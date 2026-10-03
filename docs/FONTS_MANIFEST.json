@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-10-04",
+  "readest": {
+    "version": "0.12.10",
+    "commit": "8a56831af61841175b49cc2740bffcde57b470b0",
+    "foliate_commit": "341dc63cda7ad26b31ada4ee905e40b5020da88a"
+  },
+  "google_fonts_commit": "9710da1eacb3be272583c3224dcb70f9da6eadbb",
+  "fonts": [
+    {
+      "file": "Bitter-Italic-VF.ttf",
+      "bytes": 317652,
+      "sha256": "5e6e0af503171c9d7b4be7a22c16f474d7a638cf83a80051d825bcc58d664bc3",
+      "family": "Bitter Thin",
+      "full_name": "Bitter Thin Italic",
+      "version": "Version 3.021",
+      "license": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org",
+      "license_url": "https://openfontlicense.org",
+      "codepoints": 977,
+      "axes": [
+        {
+          "tag": "wght",
+          "min": 100.0,
+          "default": 100.0,
+          "max": 900.0
+        }
+      ],
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf",
+      "license_file": "Bitter-OFL.txt",
+      "modifications": "None to font bytes; filename shortened for Roboto/Bitter only.",
+      "packaged_sha256": "5e6e0af503171c9d7b4be7a22c16f474d7a638cf83a80051d825bcc58d664bc3"
+    },
+    {
+      "file": "Bitter-Regular-VF.ttf",
+      "bytes": 328636,
+      "sha256": "ef2b9a711fb02f1e5823b34da1b7450e0fc76793b7d733a8b41006e24916d4a7",
+      "family": "Bitter Thin",
+      "full_name": "Bitter Thin",
+      "version": "Version 3.021",
+      "license": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org",
+      "license_url": "https://openfontlicense.org",
+      "codepoints": 977,
+      "axes": [
+        {
+          "tag": "wght",
+          "min": 100.0,
+          "default": 100.0,
+          "max": 900.0
+        }
+      ],
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/bitter/Bitter%5Bwght%5D.ttf",
+      "license_file": "Bitter-OFL.txt",
+      "modifications": "None to font bytes; filename shortened for Roboto/Bitter only.",
+      "packaged_sha256": "ef2b9a711fb02f1e5823b34da1b7450e0fc76793b7d733a8b41006e24916d4a7"
+    },
+    {
+      "file": "LXGWWenKaiGBScreen.ttf",
+      "bytes": 24879158,
+      "sha256": "7bad73877a13af4614bb6e43a99501a7e72b0ebf67b5757c92a67253d0003b09",
+      "family": "LXGW WenKai GB Screen",
+      "full_name": "LXGW WenKai GB Screen",
+      "version": "Version 1.520;June 18, 2025",
+      "license": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL",
+      "license_url": "https://scripts.sil.org/OFL",
+      "codepoints": 46501,
+      "axes": [],
+      "source_url": "https://github.com/lxgw/LxgwWenKai-Screen/releases/download/v1.520/LXGWWenKaiGBScreen.ttf",
+      "license_file": "LXGW-OFL.txt",
+      "modifications": "None to font bytes; filename shortened for Roboto/Bitter only.",
+      "packaged_sha256": "7bad73877a13af4614bb6e43a99501a7e72b0ebf67b5757c92a67253d0003b09"
+    },
+    {
+      "file": "Roboto-Italic-VF.ttf",
+      "bytes": 530944,
+      "sha256": "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182",
+      "family": "Roboto",
+      "full_name": "Roboto Italic",
+      "version": "Version 3.015; 2026",
+      "license": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org",
+      "license_url": "https://openfontlicense.org",
+      "codepoints": 927,
+      "axes": [
+        {
+          "tag": "wght",
+          "min": 100.0,
+          "default": 400.0,
+          "max": 900.0
+        },
+        {
+          "tag": "wdth",
+          "min": 75.0,
+          "default": 100.0,
+          "max": 100.0
+        }
+      ],
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/roboto/Roboto-Italic%5Bwdth%2Cwght%5D.ttf",
+      "license_file": "Roboto-OFL.txt",
+      "modifications": "None to font bytes; filename shortened for Roboto/Bitter only.",
+      "packaged_sha256": "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182"
+    },
+    {
+      "file": "Roboto-Regular-VF.ttf",
+      "bytes": 488584,
+      "sha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+      "family": "Roboto",
+      "full_name": "Roboto Regular",
+      "version": "Version 3.015; 2026",
+      "license": "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org",
+      "license_url": "https://openfontlicense.org",
+      "codepoints": 927,
+      "axes": [
+        {
+          "tag": "wght",
+          "min": 100.0,
+          "default": 400.0,
+          "max": 900.0
+        },
+        {
+          "tag": "wdth",
+          "min": 75.0,
+          "default": 100.0,
+          "max": 100.0
+        }
+      ],
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf",
+      "license_file": "Roboto-OFL.txt",
+      "modifications": "None to font bytes; filename shortened for Roboto/Bitter only.",
+      "packaged_sha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
+    }
+  ],
+  "licenses": [
+    {
+      "file": "Roboto-OFL.txt",
+      "license": "OFL-1.1",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/roboto/OFL.txt",
+      "sha256": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41"
+    },
+    {
+      "file": "Bitter-OFL.txt",
+      "license": "OFL-1.1",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/bitter/OFL.txt",
+      "sha256": "152a1e283e23b42c4940da4c72f2f5bebaa17969cb77c76d7af05903846006f1"
+    },
+    {
+      "file": "LXGW-OFL.txt",
+      "license": "OFL-1.1",
+      "source_url": "https://raw.githubusercontent.com/lxgw/LxgwWenKai-Screen/b2e2193c58b67ef499f257ca584946aeca73e9d3/OFL.txt",
+      "sha256": "4d72e3080cdb3be63638bb7197c7caae55b6e4cbe1bab1ded2830bdff0c9b438"
+    }
+  ],
+  "local_font_face_css": {
+    "path": "app/src/main/assets/fonts/readest.css",
+    "sha256": "e45774f76ef777c6e6ecedd4e9f120e22cfddd2d09b6aee6240192365a06a7be",
+    "origin": "Original project declarations; no Readest CSS copied.",
+    "font_display": "swap",
+    "webfont_effective_coverage": "Roboto and Bitter normal/italic declarations use exact recorded effective cmap intersect original CSS unicode-range unions; verified against FONT_WEB_COVERAGE.json."
+  },
+  "comparison": [
+    {
+      "original": "LXGWWenKaiGBScreen.ttf",
+      "subsets": 248,
+      "unique_codepoints": 46501,
+      "subset_versions": [
+        "Version 1.520;June 18, 2025"
+      ],
+      "location": null,
+      "comparisons": {
+        "matched": 46509,
+        "different": 0,
+        "not_in_original": 0
+      },
+      "first_differences": [],
+      "scope": "Decomposed outline command sequence + advance width only; does not prove shaping, hinting, layout, actual device use or rendered pixels."
+    },
+    {
+      "original": "Roboto-Regular-VF.ttf",
+      "subsets": 9,
+      "unique_codepoints": 897,
+      "subset_versions": [
+        "Version 3.015; 2026"
+      ],
+      "location": {
+        "wght": 400
+      },
+      "comparisons": {
+        "matched": 1190,
+        "different": 0,
+        "not_in_original": 0
+      },
+      "first_differences": [],
+      "scope": "Decomposed outline command sequence + advance width only; does not prove shaping, hinting, layout, actual device use or rendered pixels."
+    },
+    {
+      "original": "Roboto-Italic-VF.ttf",
+      "subsets": 9,
+      "unique_codepoints": 897,
+      "subset_versions": [
+        "Version 3.015; 2026"
+      ],
+      "location": {
+        "wght": 400
+      },
+      "comparisons": {
+        "matched": 1190,
+        "different": 0,
+        "not_in_original": 0
+      },
+      "first_differences": [],
+      "scope": "Decomposed outline command sequence + advance width only; does not prove shaping, hinting, layout, actual device use or rendered pixels."
+    },
+    {
+      "original": "Bitter-Regular-VF.ttf",
+      "subsets": 5,
+      "unique_codepoints": 871,
+      "subset_versions": [
+        "Version 3.021"
+      ],
+      "location": {
+        "wght": 400
+      },
+      "comparisons": {
+        "matched": 936,
+        "different": 0,
+        "not_in_original": 0
+      },
+      "first_differences": [],
+      "scope": "Decomposed outline command sequence + advance width only; does not prove shaping, hinting, layout, actual device use or rendered pixels."
+    },
+    {
+      "original": "Bitter-Italic-VF.ttf",
+      "subsets": 5,
+      "unique_codepoints": 871,
+      "subset_versions": [
+        "Version 3.021"
+      ],
+      "location": {
+        "wght": 400
+      },
+      "comparisons": {
+        "matched": 936,
+        "different": 0,
+        "not_in_original": 0
+      },
+      "first_differences": [],
+      "scope": "Decomposed outline command sequence + advance width only; does not prove shaping, hinting, layout, actual device use or rendered pixels."
+    }
+  ],
+  "limitations": [
+    "No proof of actual font selected by installed Readest for each glyph.",
+    "No end-to-end device pixel parity claim.",
+    "Google API results are a snapshot of 2026-10-04; installed device cache could differ.",
+    "Comparison verifies default weight 400 decomposed outlines and advances, not all variation weights, OpenType shaping or hinting."
+  ],
+  "reference_css": [
+    {
+      "file": "google-readest-defaults.css",
+      "sha256": "66c07a5af21d5c99121d0c3183e5c3dd91dfe087ebadbd103935c4fe4328c6c2"
+    },
+    {
+      "file": "lxgw-readest-1.520.0.css",
+      "sha256": "f91776327f21d500465bb07d1945a731d6d7726b60f0c0aeb0aa8bf64ff7044d"
+    }
+  ],
+  "npm_webfont": {
+    "package": "lxgw-wenkai-screen-web@1.520.0",
+    "git_commit": "65102e6a4a887152b196cfd800f4a52db3bf785a",
+    "integrity_verified": true,
+    "cdn_css_matches_package": true,
+    "woff2_count": 248,
+    "license_note": "Package metadata says MIT; individual font bytes explicitly declare OFL-1.1. Fonts distributed under OFL-1.1 with copyright and license."
+  },
+  "coverage_mitigation": {
+    "complete": true,
+    "detail": "Full-font extra 30/106 codepoints excluded by explicit unicode-range; this matches the captured Google webfont effective coverage. Does not prove other glyph metrics, shaping or device parity."
+  }
+}
