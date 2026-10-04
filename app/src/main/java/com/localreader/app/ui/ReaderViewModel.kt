@@ -13,10 +13,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class UiState(val loading: Boolean = true, val books: List<Book> = emptyList(), val reader: ReadingSession? = null,
-                   val busy: Boolean = false, val operation: String = "", val results: List<ImportResult> = emptyList(), val error: String? = null)
+data class UiState(val loading: Boolean = true, val books: List<ContentSummary> = emptyList(), val reader: ReadingSession? = null,
+                   val busy: Boolean = false, val operation: String = "", val results: List<ImportResult> = emptyList(), val error: String? = null, val defaults: ReaderRules = ReaderRules(), val libraryReady: Boolean = false)
 
-class ReaderViewModel internal constructor(application: Application, private val readingStore: ReadingStore) : AndroidViewModel(application) {
+class ReaderViewModel internal constructor(application: Application, private val readingStore: ReadingStore, private val readingPreferences: ReadingPreferences = (application as ReaderApplication).readingStore) : AndroidViewModel(application) {
     constructor(application: Application) : this(application,(application as ReaderApplication).readingStore)
     private val app = application as ReaderApplication
     private val repository = app.repository
@@ -34,11 +34,36 @@ class ReaderViewModel internal constructor(application: Application, private val
     @OptIn(ExperimentalCoroutinesApi::class)
     private val dbWriter = Dispatchers.IO.limitedParallelism(1)
 
-    init {
+    init { retryLibrary() }
+    fun retryLibrary() {
         viewModelScope.launch { try {
-            val books = withContext(Dispatchers.IO) { repository.recover(); repository.db.books() }
-            mutable.update { it.copy(loading = false, books = books) }
-        } catch (e: Exception) { mutable.update { it.copy(loading = false, error = e.message ?: "无法读取书库") } } }
+            val books = withContext(dbWriter) { repository.recover(); repository.db.contents() }
+            val defaults = withContext(dbWriter) { readingPreferences.defaults().rules }
+            mutable.update { it.copy(loading = false,books = books,defaults = defaults,error = null,libraryReady = true) }
+            refreshRules()
+        } catch(cancel: CancellationException) { throw cancel }
+        catch(e: Exception) { mutable.update { it.copy(loading = false,error = e.message ?: "无法读取书库；原数据已保留") } } }
+    }
+    init {
+        viewModelScope.launch {
+            readingPreferences.preferencesRevision.collect {
+                try {
+                    val defaults = withContext(dbWriter) { readingPreferences.defaults().rules }
+                    mutable.update { it.copy(defaults = defaults) }
+                    refreshRules()
+                } catch(cancel: CancellationException) { throw cancel }
+                catch(e: Exception) { mutable.update { it.copy(error = "阅读默认读取失败：${e.message}") } }
+            }
+        }
+    }
+    private suspend fun refreshRules() {
+        val active = owner ?: return
+        val rules = withContext(dbWriter) { readingPreferences.effectiveRules(active.opened.contentId).rules }
+        if (owner === active && active.snapshot.rules != rules) {
+            val screen = state.value.reader ?: return
+            active.rules(rules)
+            mutable.update { it.copy(reader = active.state(serial = screen.jumpSerial + 1,notice = screen.notice)) }
+        }
     }
     fun importFiles(uris: List<Uri>) {
         if (state.value.busy) return
@@ -49,7 +74,7 @@ class ReaderViewModel internal constructor(application: Application, private val
                 uris.forEachIndexed { index, uri ->
                     mutable.update { it.copy(operation = "正在导入 ${index + 1}/${uris.size}") }
                     val result = withContext(Dispatchers.IO) { repository.import(uri) { cancelled.get() } }
-                    val books = withContext(Dispatchers.IO) { repository.db.books() }
+                    val books = withContext(Dispatchers.IO) { repository.db.contents() }
                     mutable.update { it.copy(books = books, results = it.results + result) }
                 }
             } finally { mutable.update { it.copy(busy = false, operation = "") } }
@@ -127,7 +152,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         owner = null; ++generation
         mutable.update { it.copy(reader = null) }
         viewModelScope.launch { withContext(Dispatchers.IO) {
-            val books = repository.db.books(); mutable.update { it.copy(books = books) }
+            val books = repository.db.contents(); mutable.update { it.copy(books = books) }
         } }
     }
     fun jump(locator: Locator) {
@@ -139,19 +164,37 @@ class ReaderViewModel internal constructor(application: Application, private val
     }
     fun jumpToc(id: String) { owner?.opened?.locatorForToc(id)?.let(::jump) }
     fun style(fontSize: Float, theme: String) {
-        val rules = owner?.snapshot?.rules ?: return
-        rules(rules.copy(fontSize = fontSize,theme = theme))
+        val old = owner?.snapshot?.rules ?: return
+        val patch = RulesPatch(fontSize = if(fontSize != old.fontSize) FieldUpdate.Set(fontSize) else FieldUpdate.Keep,
+            theme = if(theme != old.theme) FieldUpdate.Set(theme) else FieldUpdate.Keep)
+        patchBook(patch)
     }
-    fun flow(flow: ReaderFlow) { owner?.snapshot?.rules?.let { rules(it.copy(flow = flow)) } }
-    private fun rules(rules: ReaderRules) {
+    fun fontSize(font: Float) = patchBook(RulesPatch(fontSize = FieldUpdate.Set(font)))
+    fun flow(flow: ReaderFlow) = globalRules(RulesPatch(flow = FieldUpdate.Set(flow)))
+    fun theme(theme: String) = globalRules(RulesPatch(theme = FieldUpdate.Set(theme)))
+    private fun patchBook(patch: RulesPatch) {
         val active = owner ?: return
-        val screen = state.value.reader ?: return
         if (state.value.busy) return
-        active.rules(rules)
-        mutable.update { it.copy(reader = active.state(serial = screen.jumpSerial + 1,notice = screen.notice)) }
         viewModelScope.launch(dbWriter) {
-            try { readingStore.saveRules(active.opened.contentId,active.opened.revision,rules) }
-            catch (e: Exception) { if (owner === active) mutable.update { it.copy(error = "阅读设置保存失败：${e.message}") } }
+            try {
+                readingStore.patchRules(active.opened.contentId,active.opened.revision,patch)
+                withContext(Dispatchers.Main.immediate) { if(owner === active) {
+                    refreshRules()
+                } }
+            } catch (e: Exception) { mutable.update { it.copy(error = "阅读设置保存失败：${e.message}") } }
+        }
+    }
+    fun globalRules(patch: RulesPatch) {
+        viewModelScope.launch(dbWriter) {
+            try { readingPreferences.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,patch) }
+            catch(e: Exception) { mutable.update { it.copy(error = "全局设置保存失败：${e.message}") } }
+        }
+    }
+    fun resetBookRules() {
+        val active = owner ?: return
+        viewModelScope.launch(dbWriter) {
+            try { readingPreferences.resetBookRules(active.opened.contentId,active.opened.revision) }
+            catch(e: Exception) { mutable.update { it.copy(error = "恢复默认失败：${e.message}") } }
         }
     }
     fun addBookmark() {
@@ -190,12 +233,12 @@ class ReaderViewModel internal constructor(application: Application, private val
             } catch (e: Exception) { if (owner === active) mutable.update { it.copy(error = "书签删除失败：${e.message}") } }
         }
     }
-    fun delete(book: Book) = operation("正在删除应用内副本") {
+    fun delete(book: ContentSummary) = operation("正在删除应用内副本") {
         repository.delete(book)
         // Explicit successful deletion also discards that book's unsaved closed-session position.
         retryOwners.removeAll { it.opened.contentId == book.id }
     }
-    fun metadata(book: Book, title: String, author: String) = operation("正在保存信息") {
+    fun metadata(book: ContentSummary, title: String, author: String) = operation("正在保存信息") {
         repository.db.setMetadata(book.id, title.trim().ifBlank { book.title }, author.trim().ifBlank { "作者未知" })
     }
     fun reencode(encoding: String) {
@@ -220,7 +263,7 @@ class ReaderViewModel internal constructor(application: Application, private val
                 installed = true
                 mutable.update { it.copy(reader = screen,busy = false,operation = "") }
                 active.closeSource() // no cancellable suspension after ownership leaves the old session
-                val books = withContext(Dispatchers.IO) { repository.db.books() }
+                val books = withContext(Dispatchers.IO) { repository.db.contents() }
                 mutable.update { it.copy(books = books) }
             } catch (cancel: CancellationException) { throw cancel }
             catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "编码切换失败；原正文仍保留") } }
@@ -233,7 +276,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { work() }
-                val books = withContext(Dispatchers.IO) { repository.db.books() }
+                val books = withContext(Dispatchers.IO) { repository.db.contents() }
                 mutable.update { it.copy(books = books) }
             } catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "操作失败，已有数据已保留") } }
             finally { mutable.update { it.copy(busy = false, operation = "") } }

@@ -2,7 +2,7 @@ package com.localreader.app.core
 
 import java.io.Closeable
 
-enum class ContentFormat { TXT }
+enum class ContentFormat { TXT, EPUB }
 data class ContentMetadata(val title: String, val author: String)
 enum class TocSource { CHAPTERS, TEXT_SEGMENTS }
 data class TocEntry(val id: String, val title: String, val depth: Int = 0)
@@ -40,5 +40,5 @@ interface ReadingStore {
     fun bookmarks(contentId: String): List<ReaderBookmark>
     fun addBookmark(contentId: String, revision: String, locator: Locator, excerpt: String): Boolean
     fun deleteBookmark(contentId: String, id: Long)
-    fun saveRules(contentId: String, revision: String, rules: ReaderRules)
+    fun patchRules(contentId: String, revision: String, patch: RulesPatch): ReaderRules
 }

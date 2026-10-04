@@ -1,6 +1,8 @@
 package com.localreader.app
 
 import android.net.Uri
+import android.content.ContentValues
+import com.localreader.app.core.ReaderFlow
 import android.webkit.WebView
 import android.view.View
 import android.view.ViewGroup
@@ -37,6 +39,17 @@ class ReadingUiTest {
         waitFor { result.get() != null }
         return requireNotNull(result.get())
     }
+    private fun preferenceRows(repository: com.localreader.app.data.LibraryRepository, table: String): List<ContentValues> =
+        repository.db.readableDatabase.rawQuery("SELECT * FROM $table",null).use { cursor -> buildList {
+            while(cursor.moveToNext()) add(ContentValues().apply { cursor.columnNames.forEachIndexed { index,column ->
+                when(cursor.getType(index)) {
+                    android.database.Cursor.FIELD_TYPE_NULL -> putNull(column)
+                    android.database.Cursor.FIELD_TYPE_INTEGER -> put(column,cursor.getLong(index))
+                    android.database.Cursor.FIELD_TYPE_FLOAT -> put(column,cursor.getDouble(index))
+                    else -> put(column,cursor.getString(index))
+                }
+            } })
+        } }
     private fun ready() {
         waitFor { var exists = false; compose.runOnUiThread { exists = webView(compose.activity.window.decorView) != null }; exists }
         waitFor { evaluate("Boolean(window.readerHost?.diagnostics().loaded && window.readerHost?.diagnostics().anchorGeometry?.visible)") == "true" }
@@ -47,6 +60,8 @@ class ReadingUiTest {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val app = target.applicationContext as ReaderApplication
         val repository = app.repository
+        val priorDefaults=preferenceRows(repository,"reader_defaults")
+        val priorOverrides=preferenceRows(repository,"reading_settings")
         val nonce = UUID.randomUUID().toString()
         val uri = Uri.parse("content://com.localreader.app.test.fixtures/ui-$nonce.txt")
         // ASCII is valid in both UTF-8 and GB18030: correcting this fixture must reach the version transaction.
@@ -58,7 +73,7 @@ class ReadingUiTest {
             compose.runOnUiThread { model().importFiles(listOf(uri)) }
             waitFor { !model().state.value.busy && model().state.value.results.isNotEmpty() }
             id = requireNotNull(model().state.value.results.single().bookId)
-            val imported = requireNotNull(repository.db.book(requireNotNull(id)))
+            val imported = requireNotNull(repository.db.txt(requireNotNull(id)))
             compose.onNodeWithText("完成").performClick()
             compose.onNodeWithText(imported.title).performClick()
             waitFor { model().state.value.reader?.contentId == id }
@@ -71,6 +86,23 @@ class ReadingUiTest {
             assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible"))
             compose.onNodeWithText("设置").performClick()
             compose.onNodeWithText("增大").performClick()
+            compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            ready()
+            assertEquals(jumped,requireNotNull(model().state.value.reader).snapshot.current)
+            compose.onNodeWithText("设置").performClick()
+            compose.onNodeWithText("连续滚动").performClick()
+            waitFor { model().state.value.reader?.snapshot?.rules?.flow == ReaderFlow.SCROLLED }
+            compose.onNodeWithText("深色").performClick()
+            waitFor { model().state.value.reader?.snapshot?.rules?.theme == "dark" }
+            compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            ready()
+            assertEquals(jumped,requireNotNull(model().state.value.reader).snapshot.current)
+            assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible"))
+            compose.onNodeWithText("设置").performClick()
+            compose.onNodeWithText("恢复单本默认").performClick()
+            waitFor { model().state.value.reader?.snapshot?.rules?.fontSize == 16f }
+            compose.onNodeWithText("增大").performClick()
+            waitFor { model().state.value.reader?.snapshot?.rules?.fontSize == 18f }
             compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
             ready()
             assertEquals(jumped,requireNotNull(model().state.value.reader).snapshot.current)
@@ -98,14 +130,21 @@ class ReadingUiTest {
             ready()
             val changed = requireNotNull(model().state.value.reader)
             assertEquals("GB18030",changed.textControls?.encoding)
-            assertEquals(imported.hash,repository.db.book(requireNotNull(id))?.hash)
+            assertEquals(imported.hash,repository.db.txt(requireNotNull(id))?.hash)
             assertEquals(text + nonce,target.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() })
             assertEquals(bookmark.locator,repository.db.bookmarks(requireNotNull(id)).single().locator)
             assertTrue(repository.db.retainedVersions(requireNotNull(id)).contains(imported.version))
         } finally {
             compose.runOnUiThread { model().closeReader() }
-            id?.let { repository.db.book(it)?.let(repository::delete) }
+            id?.let { repository.db.txt(it)?.let(repository::delete) }
             target.contentResolver.delete(uri,null,null)
+            // Global actions intentionally clear every book's relevant overrides. Restore pre-test user preferences.
+            val restoredRevision=repository.db.preferencesRevision.value+1
+            repository.db.transaction { database ->
+                priorDefaults.forEach { row -> row.put("prefs_revision",restoredRevision);database.update("reader_defaults",row,"scope=?",arrayOf(row.getAsString("scope"))) }
+                priorOverrides.forEach { row -> database.update("reading_settings",row,"content_id=?",arrayOf(row.getAsString("content_id"))) }
+            }
+            repository.db.preferencesRevision.value=restoredRevision
         }
     }
 }

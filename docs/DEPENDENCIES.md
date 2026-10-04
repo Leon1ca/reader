@@ -22,3 +22,5 @@
 SQLite 使用 Android 平台提供的 SQLiteOpenHelper，不额外接入 Room 或远程数据库。正文使用固定官方 OFL 字体，来源、哈希及比较范围见 FONTS.md / FONTS_MANIFEST.json；文章开发样本中的山景 SVG 为本项目自建，未使用外部图像资产。WebView 使用系统组件，字体、CSS 和正文资源均离线。此表是直接依赖登记，尚不代表发布所需的完整传递依赖许可清单或最终项目许可决议；升级须固定新版本并回归编码、定位和数据库可靠性样本。
 
 MIT 上游许可、源 / 打包 / patch 哈希与重放补丁位于 `app/src/main/assets/reader/vendor/foliate/`。仅打包 paginator.js，四项必要补丁为禁正文脚本、全局 view 上限及补偿淘汰、释放 view 的 observer / iframe、关闭 paginator 的 container observer；更新必须跑浏览器与真机定位 / 资源回归。Playwright / Chromium 只用于外部开发测试，不是 APK 运行依赖。
+
+R1b adds `org.json:json:20260814` for JVM tests only. Production uses Android platform `org.json`; no Room/KSP dependency is added. The official Maven Central POM was retrieved through the existing macOS proxy and retained in the task work directory.

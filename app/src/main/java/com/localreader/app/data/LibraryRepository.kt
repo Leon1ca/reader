@@ -21,31 +21,34 @@ class LibraryRepository(private val context: Context) {
     @Volatile private var recovered = false
 
     /** Run before accepting operations. Metadata is committed only after a complete private directory exists. */
-    @Synchronized fun recover() {
+    fun recover() = mutate { recoverLocked() }
+    private fun recoverLocked() {
         if (recovered) return // every ViewModel/Activity instance shares one repository; run once per process
+        val books = db.contents() // bootstrap/upgrade must succeed before any recovery cleanup
         staging.listFiles()?.forEach { it.deleteRecursively() }
         // Directories the database does not know are moved to trash, never deleted outright: a rebuilt (empty)
         // database must not erase the user's books. Trash entries are named "<millis>-<id>" and purged after 7 days.
         val now = System.currentTimeMillis()
         trash.listFiles()?.filter { (it.name.substringBefore('-').toLongOrNull() ?: 0L) < now - TRASH_RETENTION_MS }?.forEach { it.deleteRecursively() }
-        val books = db.books()
         val ids = books.map { it.id }.toSet()
         library.listFiles()?.filter { it.name !in ids }?.forEach { it.renameTo(File(trash, "$now-${it.name}")) }
         books.forEach { book ->
-            val keep = db.retainedVersions(book.id) + book.version
+            val keep = db.retainedVersions(book.id) + requireNotNull(db.content(book.id)).revision
             File(File(library, book.id), "versions").listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
         }
         // Old index versions are retained as locator backups; active books are never auto-deleted.
         recovered = true
     }
-    fun directory(book: Book) = File(File(library, book.id), "versions/${book.version}")
-    fun engine(book: Book) = TxtEngine(directory(book), book.version)
+    fun directory(book: TxtRecord) = File(File(library, book.id), "versions/${book.version}")
+    fun engine(book: TxtRecord) = TxtEngine(directory(book), book.version)
 
-    fun import(uri: Uri, cancelled: () -> Boolean = { false }): ImportResult {
+    fun import(uri: Uri, cancelled: () -> Boolean = { false }): ImportResult = mutate { importLocked(uri,cancelled) }
+    private fun importLocked(uri: Uri, cancelled: () -> Boolean): ImportResult {
         var name = "所选文件"
         val task = File(staging, UUID.randomUUID().toString()).apply { mkdirs() }
         var committed: File? = null
         try {
+            db.writableDatabase // initialization must succeed before reading external content
             var declaredSize: Long? = null
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
@@ -94,11 +97,11 @@ class LibraryRepository(private val context: Context) {
             val parsed = TxtParser.build(original, File(task, "versions/$version"), detected, guard)
             if (cancelled()) throw ImportCancelled()
             val id = UUID.randomUUID().toString()
-            val book = Book(id, name.substringBeforeLast('.', name), "作者未知", hash, copied, System.currentTimeMillis(), 0,
+            val book = TxtRecord(id, name.substringBeforeLast('.', name), "作者未知", hash, copied, System.currentTimeMillis(), 0,
                 parsed.encoding, version, parsed.paragraphs, parsed.totalCharacters, Locator.Text(version, 0, 0), 0, 16f, "white")
             val destination = File(library, id)
             check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" }; committed = destination
-            db.insert(book)
+            db.insert(book,originalName = name)
             committed = null
             return ImportResult(name, "导入成功 · ${parsed.encoding}", id)
         } catch (e: Exception) {
@@ -111,14 +114,18 @@ class LibraryRepository(private val context: Context) {
         } finally { task.deleteRecursively(); committed?.deleteRecursively() }
     }
 
-    fun delete(book: Book) {
+    fun delete(book: ContentSummary) { delete(requireNotNull(db.content(book.id))) }
+    fun delete(book: TxtRecord) { delete(requireNotNull(db.content(book.id))) }
+    fun delete(book: ContentRecord) = mutate { deleteLocked(book) }
+    private fun deleteLocked(book: ContentRecord) {
         // Delete metadata first: a failed file removal is an orphan cleaned on next startup, never a ghost book.
         db.delete(book.id)
         File(library, book.id).deleteRecursively()
     }
-    fun reencode(book: Book, encoding: String) { reencodePrepared(book, encoding) { Unit } }
+    fun reencode(book: TxtRecord, encoding: String) { reencodePrepared(book, encoding) { Unit } }
     /** Validate/open the new source before the database switches; failure keeps the previous version active. */
-    fun <T> reencodePrepared(book: Book, encoding: String, checkpoint: () -> Unit = {}, prepare: (Book) -> T): T {
+    fun <T> reencodePrepared(book: TxtRecord, encoding: String, checkpoint: () -> Unit = {}, prepare: (TxtRecord) -> T): T = mutate { reencodeLocked(book,encoding,checkpoint,prepare) }
+    private fun <T> reencodeLocked(book: TxtRecord, encoding: String, checkpoint: () -> Unit, prepare: (TxtRecord) -> T): T {
         val task = File(staging, UUID.randomUUID().toString()).apply { mkdirs() }
         val version = UUID.randomUUID().toString()
         var destination: File? = null
@@ -129,7 +136,7 @@ class LibraryRepository(private val context: Context) {
             }
             val target = File(File(library, book.id), "versions/$version")
             check(task.renameTo(target)) { "无法提交新索引" }; destination = target
-            val fresh = requireNotNull(db.book(book.id))
+            val fresh = requireNotNull(db.txt(book.id))
             check(fresh.version == book.version) { "书籍版本已改变；保留当前索引" }
             val last = (parsed.totalCharacters - 1).coerceAtLeast(0)
             val scale = if (fresh.characters > 0 && fresh.characters != parsed.totalCharacters) parsed.totalCharacters.toDouble() / fresh.characters else 1.0
@@ -143,5 +150,10 @@ class LibraryRepository(private val context: Context) {
             return prepared
         } finally { task.deleteRecursively(); destination?.deleteRecursively() }
     }
-    private companion object { const val TRASH_RETENTION_MS = 7L * 24 * 60 * 60 * 1000 }
+    private fun <T> mutate(work: () -> T): T = synchronized(lock) { work() }
+    private val lock = synchronized(locks) { locks.getOrPut(context.getDatabasePath("library.db").absolutePath) { Any() } }
+    private companion object {
+        const val TRASH_RETENTION_MS = 7L * 24 * 60 * 60 * 1000
+        val locks = mutableMapOf<String,Any>()
+    }
 }

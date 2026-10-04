@@ -31,7 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.content.edit
 import com.localreader.app.core.*
-import com.localreader.app.data.Book
+import com.localreader.app.data.ContentSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -90,19 +90,19 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(model.preferences.getString("sort", "最近阅读") ?: "最近阅读") }
     var sortMenu by remember { mutableStateOf(false) }
-    var delete by remember { mutableStateOf<Book?>(null) }
-    var edit by remember { mutableStateOf<Book?>(null) }
+    var delete by remember { mutableStateOf<ContentSummary?>(null) }
+    var edit by remember { mutableStateOf<ContentSummary?>(null) }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) model.importFiles(it) }
     val books = remember(state.books, query, sort) {
         val filtered = state.books.filter { it.title.contains(query, true) || it.author.contains(query, true) }
         when (sort) {
             "导入时间" -> filtered.sortedByDescending { it.imported }
             "标题" -> filtered.sortedBy { it.title.lowercase() }
-            else -> filtered.sortedWith(compareByDescending<Book> { it.lastRead }.thenByDescending { it.imported })
+            else -> filtered.sortedWith(compareByDescending<ContentSummary> { it.lastRead }.thenByDescending { it.imported })
         }
     }
     Scaffold(topBar = { TopAppBar(title = { Text(listOf("书架", "稍后阅读", "RSS", "设置")[tab]) }, actions = {
-        if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy && !state.loading) { Text("导入 TXT") }
+        if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy && !state.loading && state.libraryReady) { Text("导入 TXT") }
     }) }, bottomBar = {
         NavigationBar { listOf("书架", "稍后阅读", "RSS", "设置").forEachIndexed { index, label ->
             NavigationBarItem(selected = tab == index, onClick = { tab = index; model.preferences.edit { putInt("tab", index) } },
@@ -132,6 +132,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                         }
                     }
                     if (state.loading) CircularProgressIndicator()
+                    else if (!state.libraryReady) { Text("书库尚未就绪，已有数据保留。"); TextButton(onClick = model::retryLibrary) { Text("重试读取书库") } }
                     else if (books.isEmpty()) {
                         Spacer(Modifier.height(48.dp))
                         Text(if (query.isNotEmpty()) "没有匹配的图书" else "把一本书，留在这里。", style = MaterialTheme.typography.headlineSmall)
@@ -142,9 +143,9 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                             Column(Modifier.fillMaxWidth().clickable(enabled = !state.busy) { model.open(book.id) }.padding(16.dp)) {
                                 Text(book.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                 Text(book.author, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium)
-                                val percentage = percent(book.current.sourceOffset, book.characters)
+                                val percentage = fractionPercent(book.fraction)
                                 Text("TXT · ${book.encoding} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
-                                Text("当前位置 $percentage% · 最远 ${percent(book.furthest, book.characters)}%", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium)
+                                Text("当前位置 $percentage% · 最远 ${fractionPercent(book.furthestFraction)}%", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = { edit = book }, enabled = !state.busy) { Text("信息") }
                                     TextButton(onClick = { delete = book }, enabled = !state.busy) { Text("删除") }
@@ -163,11 +164,16 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                 3 -> {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 24.dp)) {
                         item { Text("本地优先", style = MaterialTheme.typography.headlineSmall); Text("没有网络权限、账号或远程分析。文件仅通过系统选择器读取；不会请求全盘存储权限。", Modifier.padding(top = 8.dp)) }
-                        item { Text("当前版本 0.2.0 · 阅读内核增量", style = MaterialTheme.typography.titleMedium); Text("UTF-8、带 BOM 的 UTF-16、GB18030；分页与连续滚动、章节、字号、主题、书签与位置恢复。", Modifier.padding(top = 8.dp)) }
+                        item { Text("当前版本 ${com.localreader.app.BuildConfig.VERSION_NAME} · 阅读内核增量", style = MaterialTheme.typography.titleMedium); Text("UTF-8、带 BOM 的 UTF-16、GB18030；分页与连续滚动、章节、字号、主题、书签与位置恢复。", Modifier.padding(top = 8.dp)) }
                         item { Text("兼容范围", style = MaterialTheme.typography.titleMedium); Text("EPUB、MOBI、PDF、漫画、网页剪藏与 RSS 尚未实现。分类、字体导入和手动备份仍待开发。", Modifier.padding(top = 8.dp)) }
                         if (com.localreader.app.BuildConfig.DEBUG) item { TextButton(onClick = onArticlePreview) { Text("开发预览：结构化文章样本") }; Text("本地自建样本，不是网页导入或 RSS 管线。") }
                         item { Text("数据保留", style = MaterialTheme.typography.titleMedium); Text("书库不参加自动云备份或设备迁移。本增量尚无手动备份；卸载或清除应用数据会删除书库、进度与书签。", Modifier.padding(top = 8.dp)) }
-                        item { Text("阅读偏好", style = MaterialTheme.typography.titleMedium); Text("打开书籍后的“设置”保存该书字号与主题。", Modifier.padding(top = 8.dp)) }
+                        item { Text("全局阅读默认", style = MaterialTheme.typography.titleMedium)
+                            Text("背景和阅读模式应用到全部书；各书字号覆盖保留。")
+                            Row { listOf("white" to "浅色","paper" to "纸色","dark" to "深色").forEach { (theme,label) -> TextButton(onClick = { model.theme(theme) }) { Text(label) } } }
+                            Row { TextButton(onClick = { model.flow(ReaderFlow.PAGINATED) }) { Text("横向分页") }; TextButton(onClick = { model.flow(ReaderFlow.SCROLLED) }) { Text("连续滚动") } }
+                            Text("默认：${state.defaults.theme} · ${state.defaults.flow.wire}")
+                        }
                     }
                 }
             }
@@ -184,7 +190,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
         confirmButton = { TextButton(onClick = model::dismissResults) { Text("完成") } })
 }
 
-@Composable private fun MetadataDialog(book: Book, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+@Composable private fun MetadataDialog(book: ContentSummary, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     var title by remember { mutableStateOf(book.title) }; var author by remember { mutableStateOf(book.author) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("图书信息") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(title, { title = it.take(250) }, label = { Text("标题") })
@@ -193,7 +199,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
     } }, confirmButton = { TextButton(onClick = { onSave(title, author) }) { Text("保存") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
-private fun percent(offset: Long, total: Long) = if (total <= 1) 0 else ((offset.toDouble() / (total - 1)) * 100).roundToInt().coerceIn(0, 100)
+private fun fractionPercent(fraction: Double) = (fraction * 100).roundToInt().coerceIn(0,100)
 private fun formatBytes(bytes: Long) = if (bytes < 1048576) "${bytes / 1024} KB" else "${bytes / 1048576} MB"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -265,10 +271,12 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                     } }
                 }
                 "设置" -> {
+                    Text("阅读模式和背景：全局，应用到所有书")
+                    TextButton(onClick = model::resetBookRules) { Text("恢复单本默认") }
                     Row { TextButton(onClick = { model.flow(ReaderFlow.PAGINATED) }) { Text("横向分页") }; TextButton(onClick = { model.flow(ReaderFlow.SCROLLED) }) { Text("连续滚动") } }
                     Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
-                    Row { TextButton(onClick = { model.style((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f), session.snapshot.rules.theme) }) { Text("减小") }; TextButton(onClick = { model.style((session.snapshot.rules.fontSize + 2).coerceAtMost(36f), session.snapshot.rules.theme) }) { Text("增大") } }
-                    Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.style(session.snapshot.rules.fontSize, theme) }) { Text(label) } } }
+                    Row { TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)) }) { Text("减小") }; TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)) }) { Text("增大") } }
+                    Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.theme(theme) }) { Text(label) } } }
                     session.textControls?.let { controls ->
                         Text("当前编码：${controls.encoding}", Modifier.padding(top = 16.dp))
                         Text("显示乱码时可手动纠正。新索引成功后才切换；旧索引与原定位备份会保留。", Modifier.padding(vertical = 8.dp))

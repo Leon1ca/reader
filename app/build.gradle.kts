@@ -5,7 +5,7 @@ plugins {
 android {
     namespace = "com.localreader.app"
     compileSdk { version = release(37) { minorApiLevel = 0 } }
-    defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 3; versionName = "0.2.1-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 4; versionName = "0.2.2-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     lint { warningsAsErrors = true }
@@ -22,6 +22,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.17.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")

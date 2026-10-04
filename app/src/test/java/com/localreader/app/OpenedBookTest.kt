@@ -65,7 +65,7 @@ class OpenedBookTest {
         override fun bookmarks(contentId: String) = snapshot.bookmarks
         override fun addBookmark(contentId: String, revision: String, locator: Locator, excerpt: String) = true
         override fun deleteBookmark(contentId: String, id: Long) = Unit
-        override fun saveRules(contentId: String, revision: String, rules: ReaderRules) = Unit
+        override fun patchRules(contentId: String, revision: String, patch: RulesPatch) = ReaderRules()
     }
     private fun snapshot(opened: TxtOpenedBook) = ReadingSnapshot(requireNotNull(opened.locatorForToc(opened.toc().first().id)),
         TxtReadingExtent(opened.revision,0),ReaderRules(),emptyList())
