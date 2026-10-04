@@ -14,7 +14,7 @@ import com.localreader.app.core.Locator
 import com.localreader.app.data.LibraryRepository
 import com.localreader.app.ui.ReaderViewModel
 import com.localreader.app.ui.WebReaderAdapter
-import com.localreader.app.core.WebDocument
+import com.localreader.app.core.*
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -70,6 +70,7 @@ class LibraryPersistenceTest {
         assertEquals(40L, restored.current.sourceOffset); assertEquals(105L, restored.furthest)
         assertEquals(0.125, restored.current.fallbackFraction, 0.00001)
         assertEquals(28f, restored.fontSize, 0.01f); assertEquals("dark", restored.theme)
+        assertEquals("paginated",restored.flow)
         assertEquals(anchor, repository.db.bookmarks(book.id).single().locator)
         repository.engine(restored).use { engine -> assertEquals("第一章 开始", engine.block(0).text); assertTrue(engine.resolve(anchor).paragraph > 0) }
     }
@@ -147,8 +148,8 @@ class LibraryPersistenceTest {
             }
         }
     }
-    private fun waitUntil(condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10000
+    private fun waitUntil(timeoutMs: Long = 10000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition()) { check(System.currentTimeMillis() < deadline) { "等待阅读状态超时" }; Thread.sleep(50) }
     }
     @Test fun fastBacktrackingBeforeDebounceKeepsFurthestAndRejectsForeignVersion() {
@@ -203,10 +204,11 @@ class LibraryPersistenceTest {
         }
         repository = LibraryRepository(context)
         val migrated = repository.db.writableDatabase
-        assertEquals(2, migrated.version)
+        assertEquals(3, migrated.version)
         migrated.rawQuery("SELECT title,current_offset,current_fraction FROM books WHERE id='existing'", null).use {
             assertTrue(it.moveToFirst()); assertEquals("保留书籍", it.getString(0)); assertEquals(250L,it.getLong(1)); assertEquals(0.25,it.getDouble(2),0.00001)
         }
+        migrated.rawQuery("SELECT flow FROM books WHERE id='existing'",null).use { assertTrue(it.moveToFirst());assertEquals("scrolled",it.getString(0)) }
         migrated.rawQuery("SELECT excerpt,fallback_fraction FROM bookmarks WHERE id=1", null).use {
             assertTrue(it.moveToFirst()); assertEquals("保留书签",it.getString(0)); assertEquals(0.5,it.getDouble(1),0.00001)
         }
@@ -215,6 +217,7 @@ class LibraryPersistenceTest {
         val payload = "第一章 安全样本\n中文 English 123４５６ <script>window.attacked=true</script>\n" + "正文段落。\n".repeat(80)
         val book = requireNotNull(repository.db.book(requireNotNull(repository.import(fixture(payload.toByteArray())).bookId)))
         val engine = repository.engine(book)
+        val publication = TxtPublication(engine)
         val position = AtomicReference<Locator.Text?>()
         val error = AtomicReference<String?>()
         lateinit var adapter: WebReaderAdapter
@@ -223,10 +226,14 @@ class LibraryPersistenceTest {
             try {
                 val firstBody = engine.block(1)
                 scenario.onActivity { activity ->
-                    adapter = WebReaderAdapter(activity, { position.set(it) }, {}, { error.set(it) })
+                    adapter = WebReaderAdapter(activity) { event -> when(event) {
+                        is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
+                        is RendererEvent.Error -> error.set(event.message)
+                        else -> Unit
+                    } }
                     adapterCreated = true
                     activity.setContentView(adapter.view)
-                    adapter.render(engine, Locator.Text(book.version, firstBody.sourceOffset, 1), 0, 16f, "white")
+                    adapter.render(publication, Locator.Text(book.version, firstBody.sourceOffset, 1), 0, ReaderRules())
                 }
                 waitUntil { position.get() != null || error.get() != null }
                 assertNull(error.get()); assertNotNull(position.get())
@@ -236,23 +243,186 @@ class LibraryPersistenceTest {
                     scenario.onActivity { adapter.view.evaluateJavascript(script) { result.set(it) } }
                     waitUntil { result.get() != null }; return requireNotNull(result.get())
                 }
-                assertEquals("true", evaluate("document.URL === '${WebDocument.URL}' && document.querySelectorAll('[data-paragraph]').length <= 32"))
+                assertEquals("true", evaluate("document.URL === '${adapter.currentUrl}' && readerHost.diagnostics().loaded && readerHost.diagnostics().activeViews <= 8"))
                 assertEquals("\"undefined\"", evaluate("typeof window.attacked"))
-                assertEquals("true", evaluate("document.body.textContent.includes('<script>window.attacked=true</script>')"))
-                evaluate("document.fonts.load('20px \"LXGW WenKai GB Screen\"','中文').then(()=>window.fontSmoke=true).catch(()=>window.fontSmoke=false);void 0")
+                assertEquals("true", evaluate("document.getElementById('renderer').getContents().some(c=>c.doc.body.textContent.includes('<script>window.attacked=true</script>'))"))
+                evaluate("document.getElementById('renderer').getContents()[0].doc.fonts.load('20px \"LXGW WenKai GB Screen\"','中文').then(()=>window.fontSmoke=true).catch(()=>window.fontSmoke=false);void 0")
                 waitUntil { evaluate("window.fontSmoke === true") == "true" }
-                assertEquals("true", evaluate("document.fonts.check('20px \"LXGW WenKai GB Screen\"','中文')"))
+                assertEquals("true", evaluate("document.getElementById('renderer').getContents()[0].doc.fonts.check('20px \"LXGW WenKai GB Screen\"','中文')"))
                 val before = position.get()
-                evaluate("ReaderPosition.position('wrong-token',0,0);ReaderPosition.position('wrong-token',2147483647,-1);void 0")
+                evaluate("ReaderEvents.postMessage(JSON.stringify({protocol:1,sessionId:'wrong-session',revision:'wrong',layoutEpoch:1,commandId:1,type:'relocated',target:{section:0,blockId:'-1',character:-1}}));void 0")
                 Thread.sleep(150); assertEquals(before, position.get())
                 scenario.onActivity {
                     assertTrue(adapter.view.webViewClient.onRenderProcessGone(adapter.view, null))
                     assertNull(adapter.view.parent)
-                    adapter.render(engine, book.current, 1, 20f, "dark") // invalidated view must never be reused
+                    adapter.render(publication, book.current, 1, ReaderRules(fontSize = 20f,theme = "dark")) // invalidated view must never be reused
                     adapter.destroy() // idempotent cleanup
                 }
                 assertTrue(error.get()?.contains("已停止") == true)
             } finally { scenario.onActivity { if (adapterCreated) adapter.destroy() }; engine.close() }
+        }
+    }
+    @Test fun firstTextGlyphRestoresAfterInitiallyZeroHeightWebViewGetsViewport() {
+        val payload = "本地阅读器验证样本\n\n第一章 离线入口\n" + "正文中文 English 123。\n".repeat(80)
+        val book = requireNotNull(repository.db.book(requireNotNull(repository.import(fixture(payload.toByteArray())).bookId)))
+        val engine = repository.engine(book)
+        val publication = TxtPublication(engine)
+        val position = AtomicReference<Locator.Text?>()
+        val error = AtomicReference<String?>()
+        lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    adapter = WebReaderAdapter(activity) { event -> when(event) {
+                        is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
+                        is RendererEvent.Error -> error.set(event.message)
+                        else -> Unit
+                    } }
+                    val parent = android.widget.FrameLayout(activity)
+                    parent.addView(adapter.view,android.widget.FrameLayout.LayoutParams(-1,0))
+                    activity.setContentView(parent)
+                    adapter.open(publication,book.current,ReaderRules(flow = ReaderFlow.SCROLLED))
+                    adapter.view.postDelayed({ adapter.view.layoutParams = android.widget.FrameLayout.LayoutParams(-1,-1) },300)
+                }
+                waitUntil(16000) { position.get()?.paragraph == 0 || error.get() != null }
+                assertNull(error.get());assertEquals(0,position.get()?.paragraph);assertEquals(0,position.get()?.character)
+                val visible = AtomicReference<String?>()
+                scenario.onActivity { adapter.view.evaluateJavascript("(()=>{const d=readerHost.diagnostics(),r=document.getElementById('renderer').getBoundingClientRect();return r.height>0 && Math.abs(r.height-visualViewport.height)<2 && d.anchorGeometry.visible && d.anchorGeometry.width>0})()") { visible.set(it) } }
+                waitUntil { visible.get() != null };assertEquals("true",visible.get())
+            } finally { scenario.onActivity { adapter.close() };engine.close() }
+        }
+    }
+    @Test fun initialCommandsMergeIntoLatestOpenAndReflowKeepsActualTextVisible() {
+        val text = "初始命令回归\n" + (0..300).joinToString("\n") { "段落 $it 中文 English 123，".repeat(5) }
+        val book = requireNotNull(repository.db.book(requireNotNull(repository.import(fixture(text.toByteArray())).bookId)))
+        val engine = repository.engine(book)
+        val document = TxtPublication(engine)
+        val position = AtomicReference<Locator.Text?>()
+        val error = AtomicReference<String?>()
+        val ready = AtomicReference(false)
+        lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun evaluate(script: String): String {
+                val result = AtomicReference<String?>()
+                scenario.onActivity { adapter.view.evaluateJavascript(script) { result.set(it) } }
+                waitUntil { result.get() != null };return requireNotNull(result.get())
+            }
+            try {
+                val targetBlock = engine.block(150)
+                val target = Locator.Text(book.version,targetBlock.sourceOffset+3,150,3,(targetBlock.sourceOffset+3).toDouble()/engine.index.totalCharacters)
+                scenario.onActivity { activity ->
+                    adapter = WebReaderAdapter(activity) { event -> when(event) {
+                        is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
+                        is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Ready -> ready.set(true)
+                        RendererEvent.Loading -> ready.set(false)
+                    } }
+                    activity.setContentView(adapter.view)
+                    adapter.open(document,book.current,ReaderRules())
+                    // Before host boot: these must preserve open and use the latest target/settings.
+                    adapter.setRules(ReaderRules(fontSize = 24f,flow = ReaderFlow.SCROLLED),book.current)
+                    adapter.goTo(target)
+                }
+                waitUntil { position.get()?.paragraph == 150 || error.get() != null }
+                assertNull(error.get());assertTrue(ready.get())
+                assertEquals(target,position.get())
+                assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible && readerHost.diagnostics().flow === 'scrolled'"))
+                val originalUrl = adapter.currentUrl
+                scenario.onActivity { adapter.next() }
+                waitUntil { ready.get() || error.get() != null }
+                Thread.sleep(350)
+                assertNull(error.get());assertTrue(requireNotNull(position.get()).sourceOffset > target.sourceOffset)
+                scenario.onActivity { adapter.goTo(target) }
+                waitUntil { ready.get() && position.get() == target || error.get() != null }
+                scenario.onActivity { adapter.setRules(ReaderRules(fontSize = 18f,theme = "dark"),target) }
+                waitUntil { ready.get() || error.get() != null }
+                assertNull(error.get());assertEquals(originalUrl,adapter.currentUrl)
+                assertEquals("实际重排诊断：${evaluate("JSON.stringify(readerHost.diagnostics())")}","true",evaluate("readerHost.diagnostics().anchorGeometry.visible && readerHost.diagnostics().target.blockId === '150'"))
+            } finally { scenario.onActivity { adapter.close() };engine.close() }
+        }
+    }
+    @Test fun articleFixtureLoadsManifestImageTableAndRestoresImageElement() {
+        val document = ArticleSamplePublication()
+        val position = AtomicReference<Locator?>()
+        val error = AtomicReference<String?>()
+        lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun evaluate(script: String): String {
+                val result = AtomicReference<String?>()
+                scenario.onActivity { adapter.view.evaluateJavascript(script) { result.set(it) } }
+                waitUntil { result.get() != null };return requireNotNull(result.get())
+            }
+            try {
+                scenario.onActivity { activity ->
+                    adapter = WebReaderAdapter(activity) { event -> when(event) {
+                        is RendererEvent.Position -> position.set(event.locator)
+                        is RendererEvent.Error -> error.set(event.message)
+                        else -> Unit
+                    } }
+                    activity.setContentView(adapter.view)
+                    adapter.open(document,Locator.Article(document.revision,"image-1",0,element = true),ReaderRules(flow = ReaderFlow.SCROLLED))
+                }
+                waitUntil { position.get() != null || error.get() != null }
+                assertNull(error.get());assertEquals("image-1",(position.get() as Locator.Article).blockId)
+                assertEquals("true",evaluate("(()=>{const d=document.getElementById('renderer').getContents()[0].doc;return d.querySelector('img').complete && d.querySelector('img').naturalWidth===480 && !!d.querySelector('table') && !!d.querySelector('figcaption') && readerHost.diagnostics().anchorGeometry.visible})()"))
+                assertEquals("true",evaluate("readerHost.diagnostics().contents[0].fontFamily.includes('Roboto')"))
+            } finally { scenario.onActivity { adapter.close() } }
+        }
+    }
+    @Test fun twentyMegabyteRealTxtPublicationRendersBoundedLateAnchorAndReflows() {
+        val uri = Uri.parse("content://com.localreader.app.test.fixtures/large-${UUID.randomUUID()}.txt")
+        fixtureUris += uri
+        val line = ("中文 English 123 数字 😀，有界阅读正文。".repeat(40)+"\n").toByteArray()
+        var written = 0L
+        context.contentResolver.openOutputStream(uri,"wt")!!.use { output ->
+            val heading = "第一章 大书回归 ${UUID.randomUUID()}\n".toByteArray()
+            output.write(heading);written += heading.size
+            while (written < 20L*1024*1024) { output.write(line);written += line.size }
+            output.write("\n末尾：中文 English 789。".toByteArray())
+        }
+        val book = requireNotNull(repository.db.book(requireNotNull(repository.import(uri).bookId)))
+        assertTrue(book.bytes >= 20L*1024*1024)
+        val engine = repository.engine(book)
+        val document = TxtPublication(engine)
+        assertTrue(document.sectionCount > 100)
+        val targetBlock = engine.block(engine.index.paragraphs*3/4)
+        val target = Locator.Text(book.version,targetBlock.sourceOffset+6,targetBlock.index,6,
+            (targetBlock.sourceOffset+6).toDouble()/engine.index.totalCharacters)
+        val ready = AtomicReference(false)
+        val position = AtomicReference<Locator.Text?>()
+        val error = AtomicReference<String?>()
+        lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun evaluate(script: String): String {
+                val result = AtomicReference<String?>()
+                scenario.onActivity { adapter.view.evaluateJavascript(script) { result.set(it) } }
+                waitUntil { result.get() != null };return requireNotNull(result.get())
+            }
+            try {
+                scenario.onActivity { activity ->
+                    adapter = WebReaderAdapter(activity) { event -> when(event) {
+                        is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
+                        is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Ready -> ready.set(true)
+                        RendererEvent.Loading -> ready.set(false)
+                    } }
+                    activity.setContentView(adapter.view)
+                    adapter.open(document,target,ReaderRules(flow = ReaderFlow.SCROLLED))
+                }
+                try { waitUntil(16000) { ready.get() && position.get() == target || error.get() != null } }
+                catch (e: IllegalStateException) { throw AssertionError("大书定位 target=$target actual=${position.get()} ready=${ready.get()} error=${error.get()} diagnostics=${evaluate("JSON.stringify(readerHost.diagnostics())")}",e) }
+                assertNull(error.get());assertEquals(target,position.get())
+                Thread.sleep(700) // late programmatic scroll must not replace character 6 with its line start
+                assertEquals(target,position.get())
+                assertEquals("true",evaluate("(()=>{const d=readerHost.diagnostics();return d.activeViews>=1 && d.activeViews<=8 && d.anchorGeometry.visible && d.anchorGeometry.width>0 && d.contents.reduce((sum,c)=>sum+c.textLength,0)<=${8*SessionResources.MAX_SECTION_CHARACTERS} && d.contents.reduce((sum,c)=>sum+c.textLength,0)<${book.characters} && d.events.some(e=>e.type==='sectionLoaded')})()"))
+                assertTrue(adapter.cachedResourceBytes <= 2*SessionResources.MAX_SECTION_BYTES)
+                val initialFontSize = evaluate("parseFloat(readerHost.diagnostics().contents[0].fontSize)").toDouble()
+                scenario.onActivity { adapter.setRules(ReaderRules(fontSize = 24f,theme = "paper"),target) }
+                waitUntil { ready.get() || error.get() != null }
+                assertNull(error.get())
+                assertEquals("true",evaluate("(()=>{const d=readerHost.diagnostics();return d.anchorGeometry.visible && d.anchorGeometry.width>0 && d.activeViews<=8 && parseFloat(d.contents[0].fontSize)>$initialFontSize})()"))
+                assertTrue(adapter.cachedResourceBytes <= 2*SessionResources.MAX_SECTION_BYTES)
+            } finally { scenario.onActivity { adapter.close() };engine.close() }
         }
     }
 }

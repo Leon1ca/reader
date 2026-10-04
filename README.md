@@ -1,4 +1,4 @@
-# 本地阅读器 · TXT 首增量
+# 本地阅读器 · 0.2.0 阅读内核增量
 
 这是 PRD v0.1 下的阶段性交付，**不是完整 R1**。采用 Kotlin、Jetpack Compose、Android 10（API 29）及以上。外围界面保持朴素 Material 3，便于后续替换正式设计。
 
@@ -8,16 +8,17 @@
 - SHA-256 按原始文件内容去重。改名副本不会新增书目，也不会重置已有进度或书签；同名不同内容可并存。
 - 标题 / 作者包含搜索（拉丁字母忽略大小写）、最近阅读 / 导入时间 / 标题排序、信息编辑、删除确认。TXT 缺失作者时显示“作者未知”。
 - UTF-8、带 BOM 的 UTF-16LE / BE、GB18030；可手动纠正编码。自动识别存在歧义，不承诺任意字节流都能正确识别。
-- 流式分章与有界文本块滚动阅读。每组最多 32 个索引块，使用“上一组 / 下一组正文”继续；组内同一物理段落的长文本块合并，不产生人为段距。识别中文“第…章 / 节 / 卷”等、英文 Chapter 和常见序言标题；无目录时明确采用固定文本长度分段。
+- 流式分章、有界横向分页与纵向连续滚动。技术章节由内核按需加载，不需要人工“上一组 / 下一组”导航；优先在完整物理段落边界分节。识别中文“第…章 / 节 / 卷”等、英文 Chapter 和常见序言标题；无目录时明确采用固定文本长度分段。
 - 本书字号 12–36（Readest 设置单位，移动 CSS 乘 1.25）、纸色 / 浅色 / 深色主题、文本选择、目录和书签跳转。新书默认字号 16、浅色；保留已有书籍的显式设置。
 - 文本锚点保存当前位置与历史最远位置。稳定滚动后约 400 ms 保存；退出 / 切后台立即提交。书签、单书设置及进度存入 SQLite，重开恢复。
 - 重新纠正编码先构建完整新索引，再事务切换；旧索引和原定位备份保留。旧书签以旧版本锚点保存，跨版本跳转提示恢复到附近位置。
 
-**正文已接入受控 WebView 和独立 `WebTypographyProfile`，固定离线 Roboto / Bitter / LXGW WenKai GB Screen 字体及 CJK 基准 CSS 参数，但尚未通过用户要求的 Readest 默认中文 / 英文 / 数字字体及排版一致性验收。** 当前是滚动排版窗口，并未接入 foliate 分页；保留平台 fontScale 对 WebView 默认 textZoom 的影响，不把 20 CSSpx 直接当 Android 20sp。见 `docs/READEST_PARITY.md` 和 `docs/FONTS.md` 的基准及限制。长段落在窗口边界仍可能产生断行差异；窗口首段为延续内容时去除首行缩进，不伪称分页一致。
+**正文接入固定 MIT Foliate 分页器、独立 TXT / Article 内容适配、版本化规则编译与类型化渲染协议。用户要求的 Readest 默认字体和完整正文排版一致性仍未通过验收。** 保留平台 fontScale 对 WebView 默认 textZoom 的影响，不把声明的 20 CSSpx 直接当 Android 20sp。参数、字体证据及未达项见 `docs/READEST_PARITY.md`、`docs/FONTS.md` 和 `docs/CORE_ARCHITECTURE.md`。
 
+Debug 包在“设置”提供“结构化文章样本”开发入口，实际渲染本地标题、粗斜体、引用、列表、代码、图片、图注与表格，支持文本及图片元素锚点。该入口没有网页获取、清洗、剪藏或 RSS 管线，文章位置仅为预览会话状态。
 ## 尚未实现
 
-EPUB、MOBI、PDF、漫画、网页剪藏、RSS、分类、横向分页、本地字体导入、复杂版式设置、手动备份 / 恢复、分享 / “用此应用打开”入口均未完成。稍后阅读与 RSS 页面明确显示开发中，不接受链接或联网。本项目未宣称 Readest 对齐完成，也未宣称 PRD 的 M3 / R1 验收通过。
+EPUB、MOBI、PDF、漫画、网页剪藏、RSS、分类、本地字体导入、复杂版式设置、手动备份 / 恢复、分享 / “用此应用打开”入口均未完成。稍后阅读与 RSS 页面明确显示开发中，不接受链接或联网。本项目未宣称 Readest 对齐完成，也未宣称 PRD 的 M3 / R1 验收通过。
 
 ## 构建
 
@@ -38,7 +39,7 @@ Android Studio 导入项目时也需将项目 Gradle JDK 设为 JDK 17。便捷�
 ./scripts/build.sh connectedDebugAndroidTest
 ```
 
-连接 API 29 及以上设备 / 模拟器后运行设备测试。输出 APK 为 `app/build/outputs/apk/debug/app-debug.apk`，包名 `com.localreader.app`。纯索引 / Web 模板测试覆盖编码、长段落 / emoji、伪文件、跨版本备用定位、≥20 MB 流式解析、HTML 转义、有界段落合并、桥的会话 / 数值范围校验及字体资源白名单；设备测试通过测试专用 ContentProvider 和真实 SQLite 验证私有副本、去重、进度 / 最远位置、书签重开、失败清理、编码切换，以及 Activity 配置重建的实际阅读锚点恢复。设备阻止测试 APK 安装或屏幕锁定须单列为测试环境限制，不计为断言通过。
+连接 API 29 及以上设备 / 模拟器后运行设备测试。输出 APK 为 `app/build/outputs/apk/debug/app-debug.apk`，包名 `com.localreader.app`。纯核心测试覆盖编码、长段落 / emoji、伪文件、跨版本备用定位、≥20 MB 流式解析、HTML 转义、有界 Publication 规划、语义段落边界、源锚点映射、会话 / epoch 门禁及资源白名单；设备测试通过测试专用 ContentProvider 和真实 SQLite 验证私有副本、去重、进度 / 最远位置、书签重开、失败清理、编码切换，以及 Activity 配置重建的实际阅读锚点恢复。设备阻止测试 APK 安装或屏幕锁定须单列为测试环境限制，不计为断言通过。
 
 本轮 API 37 / MIUI 设备存在跨应用后台启动限制：测试 APK 需正常安装后，通过 shell 预启动自建 fixture provider 和本应用 Activity，再执行测试。调试准备示例（只涉及本项目的测试组件）：
 
@@ -51,7 +52,7 @@ adb shell am start -W -n com.localreader.app/.MainActivity
 adb shell am instrument -w com.localreader.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-在此设备上，预启动后直接运行 instrumentation 可避免重安装测试包使预启动进程失效；屏幕须处于可交互状态。本轮未更改设备安全开关、没有新增产品权限。最终冻结代码的构建、lint、10 项 JVM 测试和 7 项设备测试由父代理统一运行并通过；最低 API 29 设备与完整 Readest 排版一致性仍待实测。
+在此设备上，预启动后直接运行 instrumentation 可避免重安装测试包使预启动进程失效；屏幕须处于可交互状态。本轮未更改设备安全开关、没有新增产品权限。旧版与本阶段施工快照已跑过构建、JVM 与设备回归；本阶段最终结果以 `docs/VALIDATION.md` / `docs/CODE_REVIEW.md` 的实际记录为准，不把早期通过等同最终冻结通过。最低 API 29 设备与完整 Readest 排版一致性仍待实测。
 
 ## 数据和可靠性边界
 
@@ -59,12 +60,27 @@ adb shell am instrument -w com.localreader.app.test/androidx.test.runner.Android
 
 导入写入独立暂存目录，复制时同步文件并计算 SHA-256。原始副本、规范化正文、固定记录索引及元信息都准备完成后，将整个目录重命名到私有书库，再事务插入书目。进程终止后，下次启动清理未提交暂存与无数据库引用目录；不会把半成品展示成可读书。删除先删除数据库记录和关联数据，再回收私有目录；文件回收中断留下的孤儿会在启动时清理。编码切换产生的新索引在事务提交前终止时同样会清理；成功切换的历史索引保留为定位备份。
 
-每个块最多约 2048 个 UTF-16 单元（为保留 emoji 代理对，边界可多一个单元），索引按固定 28 字节记录随机访问，引擎仅缓存最近 64 块。索引 v2 带物理段落延续标记，同时兼容 v1 索引。WebView 每次只加载 32 块的转义 TXT 与可信模板，不将整本大文件放进单页。文本锚点依据原始解码文本的 UTF-16 偏移，不依赖屏幕页号或像素；等待字体完成加载后按文本范围所在行恢复。源码有格式专属 `Locator` 与 `ReaderEngine`，预留固定页 / 漫画位置载荷但未实现这些格式。
+每个索引块最多约 2048 个 UTF-16 单元（emoji 边界可多一个），28 字节记录随机访问，TXT 源缓存最近 64 块。v2 延续标记兼容旧 v1 索引。内容适配只扫描索引元数据规划章节，不为规划解码整本书；每个资源源字符最多 131136、生成 HTML 最多 2 MiB，优先保留物理段落。极端单段超过 128 KiB UTF-8 内容时仍须技术切分；前后段距与重复缩进已消除，跨 iframe 断行仍可能不同，未声称严格一致。内核最多 8 个活动 view，前方淘汰补偿高度以保持当前位置；原生仅缓存 2 个章节响应。字体是共享离线资产，不嵌入正文或转成 base64。
 
-Web 容器禁 file / content 访问、外部导航、弹窗及网络请求；CSP 拒绝图片、iframe、连接和书内脚本，仅执行带 nonce 的可信位置脚本。HTTPS 本地 origin 只允许显式字体文件白名单，未命中一律返回拒绝响应。JavaScript 桥只接收当前会话 token、块序号和字符偏移，校验版本与窗口范围后报告位置，不暴露文件、数据库或系统能力。Debug 包开放 WebView 调试用于同设备 CSS / 字体取证，Release 不开放。Renderer 退出时销毁该 WebView 并要求返回书架重开。
+`TxtTextSource` 专属文本索引；`ReaderPublication` 提供章节 / 资源清单与来源定位映射；`RuleCompiler` 生成独立默认规则和用户设置；`RendererBackend` 只接受打开、定位、翻页、规则更新和关闭。TXT 进度仍使用原始解码文本 UTF-16 偏移，文章样本使用稳定 block / element ID；分页页码、像素及 JS Range 不写入数据库。字体声明直接内联自固定 OFL manifest，避免 @import 尚未到达时提前 Ready；等待字体、尺寸相关图片和稳定几何后恢复来源锚点。被替代的加载重建渲染实例，旧事件由会话 / revision / epoch / command ID 拒绝。完整升级约束见架构文档。
 
+WebView 禁 file / content 访问、外部导航、弹窗及网络回退。可信 HTTPS host 模块与惰性正文 iframe 分开：正文 sandbox 不允许脚本，HTTP CSP 再次禁止脚本、连接、嵌套 frame、表单和 base 修改。资源必须命中当前随机会话的确切清单，未命中返回 403。原生 WebMessage 接口验证唯一 origin 和主 frame，接受有界 JSON 的定位事件，不暴露文件、SQL 或任意网络操作。Debug 可调试 WebView，Release 不开放；renderer 退出销毁 WebView，需返回书架重开。
 输入当前限 128 MB。空间预检采用包含逐行索引开销的保守上限（约输入体积 34 倍），解析中仍检测余量；多空行文件可能产生较大索引，故此预检可能拒绝本能放下的文件。磁盘不足或单项损坏仅使该项失败。取消解析会在读取检查点停止并清理本项；杀进程可能退回最近一次成功提交位置。设备断电、极限磁盘故障与最低 API 真机尚需专项验收，不把架构说明等同故障实测。
 
-数据库 schema 为 v2，提供 v1→v2 非破坏性迁移，新增当前位置 / 书签备用比例；后续升级仍须新增迁移并回归，禁止销毁重建用户书库。参考应用代码未被复制，当前直接依赖见 `docs/DEPENDENCIES.md`；字体来自各自官方 OFL 来源并固定哈希，发布前仍需完整传递依赖与许可审查。
+数据库 schema 为 v3，提供 v1 / v2→v3 非破坏性迁移，保留当前位置、备用比例、书签和已有字号 / 主题；旧书保留连续滚动模式，新书默认分页；后续升级仍须新增迁移并回归，禁止销毁重建用户书库。Readest AGPL 应用代码未被复制；MIT foliate 仅固定实际使用的 paginator 和可重放窄补丁，当前直接依赖见 `docs/DEPENDENCIES.md`；字体来自各自官方 OFL 来源并固定哈希，发布前仍需完整传递依赖与许可审查。
 
 项目需求原文与增量计划见 `docs/Android_Local_Reader_PRD_v0.1.md` 和 `docs/IMPLEMENTATION_PLAN.md`。自建样本在 `samples/`，不包含外部版权图书。测试记录以父代理最终实际运行报告为准。
+
+## 浏览器内核回归
+
+系统 Chromium 与 Playwright 可运行以下测试（不需要修改应用的 Android 构建依赖）：
+
+```sh
+export NODE_PATH=/path/to/playwright/node_modules
+export READER_CHROMIUM=/path/to/chromium
+node scripts/tests/renderer-browser.cjs
+node scripts/tests/renderer-resources.cjs
+python3 scripts/tests/verify-vendor.py
+```
+
+浏览器回归覆盖真实连续跨节 / 反向重载、活动视图预算、真实来源字符可见性、分页 / 重排 / 窗口改变、慢字体 / 图片、取消与超时。最后一条默认下载固定上游单文件并验证 SHA256；离线可传 `--upstream /path/to/paginator.js`。vendor 中保留 MIT 许可、commit、原件 / 打包 / patch 哈希与可重放补丁。

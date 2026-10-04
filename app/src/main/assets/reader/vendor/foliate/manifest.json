@@ -1,0 +1,16 @@
+{
+  "engine": "foliate-paginator",
+  "repository": "https://github.com/readest/foliate-js",
+  "commit": "341dc63cda7ad26b31ada4ee905e40b5020da88a",
+  "source": "https://raw.githubusercontent.com/readest/foliate-js/341dc63cda7ad26b31ada4ee905e40b5020da88a/paginator.js",
+  "license": "MIT",
+  "upstreamSha256": "f64fe326bb0a6069c40019b954b0bc50206a06b9813605e6485d109021e4e21c",
+  "packagedSha256": "20c7058a8293355740e3a4f95529c38732be2c66d171968e5b74af75fb4e24ed",
+  "patchSha256": "15c20d1b0e276aaf9e9a43003c8cb1e5f9171bed08974db0e22b68dc6971b41d",
+  "patches": [
+    "inert iframe sandbox",
+    "global view budget and compensated eviction",
+    "view release cancels observer/navigation",
+    "paginator destroy disconnects container observer"
+  ]
+}

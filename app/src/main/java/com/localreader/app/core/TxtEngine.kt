@@ -126,7 +126,7 @@ object TxtParser {
     }
 }
 
-class TxtEngine(private val directory: File, override val version: String) : ReaderEngine {
+class TxtEngine(private val directory: File, override val version: String) : TxtTextSource {
     private var formatVersion = 1
     override val index: TextIndex = DataInputStream(File(directory, "meta.bin").inputStream().buffered()).use { input ->
         formatVersion = input.readInt()
@@ -179,6 +179,14 @@ class TxtEngine(private val directory: File, override val version: String) : Rea
         }
         val block = block(low)
         return ResolvedText(low, (target - block.sourceOffset).toInt().coerceIn(0, block.text.length), locator.version != version || outside)
+    }
+    @Synchronized override fun metadata(paragraph: Int): TxtBlockMetadata {
+        require(paragraph in 0 until index.paragraphs)
+        if (formatVersion == 1) return super.metadata(paragraph)
+        records.seek(paragraph * TxtParser.RECORD_SIZE + 8)
+        val length = records.readInt(); records.readLong(); records.readInt(); val flags = records.readInt()
+        require(length in 0..(TxtParser.MAX_BLOCK + 1) * 4) { "索引数据损坏" }
+        return TxtBlockMetadata(length,flags and 2 != 0)
     }
     @Synchronized override fun close() { text.close(); records.close(); cache.clear() }
 }

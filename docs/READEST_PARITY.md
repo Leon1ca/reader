@@ -1,14 +1,14 @@
 # Readest 正文排版一致性：固定基准、源码证据与实施规格
 
-日期：2026-10-04。状态：受控 WebView 已接入 TXT，五个 TTF 与 OFL 已打包；等待最终构建、设备与正文对照验证；**严格一致性未达标**。
+日期：2026-10-04。状态：I0 受控 WebView TXT、五个 TTF 与 OFL 已构建并完成基础设备验证；真实固定JS引擎已接入并已有浏览器/原生证据，产品已冻结且两晚修有关闭证据，冻结版本全11项设备复验通过；严格正文对照仍未通过；**严格一致性未达标**。
 
 ## 1. 用户要求与不可混淆的边界
 
 用户明确要求“排版效果和 readest 保持一致（包括文章的默认中英文数字字体）”，且手机已经安装 Readest。这是正文验收要求。外围书架/设置继续用最简 Material3，之后按用户提供的 UI 替换，两者没有冲突。
 
-早期 Compose TXT 已作为数据闭环过渡完成；当前代码已接入有界、安全的 WebView TXT 正文载体及独立实现的行为 CSS，五个固定官方 TTF 与 OFL 已打包。该变更等待最终构建和设备验证，不能宣称已经达到 Readest 排版。不得把“一致”改成“近似”“同风格”或“使用同内核所以一致”。PRD 草案原先“不要求像素级复制”的宽松条款不能覆盖用户的新要求。
+早期 Compose TXT 已作为数据闭环过渡完成；当前代码已接入有界、安全的 WebView TXT 正文载体及独立实现的行为 CSS，五个固定官方 TTF 与 OFL 已打包。I0 构建和基础设备验证结果见 VALIDATION.md，不能宣称已经达到 Readest 排版。不得把“一致”改成“近似”“同风格”或“使用同内核所以一致”。PRD 草案原先“不要求像素级复制”的宽松条款不能覆盖用户的新要求。
 
-建议实现路径是 **Android WebView + 与基准一致的字体资产/字体级联和 CSS 规则 + 固定版 foliate-js 阅读适配层**。这是为了使用相同的 Chromium 文本/排版行为；单纯给 Compose 换字体不能保证标点、字距、行断点和分页一致。WebView 对齐也不是自动通过验收，仍需同设备样本比较。滚动 HTML 初验不一定需要 foliate，但完整分页、EPUB/MOBI、锚点应验证并接入所锁定的内核。
+实现路径为 **Android WebView + 独立规则编译/字体级联 + 固定版可替换 foliate 渲染后端**，具体责任和多项目源码比较见 [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md)。这是为了使用相同的 Chromium 文本/排版行为；单纯给 Compose 换字体不能保证标点、字距、行断点和分页一致。WebView 对齐也不是自动通过验收，仍需同设备样本比较。滚动 HTML 初验不一定需要 foliate，但完整分页、EPUB/MOBI、锚点应验证并接入所锁定的内核。
 
 ## 2. 固定基准
 
@@ -97,7 +97,7 @@
 
 ## 7. 给编码角色的可执行顺序
 
-**推进优先级：受控 WebView / Readest 默认正文排版已进入代码，当前先完成最终构建、设备与同样本文字对照，优先于扩展格式。不能先增加格式再把排版要求留作外围 UI 美化。**
+**推进优先级：I0基础构建/设备验证已完成；本阶段按CORE_ARCHITECTURE.md接入真实引擎、独立规则、连续/分页与重排定位及文章结构fixture，继续同设备对照，优先于扩格式。不能把排版要求留作外围UI美化。**
 
 1. 已保留导入、数据库、书架、段落索引和 Locator，并接入 `TypographyProfile` / `WebReaderAdapter` 边界；有界 TXT 正文通过本地受控 WebView 展示。下面的构建/安全/位置验证须针对最终代码执行。
 2. 先准备可公开分享的原创短文样本，至少中文、英文、混排、ASCII/全角数字、标点、粗斜体、标题、引用、列表、代码、图片图注。分别以 TXT 和剪藏文章等价路径生成参照内容；不要读取私人书籍来构造回归样本。
@@ -105,7 +105,7 @@
 4. 在受控本地 origin 上实现最小 WebView 正文容器：字体与正文资源本地化、远程请求阻断、任意书内脚本禁用、可信桥最小化。声明 viewport，先保留并实测平台默认 textZoom，记录系统 fontScale/density；固定 Readest/Wry 代码未见主动覆写，不武断改为 100。防止 Android sp、CSS px 与系统缩放重复计算。
 5. 根据本文件完整级联路径实现 TXT/文章基础样式与默认值，保留结构差异。字体使用固定且已核许可的实际目标文件；先确认拉丁/数字/CJK 命中，不能只用 document.fonts.check 或 computedStyle 的家族名作为实际字形证明。
 6. 通过受控测试 WebView 的渲染字体检查、已知字体 glyph/advance 度量以及同设备截图核验；`computedStyle` 记录 font-size/weight/line-height/margins/indent/text-align 与 viewport。若 Readest production 包不能远程调试，源码和 APK 提供规则证据，截图及测量提供运行证据，未直接测到的字体保留“待验证”。
-7. 按固定 `readest/foliate-js` commit 验证分页/滚动与位置；以受控接口接入原始 TXT 索引、EPUB、MOBI。字体加载完成后恢复锚点，重排不能返回章节开头。滚动版先通不等于分页一致通过。
+7. 按 CORE_ARCHITECTURE.md 的固定后端主方案与运行准入验证分页/连续滚动与位置；本阶段以受控接口接入现有 TXT 与原创结构化文章fixture，EPUB/MOBI后续接入。字体加载完成后恢复锚点，重排不能返回章节开头。滚动版先通不等于分页一致通过。
 8. 从字体/布局规格走到截图对照后，针对每项差异修复；保留独立 Sol 审核。对需要 AGPL 代码的方案单独形成具体接入差异和许可清单，不能未经记录直接粘贴。
 
 ## 8. 验收记录模板与当前差异
@@ -119,9 +119,9 @@
 | 手机版本与源码固定 | 已确认 v0.12.10 | 保持 APK 元数据与源码 commit 记录 |
 | 出厂默认参数与级联路径 | 已研究 | 实际 Android 加载路径与样本测量 |
 | 手机当前样本字体设置 | 已由父代理截图确认：16 / 8 / 400、sans、霞鹜文楷、overrideFont off | 尚需其余布局参数与全局/单书范围记录；截图不能替代实际渲染字体证据 |
-| 文章实际中英文数字字形 | 未验证 | 每类字符实际选用与截图/度量 |
+| 文章实际中英文数字字形 | 本项目真实fixture默认首段已测：中文/全角数字customLXGW，English/ASCII数字customRoboto；见第12节 | Readest生产对应实际glyph仍待测，不外推本项目结果 |
 | 字体离线文件与哈希 | 已独立下载官方 Roboto/Bitter/LXGW 字体，核许可/哈希；实现角色已复制5个TTF与OFL | 见 FONTS.md；共有字形轮廓/advance已比对，实际手机字形与全字符fallback仍待验 |
-| WebView 正文适配 | 已在代码中接入受控、有界 TXT 载体，固定字体和行为CSS；等待最终构建与设备验证 | 构建、无远程回源、字体加载、内容与定位测试 |
+| WebView 正文适配 | I0已构建且基础设备验证通过，受控有界TXT载体；新内核阶段未验 | 见VALIDATION.md；新引擎需独立重做安全/资源/重排验证 |
 | 分页与文章运行排版 | 尚未完成；当前TXT滚动载体不能替代分页/文章验收 | 固定内核、分页边界、文章真实DOM/字体级联和实际glyph对照 |
 | 同设备排版一致 | 未通过 | 成对样本、逐项差异关闭、独立审核 |
 
@@ -131,3 +131,28 @@
 ## 9. 2026-10-04 字体资源核验补充
 
 已取得并固定独立官方字体：Roboto 3.015（normal/italic）、Bitter 3.021（normal/italic）、LXGW WenKai GB Screen 1.520，五个原始TTF与OFL已交实现角色。Google Fonts本日API分包与固定TTF内部版本吻合；默认字重400共有码点的轮廓和advance全部匹配。LXGW与Readest指定1.520.0网页包248子集的46,501个独立码点亦全部匹配。Roboto/Bitter完整字体比网页分包多30/106码点；实现已通过四face的精确有效unicode-range排除这些额外码点，规划角色已核对。font-display已同步swap；变量字重/shaping/hinting和手机实际glyph仍待验证。当前来源证据、下载链接、SHA256、许可、对比范围和缩放环境已汇总到 [FONTS.md](FONTS.md)，后续事实以该清单为准。
+
+## 10. I0 实机结果与新阶段边界
+
+本项目默认TXT正文声明20px在font_scale0.9设备得到computed18px/line-height28.8px，indent40px、上下margin20px、body44px16px。Arial优先链在这台手机被测中英/ASCII数字实际命中系统MiSans VF（非customfont）；五个本地fontface因未选用而unloaded。不能称TXT默认已选Roboto/LXGW。
+
+临时将文章font-family用于原创探针时，中文与全角数字命中本地LXGW，英文与ASCII数字命中本地Roboto-Regular。这证明字体打包/配置能加载，不证明真实文章管线，更不证明Readest生产包使用同一字形。该诊断设置18、computed20.25px，不是默认字号。完整证据文件及范围见 [FONTS.md](FONTS.md) 第7节。Readest生产正文仍未CDP测量，严格一致仍未通过。
+
+新阶段要独立维护更合理的内核架构，规则与渲染器拆开；复用MIT paginator不等于搬Readest应用。采用不同后端时保持同一基准与正文规则验收，不能把排版一致改成“风格接近”。I0测试不能转记为新内核通过。
+
+## 11. 真实内核接入后的剩余差异
+
+本轮已接入固定MIT foliate paginator，内容/资源、独立RuleCompiler、Locator/session与Android安全桥分层维护，旧32块窗口模板已经移除。这完成的是可维护架构和真实运行基础；即使分页/连续滚动、真实大TXT和重排测试通过，也不能据此宣称Readest一致。
+
+- **普通TXT转换仍未等价**：本项目沿用原TXT索引，只去对应CR、转义正文并保留原空白/pre-wrap，未完成Readest的trim、空行、缩进等转换与源→DOM映射。保留原UTF16位置和正确continuation很重要，但不证明转换结果一致。普通短文也未完成严格验收，不能仅把差异归于极端长段。
+- **技术section仍有极端边界**：正常物理段优先完整切节，超过128KiB源预算的单段才continuation分节；跨iframe的断行可能不同，须单列样本比较。
+- **文章是结构开发fixture**：有真实标题/列表/强调/引用/代码/图片/图注/表格及元素定位，不是Readest文章生成路径、抓取/清洗/持久化业务或RSS的完成证明。文章默认中英数字与Readest生产实际字形尚未验收。
+- **字体静态证据保持有效但范围不变**：OFL/哈希/weight400共有轮廓核查，不涵盖完整字重、shaping、系统fallback、全字符或正文分页；I0的MiSans/Roboto/LXGW探针也不是新引擎全路径的最终证明。
+
+本轮曾有跨flow目标离屏、后台scroll覆盖精确锚点、字体发现过晚等问题，已进行修复和针对性复验；最新小文件首0:0排版超时与observer清理已有真实UI/释放回归关闭证据；冻结版本全11项设备复验全部通过。当前细分状态见CORE_ARCHITECTURE及最终CORE_VALIDATION/CORE_REVIEW，严格Readest正文一致继续标为未通过。
+
+## 12. 冻结候选真实默认文章字形
+
+`work/phase2-device-article-typography-final.json`记录真实Article开发页面已Ready，host/renderer高608 CSSpx，锚点非零可见；正文默认设置16对应声明20px，系统font_scale0.9下computed18px/line-height28.8px。`work/phase2-device-article-glyph-groups.json`对原首段仅分为无样式span查询实际渲染字体，之后恢复原DOM，没有强制font-family：中文与全角４５６为customLXGW，English与123为customRoboto-Regular。这比I0临时字体链诊断更接近实际产品路径，但只证明本项目原创Article fixture，不是Readest生产runtime或抓取/文章业务路径。
+
+相同冻结版TXT实际首段仍为系统MiSans VF；真实旧约8KB书首0:0已正常Ready与字形可见，host高576px。两种内容的默认链与命中分别维护。普通TXT转换、Readest实际字形及全排版对照仍未通过，不能因这组字体结果删除第11节差异。冻结hash见CORE_ARCHITECTURE。

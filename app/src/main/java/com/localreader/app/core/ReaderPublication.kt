@@ -1,0 +1,104 @@
+package com.localreader.app.core
+
+/** Content capabilities contain no Android, SQLite, file URI or renderer implementation. */
+interface ReaderPublication {
+    val revision: String
+    val kind: WebContentKind
+    val sectionCount: Int
+    val resourceManifest: Map<String,PackagedContentResource> get() = emptyMap()
+    fun section(index: Int): ContentSection
+    fun target(locator: Locator): ContentTarget
+    fun locator(section: Int, blockId: String, character: Int): Locator?
+}
+/** Resource capabilities are owned by a content adapter, never supplied by authored HTML URLs. */
+data class PackagedContentResource(val mime: String, val assetPath: String)
+data class ContentSection(val index: Int, val html: String, val utf16Characters: Int)
+data class ContentTarget(val section: Int, val blockId: String, val character: Int, val nearby: Boolean = false)
+
+/** Bounded resources prefer physical paragraph boundaries; extreme paragraphs retain continuation. */
+class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit = {}) : ReaderPublication {
+    override val revision = source.version
+    override val kind = WebContentKind.TXT
+    // Only compact record metadata is scanned. No book text is decoded for this directory.
+    private val starts: IntArray = buildList {
+        add(0)
+        var records = 0; var bytes = 0
+        for (paragraph in 0 until source.index.paragraphs) {
+            if (paragraph % 1024 == 0) checkpoint()
+            val meta = source.metadata(paragraph)
+            if (records > 0 && ((records >= 64 || bytes >= 32768) && !meta.continuation || bytes + meta.utf8Bytes > 128 * 1024)) {
+                add(paragraph); records = 0; bytes = 0
+            }
+            bytes += meta.utf8Bytes; records++
+        }
+    }.toIntArray()
+    override val sectionCount = starts.size
+    private fun sectionOf(paragraph: Int): Int = starts.binarySearch(paragraph).let { if (it >= 0) it else -it - 2 }
+    override fun target(locator: Locator): ContentTarget {
+        val resolved = source.resolve(locator)
+        return ContentTarget(sectionOf(resolved.paragraph), resolved.paragraph.toString(), resolved.character, resolved.nearby)
+    }
+    override fun section(index: Int): ContentSection {
+        require(index in 0 until sectionCount)
+        val start = starts[index]
+        val end = starts.getOrElse(index + 1) { source.index.paragraphs }
+        val blocks = (start until end).map(source::block)
+        val body = buildString {
+            var tag: String? = null
+            blocks.forEach { block ->
+                if (tag == null || !block.continuation) {
+                    tag?.let { append("</$it>") }
+                    tag = if (block.heading) "h2" else "p"
+                    val continuesOutside = block.continues && blocks.last().continues && blocks.last().index >= block.index &&
+                        blocks.dropWhile { it.index < block.index }.drop(1).all { it.continuation }
+                    val classes = listOfNotNull(if (block.continuation) "continuation" else null,if (continuesOutside) "continues" else null).joinToString(" ")
+                    append("<$tag${if (classes.isNotEmpty()) " class=\"$classes\"" else ""}>")
+                }
+                append("<span data-block=\"${block.index}\" data-length=\"${block.text.length}\">${HtmlText.escape(block.text.ifEmpty { "\u200B" })}</span>")
+                if (!block.continues) { append("</$tag>"); tag = null }
+            }
+            tag?.let { append("</$it>") }
+        }
+        return ContentSection(index, sectionDocument(body), blocks.sumOf { it.text.length })
+    }
+    override fun locator(section: Int, blockId: String, character: Int): Locator.Text? {
+        val paragraph = blockId.toIntOrNull() ?: return null
+        if (section !in 0 until sectionCount || paragraph !in 0 until source.index.paragraphs || sectionOf(paragraph) != section || character < 0) return null
+        val block = source.block(paragraph)
+        if (character > block.text.length) return null
+        val offset = block.sourceOffset + character
+        return Locator.Text(revision, offset, paragraph, character, offset.toDouble() / source.index.totalCharacters.coerceAtLeast(1))
+    }
+    companion object { const val BLOCKS_PER_SECTION = 64 }
+}
+
+/** An authored, inert article fixture. This is not a web import/clip/RSS pipeline. */
+class ArticleSamplePublication : ReaderPublication {
+    override val revision = "article-sample-v1"
+    override val kind = WebContentKind.ARTICLE
+    override val resourceManifest = mapOf("images/landscape.svg" to PackagedContentResource("image/svg+xml","reader/sample/landscape.svg"))
+    private val texts = listOf("结构化文章排版样本", "中文 English 123４５６，保留文章的标题、段落和强调。", "强调 Bold 和 Italic 与数字 2026。",
+        "引用是一段独立的文字。", "第一个列表条目", "第二个列表条目", "val example = 123 // 中文代码", "图：本地山景示意", "语言", "示例", "中文", "123", "English", "456")
+    override val sectionCount = 1
+    override fun target(locator: Locator): ContentTarget {
+        val article = locator as? Locator.Article
+        if (article?.blockId == "image-1") return ContentTarget(0,"image-1",0,article.version != revision)
+        val id = article?.blockId?.toIntOrNull()?.takeIf { it in texts.indices } ?: 0
+        return ContentTarget(0, id.toString(), (article?.textOffset ?: 0).coerceIn(0, texts[id].length), article?.version != revision)
+    }
+    override fun locator(section: Int, blockId: String, character: Int): Locator.Article? {
+        if (section == 0 && blockId == "image-1" && character == 0) return Locator.Article(revision,blockId,0,element = true)
+        val id = blockId.toIntOrNull() ?: return null
+        return if (section == 0 && id in texts.indices && character in 0..texts[id].length) Locator.Article(revision, blockId, character) else null
+    }
+    override fun section(index: Int): ContentSection {
+        require(index == 0)
+        fun block(id: Int, content: String = HtmlText.escape(texts[id])) = "<span data-block=\"$id\" data-length=\"${texts[id].length}\">$content</span>"
+        val body = "<article><h1>${block(0)}</h1><p>${block(1)}</p><p>${block(2, "强调 <strong>Bold</strong> 和 <em>Italic</em> 与数字 2026。")}</p>" +
+            "<blockquote><p>${block(3)}</p></blockquote><ul><li>${block(4)}</li><li>${block(5)}</li></ul><pre><code>${block(6)}</code></pre>" +
+            "<figure><img data-block=\"image-1\" data-length=\"0\" data-element=\"image\" src=\"../images/landscape.svg\" alt=\"本地山景\" width=\"480\" height=\"240\"><figcaption>${block(7)}</figcaption></figure>" +
+            "<table><thead><tr><th>${block(8)}</th><th>${block(9)}</th></tr></thead><tbody><tr><td>${block(10)}</td><td>${block(11)}</td></tr><tr><td>${block(12)}</td><td>${block(13)}</td></tr></tbody></table></article>"
+        return ContentSection(0, sectionDocument(body), texts.sumOf { it.length })
+    }
+}
+private fun sectionDocument(body: String) = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body>$body</body></html>"

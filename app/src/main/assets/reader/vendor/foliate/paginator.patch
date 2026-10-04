@@ -1,0 +1,86 @@
+--- a/paginator.js
++++ b/paginator.js
+@@ -747,7 +747,8 @@
+         })
+         // `allow-scripts` is needed for events because of WebKit bug
+         // https://bugs.webkit.org/show_bug.cgi?id=218086
+-        this.#iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
++        // Local Reader Android security patch: inert content, Chromium-only backend.
++        this.#iframe.setAttribute('sandbox', 'allow-same-origin')
+         this.#iframe.setAttribute('scrolling', 'no')
+     }
+     get element() {
+@@ -1397,8 +1398,10 @@
+             this.#overlayer.clearHole()
+     }
+     destroy() {
+-        if (this.document?.body) this.#observer.unobserve(this.document.body)
++        // Local Reader lifecycle patch: cancel observation and pending iframe navigation.
++        this.#observer.disconnect()
+         this.destroyLoupe()
++        this.#iframe.remove()
+     }
+ }
+ 
+@@ -1862,6 +1865,17 @@
+         })
+     }
+     #createView(index) {
++        // Local Reader bounded-view patch: every creation obeys the same global budget.
++        this.#trimDistantViews()
++        if (!this.#views.has(index) && this.#views.size >= 8) {
++            const start = this.#renderedStart, end = this.#renderedEnd
++            const candidates = this.#sortedViews.filter(([i, v]) => {
++                const offset = this.#getViewOffset(i)
++                return i !== this.#primaryIndex && (offset + v.element.getBoundingClientRect()[this.sideProp] <= start || offset >= end)
++            }).sort(([a], [b]) => Math.abs(b - this.#primaryIndex) - Math.abs(a - this.#primaryIndex))
++            if (!candidates.length) throw new Error('Local Reader view budget exhausted')
++            this.#destroyView(candidates[0][0])
++        }
+         // Destroy existing view for this index if any
+         const existing = this.#views.get(index)
+         if (existing) {
+@@ -1913,9 +1927,17 @@
+     #destroyView(index) {
+         const view = this.#views.get(index)
+         if (!view) return
++        // Local Reader: compensate removal of an entirely off-screen preceding view.
++        const start = this.#renderedStart
++        const removedSize = view.element.getBoundingClientRect()[this.sideProp]
++        const before = index < this.#primaryIndex && this.#getViewOffset(index) + removedSize <= start + 1
+         view.destroy()
+         this.#container.removeChild(view.element)
+         this.#views.delete(index)
++        if (before) {
++            const correction = Math.max(0, start - removedSize) - this.#renderedStart
++            this.containerPosition += (this.#vertical ? -1 : 1) * correction
++        }
+         this.sections[index]?.unload?.()
+     }
+     #destroyAllViews() {
+@@ -3827,11 +3849,12 @@
+         const maxDistance = size * 10
+         const viewportEnd = this.#renderedEnd
+         for (const [index, view] of this.#sortedViews) {
+-            if (index <= this.#primaryIndex) continue
++            if (index === this.#primaryIndex) continue
+             const offset = this.#getViewOffset(index)
+-            if (offset - viewportEnd > maxDistance) {
++            const end = offset + view.element.getBoundingClientRect()[this.sideProp]
++            const precedes = end <= this.#renderedStart && index < this.#primaryIndex - 2
++            if (precedes || offset - viewportEnd > maxDistance || (offset >= viewportEnd && index > this.#primaryIndex + 2))
+                 this.#destroyView(index)
+-            }
+         }
+     }
+     #canGoToIndex(index) {
+@@ -4106,7 +4129,8 @@
+             this.#vtCleanup()
+             this.#isAnimating = false
+         }
+-        this.#observer.unobserve(this)
++        // Local Reader lifecycle patch: this observer watches the container, not this host.
++        this.#observer.disconnect()
+         this.#destroyAllViews()
+         this.#mediaQuery.removeEventListener('change', this.#mediaQueryListener)
+     }

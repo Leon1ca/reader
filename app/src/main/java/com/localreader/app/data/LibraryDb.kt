@@ -10,17 +10,17 @@ import com.localreader.app.core.Locator
 data class Book(val id: String, val title: String, val author: String, val hash: String, val bytes: Long,
                 val imported: Long, val lastRead: Long, val encoding: String, val version: String,
                 val paragraphs: Int, val characters: Long, val current: Locator.Text, val furthest: Long,
-                val fontSize: Float, val theme: String)
+                val fontSize: Float, val theme: String, val flow: String = "paginated")
 data class Bookmark(val id: Long, val bookId: String, val locator: Locator.Text, val excerpt: String, val created: Long)
 
-class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null, 2) {
+class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null, 3) {
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE books(id TEXT PRIMARY KEY,title TEXT NOT NULL,author TEXT NOT NULL,
             hash TEXT NOT NULL UNIQUE,bytes INTEGER NOT NULL,imported INTEGER NOT NULL,last_read INTEGER NOT NULL DEFAULT 0,
             encoding TEXT NOT NULL,version TEXT NOT NULL,paragraphs INTEGER NOT NULL,characters INTEGER NOT NULL,
             current_offset INTEGER NOT NULL DEFAULT 0,current_paragraph INTEGER NOT NULL DEFAULT 0,current_character INTEGER NOT NULL DEFAULT 0,
-            current_fraction REAL NOT NULL DEFAULT 0,furthest INTEGER NOT NULL DEFAULT 0,font_size REAL NOT NULL DEFAULT 16,theme TEXT NOT NULL DEFAULT 'white')""")
+            current_fraction REAL NOT NULL DEFAULT 0,furthest INTEGER NOT NULL DEFAULT 0,font_size REAL NOT NULL DEFAULT 16,theme TEXT NOT NULL DEFAULT 'white',flow TEXT NOT NULL DEFAULT 'paginated')""")
         db.execSQL("""CREATE TABLE bookmarks(id INTEGER PRIMARY KEY AUTOINCREMENT,book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             version TEXT NOT NULL,source_offset INTEGER NOT NULL,paragraph INTEGER NOT NULL,character INTEGER NOT NULL,fallback_fraction REAL NOT NULL DEFAULT 0,excerpt TEXT NOT NULL,created INTEGER NOT NULL,
             UNIQUE(book_id,version,source_offset))""")
@@ -28,12 +28,15 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null
             version TEXT NOT NULL,payload TEXT NOT NULL,created INTEGER NOT NULL)""")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion == 1 && newVersion == 2) {
+        require(oldVersion in 1..2 && newVersion == 3) { "此版本没有数据库迁移路径；保留原库" }
+        if (oldVersion == 1) {
             db.execSQL("ALTER TABLE books ADD COLUMN current_fraction REAL NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE bookmarks ADD COLUMN fallback_fraction REAL NOT NULL DEFAULT 0")
             db.execSQL("UPDATE books SET current_fraction=CASE WHEN characters>0 THEN current_offset*1.0/characters ELSE 0 END")
             db.execSQL("""UPDATE bookmarks SET fallback_fraction=COALESCE((SELECT CASE WHEN characters>0 THEN bookmarks.source_offset*1.0/characters ELSE 0 END FROM books WHERE books.id=bookmarks.book_id),0)""")
-        } else error("此版本没有数据库迁移路径；保留原库")
+        }
+        // Old users keep the previous vertical reading mode, font size and all anchors.
+        db.execSQL("ALTER TABLE books ADD COLUMN flow TEXT NOT NULL DEFAULT 'scrolled'")
     }
     fun books(): List<Book> = readableDatabase.rawQuery("SELECT * FROM books", null).use { c -> buildList { while (c.moveToNext()) add(c.book()) } }
     fun book(id: String): Book? = readableDatabase.rawQuery("SELECT * FROM books WHERE id=?", arrayOf(id)).use { if (it.moveToFirst()) it.book() else null }
@@ -52,10 +55,14 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null
     fun delete(id: String) = transaction { it.delete("books", "id=?", arrayOf(id)) }
     fun savePosition(id: String, locator: Locator.Text, furthest: Long = locator.sourceOffset, time: Long = System.currentTimeMillis()) {
         writableDatabase.execSQL("""UPDATE books SET current_offset=?,current_paragraph=?,current_character=?,current_fraction=?,
-            furthest=MAX(furthest,?),last_read=? WHERE id=? AND version=?""", arrayOf(locator.sourceOffset, locator.paragraph, locator.character, locator.fallbackFraction.coerceIn(0.0,1.0), maxOf(locator.sourceOffset, furthest), time, id, locator.version))
+            furthest=MAX(furthest,?),last_read=? WHERE id=? AND version=?""", arrayOf<Any>(locator.sourceOffset, locator.paragraph, locator.character, locator.fallbackFraction.coerceIn(0.0,1.0), maxOf(locator.sourceOffset, furthest), time, id, locator.version))
     }
     fun setStyle(id: String, font: Float, theme: String) {
         writableDatabase.update("books", ContentValues().apply { put("font_size", font); put("theme", theme) }, "id=?", arrayOf(id))
+    }
+    fun setFlow(id: String, flow: String) {
+        require(flow in setOf("paginated","scrolled"))
+        writableDatabase.update("books",ContentValues().apply { put("flow",flow) },"id=?",arrayOf(id))
     }
     fun setMetadata(id: String, title: String, author: String) {
         writableDatabase.update("books", ContentValues().apply { put("title", title); put("author", author) }, "id=?", arrayOf(id))
@@ -84,7 +91,7 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null
         db.insertOrThrow("locator_backups", null, ContentValues().apply {
             put("book_id", id); put("version", old.version); put("payload", backup); put("created", System.currentTimeMillis())
         })
-        // Keep the original bookmark payload/version. ReaderEngine resolves it with an explicit nearby warning.
+        // Keep original bookmark payload/version. TxtTextSource resolves it with a nearby warning.
         db.update("books", ContentValues().apply {
             put("encoding", encoding); put("version", version); put("paragraphs", paragraphs); put("characters", characters)
             put("current_offset", old.current.sourceOffset.coerceAtMost((characters - 1).coerceAtLeast(0)))
@@ -103,5 +110,5 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null
     private fun Cursor.book() = Book(string("id"), string("title"), string("author"), string("hash"), long("bytes"), long("imported"), long("last_read"),
         string("encoding"), string("version"), int("paragraphs"), long("characters"),
         Locator.Text(string("version"), long("current_offset"), int("current_paragraph"), int("current_character"), double("current_fraction")), long("furthest"),
-        getFloat(getColumnIndexOrThrow("font_size")), string("theme"))
+        getFloat(getColumnIndexOrThrow("font_size")), string("theme"),string("flow"))
 }

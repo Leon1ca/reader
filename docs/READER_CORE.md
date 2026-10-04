@@ -1,12 +1,12 @@
 # 阅读内核层：边界与维护决策
 
-日期：2026-10-04。决策来源：用户询问是否单独维护阅读内核；本轮确定采用独立内核层，固定上游 JS 引擎版本，维护 Android 适配与排版配置，只保留必要的小幅补丁。此文不扩大当前增量范围。
+日期：2026-10-04。决策来源：用户询问是否单独维护阅读内核；本轮确定采用独立内核层，固定上游 JS 引擎版本，维护 Android 适配与排版配置，只保留必要的小幅补丁。后续用户明确要求拆解规则与渲染器、参考更多项目；本文件按该要求修订，完整 ADR 见 [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md)。
 
 ## 维护什么
 
 项目单独维护逻辑上的阅读内核层，让 Compose 界面、书库和数据库通过稳定接口使用它。先保持清晰包/接口边界；无需为满足“独立”立即拆出多个构建模块。
 
-- 上游引擎：优先验证 Readest 0.12.10 所用 `readest/foliate-js` fork，固定 commit `341dc63cda7ad26b31ada4ee905e40b5020da88a`。不跟随 main 自动升级，不在当前阶段另造一套长期分叉引擎。
+- 渲染后端：经固定 Readest/foliate、官方 foliate、Readium 和 EPUB.js 对比，首选 `readest/foliate-js@341dc63cda7ad26b31ada4ee905e40b5020da88a` 的独立 MIT paginator；理由是现成多视图连续滚动与 Range 定位，最终准入依赖实际运行/有界性/安全测试。仅复用该模块，不搬 Readest 应用；不跟踪 main，也不自行重写浏览器排版。
 - Android 适配：WebView 生命周期、受控本地资源、字体加载、消息桥、安全策略、设备尺寸与系统缩放、暂停/恢复。
 - 内容适配：将图书章节、TXT 段落索引和文章快照映射成引擎可读取的内容，保留各自身份与结构。
 - 排版配置：独立实现且带版本的 Readest 行为规格、默认字体链、正文 CSS、布局参数和配置迁移；以固定版本源码和同设备样本为依据。
@@ -57,10 +57,26 @@
 | 字体文件 | 已取得的 Roboto/Bitter/LXGW 二进制按各自 OFL-1.1 分发，随包保留版权和许可；字体许可不决定应用许可，也不因 npm 顶层元数据变成 MIT。固定来源见 FONTS_MANIFEST.json |
 | 本项目适配与配置 | 自行实现并记录来源参考；不得仅因依赖 MIT 内核就声称其他来源同为 MIT。整体发行许可仍单独确定 |
 
-## 当前实际状态与下一步
+## 当前实际状态与本阶段
 
-当前代码已接入受控、有界的 **TXT WebView 正文载体**、本地字体资源及独立实现的行为 CSS；五个 TTF 与 OFL 已打包。Roboto/Bitter 字体覆盖范围与原始网页分包有效范围已对齐，字体轮廓/advance 的默认字重核验已记录。
+起始基线 `237d478` 已接入受控、有界的 **TXT WebView 正文载体**、本地字体资源及独立实现的行为 CSS；五个 TTF 与 OFL 已打包。Roboto/Bitter 字体覆盖范围与原始网页分包有效范围已对齐，字体轮廓/advance 的默认字重核验已记录。
 
-**当前尚未接入完整 foliate-js 引擎。** TXT 滚动载体不等于正式电子书内核，不证明分页、EPUB/MOBI、文章运行字体或严格 Readest 正文一致已完成。最终构建、设备与正文对照结果以相应验证报告为准。
+**该 I0 基线尚未接入完整 foliate-js 引擎。** TXT 滚动载体不等于正式电子书内核，不证明分页、EPUB/MOBI、文章运行字体或严格 Readest 正文一致已完成。最终构建、设备与正文对照结果以相应验证报告为准。
 
-下一阶段优先真正接入固定 JS 内核并完成严格排版对照，然后扩展格式与功能。本轮继续完成现有增量的验证，不因该决策临时加入全部内核集成或新格式。
+以上描述起始基线 `237d478`。本阶段已真实接入固定paginator并移除旧32块HTML载体。已获浏览器与原生运行证据；两项晚修已获关闭证据，产品hash已冻结，最终冻结版本11项真机复验已通过，具体能力以验证报告为准。
+
+本阶段按 [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md) 接入真实分页器、两种 flow、跨 section 连续阅读、稳定 Locator 重排、资源/消息安全以及原创结构化 Article fixture。内容仓库与渲染器之间增加真实 ContentAdapter/ResourceResolver；规则编译与 backend 分开。TXT 与 Article 共用会话协议而保留不同内容/字体路径；SQLite v2 的已有内容/书签/偏好通过非破坏迁移保留；当前 schema3 仅新增 flow，原始 UTF-16 sourceOffset 不变。
+
+Ready 由自有会话协议判断字体、尺寸相关资源、目标锚点和当前 layoutEpoch；上游 `stabilized` 仅作提示。持续滚动须证明全局 view/字节预算有界，不能用局部 preload 上限或单 iframe 替换冒称完整连续。严谨的级联与生命周期矩阵、长物理段落处理和安全 patch 见 ADR。本阶段不同时扩全格式/RSS/剪藏业务；严格 Readest parity 仍需真实基准对照。
+
+### 本阶段候选实现状态
+
+分层已落地：ContentAdapter/资源→规则编译→固定MIT paginator→Locator/session→Android主frame桥。TXT与结构化文章开发fixture走同一会话，保留各自结构和字体路径；没有引入Readest应用层。8活动view、2份native正文缓存和lazy sections限制加载；v2目录仅扫描metadata，v1旧索引通过有界block解码兼容。SQLite3仅增加flow，旧书保留滚动习惯和已有数据。
+
+已有独立100节浏览器往返、虚拟20MiB浏览器、真实至少20MiB TXT经原生WebView定位/重排以及16项JVM、10项真机通过证据；真机需要MIUI前台启动辅助，430.628秒不是性能成绩。晚发现的小文件首段0:0超时已由host同步visualViewport实际CSSpx高度修复，真实UIReady和字形可见；observer释放已验证destroy后render0。产品hash已冻结，最终冻结版本11项整体真机复验已通过，独立于此前10项历史成绩。
+
+内容转换和排版仍有清晰缺口：TXT保留原空白的pre-wrap尚未等价实现Readest trim/空行/缩进转换；极长物理段跨iframe仍可能断行不同。Article只是原创结构fixture，没有抓取/清洗/持久业务管线。严格Readest字体/全排版一致、API29/旧WebView和后续格式均未验收。最终冻结状态见CORE_ARCHITECTURE末节及CORE_VALIDATION/CORE_REVIEW。
+
+真实Article开发页面的默认字体已测到：首段中文及全角４５６命中本地LXGW，English和123命中本地Roboto。测量仅把原文本分为无样式span，未强制字体并已恢复DOM；这是真实fixture默认路径证据，仍不是Readest生产字形或完整文章业务验收。
+
+最终整轮为11/11真机通过，日志`work/phase2-device-release.log`、49.525秒，使用MAIN+LAUNCHER前台协助；不是性能测试。冻结产品未再改动，R0-A1内核基础可交付，完整R1与严格Readest正文一致不在该结论内。

@@ -13,9 +13,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class ReadingSession(val book: Book, val engine: TxtEngine, val bookmarks: List<Bookmark>,
-                          val jump: Locator.Text, val jumpSerial: Int = 0, val notice: String? = null)
-data class UiState(val loading: Boolean = true, val books: List<Book> = emptyList(), val reader: ReadingSession? = null,
+data class TxtReadingSession(val book: Book, val engine: TxtEngine, val bookmarks: List<Bookmark>,
+                          val jump: Locator.Text, val jumpSerial: Int = 0, val notice: String? = null,
+                          val document: ReaderPublication = TxtPublication(engine))
+data class UiState(val loading: Boolean = true, val books: List<Book> = emptyList(), val reader: TxtReadingSession? = null,
                    val busy: Boolean = false, val operation: String = "", val results: List<ImportResult> = emptyList(), val error: String? = null)
 private data class PendingPosition(val id: String, val locator: Locator.Text, val furthest: Long)
 
@@ -60,7 +61,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val session = withContext(Dispatchers.IO) {
                     val fresh = requireNotNull(repository.db.book(book.id))
-                    ReadingSession(fresh, repository.engine(fresh), repository.db.bookmarks(fresh.id), fresh.current)
+                    val engine = repository.engine(fresh)
+                    val coroutine = currentCoroutineContext()
+                    try { TxtReadingSession(fresh,engine,repository.db.bookmarks(fresh.id),fresh.current,document = TxtPublication(engine) { coroutine.ensureActive() }) }
+                    catch (e: Exception) { engine.close(); throw e }
                 }
                 pending = PendingPosition(session.book.id, session.jump, session.book.furthest)
                 mutable.update { it.copy(reader = session) }
@@ -110,6 +114,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         try { repository.db.setStyle(session.book.id, fontSize, theme) }
         catch (e: Exception) { mutable.update { it.copy(error = "阅读设置保存失败：${e.message}") } }
     }
+    fun flow(flow: ReaderFlow) {
+        val session = state.value.reader ?: return
+        val anchor = pending?.locator ?: session.jump
+        mutable.update { it.copy(reader = session.copy(book = session.book.copy(flow = flow.wire),jump = anchor,jumpSerial = session.jumpSerial + 1)) }
+        try { repository.db.setFlow(session.book.id,flow.wire) }
+        catch (e: Exception) { mutable.update { it.copy(error = "阅读模式保存失败：${e.message}") } }
+    }
     fun addBookmark() {
         val session = state.value.reader ?: return
         val anchor = pending?.locator ?: session.jump
@@ -146,10 +157,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             repository.reencode(session.book, encoding)
             val book = requireNotNull(repository.db.book(session.book.id))
             val engine = repository.engine(book)
+            val document = try { TxtPublication(engine) { viewModelScope.coroutineContext.ensureActive() } }
+                catch (e: Exception) { engine.close(); throw e }
             session.engine.close()
             pending = PendingPosition(book.id, book.current, book.furthest)
-            mutable.update { it.copy(reader = ReadingSession(book, engine, repository.db.bookmarks(book.id), book.current,
-                notice = "编码已更改，已恢复至附近文本位置。旧索引、进度和书签备份仍保留。")) }
+            mutable.update { it.copy(reader = TxtReadingSession(book, engine, repository.db.bookmarks(book.id), book.current,
+                notice = "编码已更改，已恢复至附近文本位置。旧索引、进度和书签备份仍保留。",document = document)) }
         }
     }
     private fun operation(label: String, work: () -> Unit) {

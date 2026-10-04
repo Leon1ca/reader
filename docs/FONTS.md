@@ -77,10 +77,35 @@ Readest 的 CJK 字体来源是 [cdnjs 固定 1.520.0 GB Screen CSS](https://cdn
 - 当前项目已将 `font-display` 对齐为 `swap`，实现角色说明在 `document.fonts.ready` 后恢复/报告位置；仍须设备测试验证字体加载后的重排行为，不以 fallback 首帧作成功证据。本地字体失败要报告，不悄悄给用户显示“已一致”。
 - 手机记录：1200×2670、physical density 520、system font_scale 0.9，WebView `com.google.android.webview 153.0.8010.36`。Readest 未提供生产调试 socket，未连接系统浏览器的调试端口。
 - 已检索固定 Readest Android 原生源代码，未找到 textZoom/fontScale 覆写；Cargo.lock 锁定 Wry 0.56.1，下载其原始 crate 并核对 lock SHA-256 `375becb4aded9913f736443cf88000c6311478db69814cc06070465e4cc44c98`，其 RustWebView Kotlin 也未设 textZoom。此证据支持保留平台默认缩放并实测；不应武断改成 100。
-- Readest 自己的同 tag 历史诊断记录报告 Android 系统 font_scale 会通过 WebView text zoom 影响 CSS 字体；这是上游测试记录，不能当本手机实测值。默认 16×1.25=20 是 **CSS 声明值**，不是已经证明的本手机 computed font-size。应测项目默认 textZoom、computedStyle 和截图，再与 Readest 比较，防止重复乘 0.9 或忽略它。
+- Readest 自己的同 tag 历史诊断记录报告 Android 系统 font_scale 会通过 WebView text zoom 影响 CSS 字体；这是上游测试记录，不能当本手机实测值。默认 16×1.25=20 是 **CSS 声明值**；本项目 I0 默认 TXT 后续实测 computed 为18px，见下节。Readest 自身生产正文仍未直接测到，防止将本项目结果外推。
 
 ## 6. 研究资源归档
 
 完整下载与证据目录：`/Users/leon1ca/Documents/Codex/2026-10-04/ji-y/work/readest-fonts`。含字体原件/许可、官方 release 元数据、Google 仓库 commit、npm integrity、原始 CSS、原始 Google 28 分包/LXGW GB 248 分包、只读轮廓验证脚本、报告与 SHA256SUMS。该目录的 npm 包/工具源码仅用于核验，不需要全部打入 APK。
 
 项目目前打包的字体/许可及原创声明哈希在 FONTS_MANIFEST.json 中；若实现角色继续改 `readest.css`，必须同步刷新 manifest 的 CSS hash。字体文件的任何替换都要重新做来源、许可、默认字形和设备回归核验。
+
+## 7. I0 真机字体证据（基线 237d478）
+
+父代理已在本项目 WebView 使用 CDP 检查实际渲染字体，记录经规划角色读取核对。证据目录 `work/` 位于研究工作区。以下是具体样本结论，不能外推至 Readest 生产运行或尚未接入的真实文章管线。
+
+| 样本 | 观察 | 结论边界 |
+| --- | --- | --- |
+| 默认 TXT，设置字号16 | 声明20px；computed18px、line-height28.8px、indent40px、上下margin20px，body44px16px；viewport369×576 CSSpx / DPR3.25 | 系统font_scale0.9影响文字；不能将实际字体尺寸与em距离简单等同 |
+| TXT的Arial优先链 | 被测中英文/ASCII数字实际为系统MiSans VF，isCustomFont=false；5个本地fontface均unloaded | 字体未命中，不是加载失败；不能称TXT默认使用Roboto/LXGW |
+| 临时文章字体链诊断 | 中文6glyph及全角数字10glyph命中本地LXGW；英文20glyph和ASCII数字10glyph命中本地Roboto-Regular，isCustomFont=true | 证明本地字体能加载和该配置可选中；是原创探针，不是文章端到端或Readest实际字体证据 |
+| 诊断时字号 | 设置18，对应声明22.5px、computed20.25px | 不是文章默认字号测量，不与默认TXT18px直接作视觉一致比较 |
+
+原始文件：`reader-device-txt-default.json`、`reader-device-typography.json`、`reader-device-article-glyph-probe.json`、`reader-device-article-profile-probe.json`。生产Readest未开放CDP，仍需成对截图/度量和各字符实际字形证据；严格parity未通过。I0构建及有MIUI启动辅助的7项设备测试结果另见 [VALIDATION.md](VALIDATION.md)，不作为新内核阶段的测试成绩。
+
+## 8. 新内核字体接入方式与证据边界
+
+真实paginator阶段保留同一批五个OFL字体和覆盖范围；字体声明由原生读取已打包的原创CSS，改写到session白名单URL后直接注入before样式。该改动解决外部`@import`尚未返回时FontFaceSet为空却过早Ready的竞态，不代表更换字体资产或复制Readest CSS。源码和针对性延迟字体测试已核，最终代码hash/构建/设备结果由冻结验证报告绑定。
+
+本文件第7节实机glyph结果只属于I0对应的TXT/临时文章探针。新内核真实运行和本地字体加载也不能替代Readest生产实际字形与全文排版对照；正文严格parity仍未通过。API29/旧WebView以及完整变量轴、shaping/fallback矩阵仍未验。
+
+## 9. 冻结新内核真实UI默认字形
+
+这次测量使用真实Article开发页面的默认规则，没有临时替换font-family；仅把原首段分为无样式span供CDP按字符组查询，之后恢复DOM。结果（`work/phase2-device-article-glyph-groups.json`）：中文2glyph及全角４５６的3glyph命中`LXGWWenKaiGBScreen`，English7glyph及123的3glyph命中`Roboto-Regular`，均isCustomFont=true。真实页面已Ready，host高608px、可见非零Range；默认computed18px/line-height28.8px。
+
+同一冻结版TXT页面高576px，原8KB书首0:0正常Ready，采样字形仍为系统MiSans VF、isCustomFont=false；未选择的本地fontface为unloaded不代表失败。完整证据为`phase2-device-article-typography-final.json`和`phase2-device-txt-typography-final.json`。这是本项目真实fixture/书籍路径证据，区别于第7节I0临时探针，仍不能证明Readest生产相同字形或完整排版一致。host/vendor/APK冻结hash见CORE_ARCHITECTURE，冻结版本全11项设备复验已通过。
