@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>组件 · 目录侧栏</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;family=Noto+Serif+SC:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<aside aria-label="目录与书签" style="width: {{w}}px; height: {{h}}px; box-sizing: border-box; background: #FBF8F2; box-shadow: inset -0.5px 0 0 rgba(43,38,32,0.12); display: flex; flex-direction: column; overflow: hidden; font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+  <div style="padding: 24px 12px 0 24px; display: flex; gap: 14px; align-items: center">
+    <div style="width: 48px; height: 64px; flex: none; border-radius: 2px 4px 4px 2px; background-color: #3E5C4E; background-image: linear-gradient(90deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.08) 2px, rgba(255,255,255,0.16) 3px, rgba(255,255,255,0) 7px); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 8px 14px -8px rgba(30,40,35,0.45); display: flex; justify-content: center; padding-top: 8px; box-sizing: border-box"><span style="writing-mode: vertical-rl; font-family: 'Noto Serif SC', serif; font-size: 11px; letter-spacing: 2px; color: #F2EAD8">呐喊</span></div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+      <div style="font-family: 'Noto Serif SC', serif; font-size: 17px; font-weight: 500; letter-spacing: 0.5px">呐喊</div>
+      <div style="font-size: 12px; font-weight: 300; color: #6B604F">鲁迅 · 共 15 篇 · 已读 23%</div>
+    </div>
+    <a href="{{closeHref}}" aria-label="收起目录" style="width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; text-decoration: none"><span style="width: 32px; height: 32px; border-radius: 16px; background: rgba(90,80,64,0.1); display: flex; align-items: center; justify-content: center; color: #4A4236"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.75" y="4.75" width="16.5" height="14.5" rx="2.5"></rect><path d="M9.5 4.75v14.5"></path><path d="M16 10l-2 2 2 2"></path></svg></span></a>
+  </div>
+
+  <div style="margin: 16px 24px 0; height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #F0EADF; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px">
+    <span style="border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(43,38,32,0.12); font-size: 13px; font-weight: 500; color: #1F5FCC; display: flex; align-items: center; justify-content: center">目录</span>
+    <span style="border-radius: 9px; font-size: 13px; font-weight: 400; color: #3B342A; display: flex; align-items: center; justify-content: center">书签 · 3</span>
+  </div>
+
+  <div style="padding: 18px 24px 6px; display: flex; justify-content: space-between; align-items: baseline">
+    <span style="font-size: 12px; font-weight: 400; letter-spacing: 1px; color: #6B604F">目录</span>
+    <span style="font-size: 12px; font-weight: 300; color: #6B604F">页码随排版变化</span>
+  </div>
+
+  <ol style="list-style: none; margin: 0; padding: 0 16px; display: flex; flex-direction: column">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="14">
+      <li style="{{r.style}}">
+        <span style="{{r.nameStyle}}">{{r.name}}</span>
+        <span style="display: flex; align-items: center; gap: 8px; flex: none">
+          <sc-if value="{{r.current}}" hint-placeholder-val="{{false}}"><span style="height: 20px; padding: 0 7px; border-radius: 10px; background: #1F5FCC; color: #FFFFFF; font-size: 11px; font-weight: 400; display: flex; align-items: center">剩 4 页</span></sc-if>
+          <span style="{{r.pageStyle}}">{{r.page}}</span>
+        </span>
+      </li>
+    </sc-for>
+  </ol>
+</aside>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"w":{"editor":"int","default":400},"h":{"editor":"int","default":800},"closeHref":{"editor":null,"default":"TabletReaderToolbar.dc.html"},"$preview":{"width":400,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const data = [
+      ['自序', 1, 'read'], ['狂人日记', 7, 'read'], ['孔乙己', 19, 'read'], ['药', 24, 'read'], ['明天', 34, 'read'],
+      ['一件小事', 42, 'read'], ['头发的故事', 45, 'read'], ['风波', 52, 'read'], ['故乡', 66, 'current'],
+      ['阿Q正传', 71, 'next'], ['第一章 序', 71, 'sub'], ['第二章 优胜记略', 76, 'sub'], ['第三章 续优胜记略', 80, 'sub'], ['第四章 恋爱的悲剧', 85, 'sub']
+    ];
+    const base = 'display: flex; align-items: center; justify-content: space-between; gap: 12px;';
+    const pg = 'font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;';
+    const rows = data.map(([name, page, kind]) => {
+      if (kind === 'current') return { name, page, current: true, style: base + ' height: 50px; padding: 0 12px; margin: 2px 0; border-radius: 12px; background: rgba(31,95,204,0.08);', nameStyle: 'font-size: 15px; font-weight: 500; color: #1F5FCC;', pageStyle: 'font-size: 12px; font-weight: 400; color: #1F5FCC; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;' };
+      if (kind === 'sub') return { name, page, current: false, style: base + ' height: 40px; padding: 0 8px 0 24px;', nameStyle: 'font-size: 14px; font-weight: 300; color: #5A5040;', pageStyle: pg };
+      return { name, page, current: false, style: base + ' height: 46px; padding: 0 8px;', nameStyle: 'font-size: 15px; font-weight: 400; color: ' + (kind === 'read' ? '#6B604F' : '#2B2620') + ';', pageStyle: pg };
+    });
+    return { rows, w: Number(this.props.w ?? 400), h: Number(this.props.h ?? 800), closeHref: this.props.closeHref ?? 'TabletReaderToolbar.dc.html' };
+  }
+}
+</script>
+</body>
+</html>

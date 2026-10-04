@@ -1,0 +1,666 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AddLink.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "稍后阅读 · 粘贴链接",
+      "w": 390,
+      "x": 0,
+      "y": 8650
+    },
+    "AppIcon.dc.html": {
+      "h": 560,
+      "radius": 20,
+      "title": "应用图标",
+      "w": 1200,
+      "x": 1880,
+      "y": 0
+    },
+    "Article.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "UI-07 文章阅读器",
+      "w": 390,
+      "x": 1410,
+      "y": 1244
+    },
+    "ArticleSummary.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "文章 · 仅保存摘要",
+      "w": 390,
+      "x": 0,
+      "y": 11138
+    },
+    "ArticleVersion.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "文章 · 原文已更新（保留旧版）",
+      "w": 390,
+      "x": 470,
+      "y": 11138
+    },
+    "Backup.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "备份与恢复",
+      "w": 390,
+      "x": 940,
+      "y": 9894
+    },
+    "BookDetail.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-02 图书详情",
+      "w": 390,
+      "x": 0,
+      "y": 7406
+    },
+    "Capture.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "UI-06 保存详情",
+      "w": 390,
+      "x": 1880,
+      "y": 1244
+    },
+    "ComicReader.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "UI-04 漫画阅读（右→左）",
+      "w": 390,
+      "x": 2820,
+      "y": 6162
+    },
+    "ContinueList.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "继续阅读 · 全部列表（含更多操作）",
+      "w": 390,
+      "x": 2350,
+      "y": 7406
+    },
+    "DeleteConfirm.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "删除图书确认",
+      "w": 390,
+      "x": 470,
+      "y": 7406
+    },
+    "FeedDetail.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-09 订阅源详情（限流状态）",
+      "w": 390,
+      "x": 2350,
+      "y": 8650
+    },
+    "FoldShelf.dc.html": {
+      "h": 830,
+      "is_interactive": true,
+      "radius": 24,
+      "title": "折叠屏展开 · 书架（约 720×830dp）",
+      "w": 720,
+      "x": 0,
+      "y": 2488
+    },
+    "ImportProgress.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "导入进度与逐项结果",
+      "w": 390,
+      "x": 940,
+      "y": 7406
+    },
+    "Later.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-05 稍后阅读",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "LaterEmpty.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "稍后阅读 · 空状态",
+      "w": 390,
+      "x": 1410,
+      "y": 8650
+    },
+    "Main.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-01 书架（继续阅读可左右滑动）",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "NeedsAction.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "需在网站中登录或验证",
+      "w": 390,
+      "x": 940,
+      "y": 8650
+    },
+    "OpmlResult.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "RSS · OPML 导入结果",
+      "w": 390,
+      "x": 2350,
+      "y": 11138
+    },
+    "PdfReader.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "UI-04 PDF 原页阅读",
+      "w": 390,
+      "x": 2350,
+      "y": 6162
+    },
+    "Reader.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-03 阅读器 · 沉浸状态（轻点呼出工具栏）",
+      "w": 390,
+      "x": 0,
+      "y": 1244
+    },
+    "ReaderBookmarks.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "阅读器 · 书签（含失效定位）",
+      "w": 390,
+      "x": 940,
+      "y": 6162
+    },
+    "ReaderDark.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "阅读器 · 夜间模式",
+      "w": 390,
+      "x": 1880,
+      "y": 6162
+    },
+    "ReaderError.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "阅读器 · 章节无法解析",
+      "w": 390,
+      "x": 1410,
+      "y": 11138
+    },
+    "ReaderPanel.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "阅读器 · 阅读面板（亮度/背景/翻页）",
+      "w": 390,
+      "x": 0,
+      "y": 6162
+    },
+    "ReaderRelocated.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "阅读器 · 已恢复到附近位置",
+      "w": 390,
+      "x": 940,
+      "y": 11138
+    },
+    "ReaderSearch.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "阅读器 · 书内搜索（P1）",
+      "w": 390,
+      "x": 1410,
+      "y": 6162
+    },
+    "ReaderSettings.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "UI-03 设置面板（字体排版）",
+      "w": 390,
+      "x": 940,
+      "y": 1244
+    },
+    "ReaderToc.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "阅读器 · 目录",
+      "w": 390,
+      "x": 470,
+      "y": 6162
+    },
+    "ReaderToolbar.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-03 阅读器 · 工具栏展开",
+      "w": 390,
+      "x": 470,
+      "y": 1244
+    },
+    "RestorePreview.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "恢复预览与确认",
+      "w": 390,
+      "x": 1410,
+      "y": 9894
+    },
+    "Rss.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-08 RSS",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "RssAdd.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "RSS · 添加订阅（自动发现）",
+      "w": 390,
+      "x": 1880,
+      "y": 8650
+    },
+    "RssEmpty.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "RSS · 空状态",
+      "w": 390,
+      "x": 2820,
+      "y": 8650
+    },
+    "RssNoUnread.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "RSS · 没有未读",
+      "w": 390,
+      "x": 3290,
+      "y": 11138
+    },
+    "Settings.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "UI-10 设置",
+      "w": 390,
+      "x": 0,
+      "y": 9894
+    },
+    "ShareChoose.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "系统分享 · 多个链接选择",
+      "w": 390,
+      "x": 470,
+      "y": 8650
+    },
+    "ShelfSearchEmpty.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "书架 · 搜索无结果",
+      "w": 390,
+      "x": 2820,
+      "y": 11138
+    },
+    "ShelfSelect.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "书架 · 批量选择",
+      "w": 390,
+      "x": 1410,
+      "y": 7406
+    },
+    "SiteSessions.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "网站登录会话",
+      "w": 390,
+      "x": 1880,
+      "y": 9894
+    },
+    "StateFoldEmpty.dc.html": {
+      "h": 830,
+      "radius": 24,
+      "title": "折叠屏 · 空书架",
+      "w": 720,
+      "x": 1740,
+      "y": 3718
+    },
+    "StateFoldOne.dc.html": {
+      "h": 830,
+      "radius": 24,
+      "title": "折叠屏 · 仅一本在读",
+      "w": 720,
+      "x": 940,
+      "y": 3718
+    },
+    "StatePhoneEmpty.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "手机 · 空书架",
+      "w": 390,
+      "x": 470,
+      "y": 3718
+    },
+    "StatePhoneNoRecent.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "手机 · 无阅读记录（模块隐藏）",
+      "w": 390,
+      "x": 0,
+      "y": 3718
+    },
+    "StatePhoneOne.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "手机 · 仅一本在读（固定宽度不拉伸）",
+      "w": 390,
+      "x": 1880,
+      "y": 7406
+    },
+    "StateTabletEmpty.dc.html": {
+      "h": 800,
+      "radius": 20,
+      "title": "平板 · 空书架",
+      "w": 1280,
+      "x": 2720,
+      "y": 4962
+    },
+    "StateTabletOne.dc.html": {
+      "h": 800,
+      "radius": 20,
+      "title": "平板 · 仅一本在读",
+      "w": 1280,
+      "x": 1360,
+      "y": 4962
+    },
+    "StateTabletTwo.dc.html": {
+      "h": 800,
+      "radius": 20,
+      "title": "平板 · 两本在读",
+      "w": 1280,
+      "x": 0,
+      "y": 4962
+    },
+    "Storage.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "radius": 28,
+      "title": "存储空间",
+      "w": 390,
+      "x": 470,
+      "y": 9894
+    },
+    "TabBar.dc.html": {
+      "h": 112,
+      "title": "组件 · 浮动胶囊导航栏",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "TabletReader.dc.html": {
+      "h": 800,
+      "radius": 20,
+      "title": "平板横屏 · 双页阅读（沉浸状态）",
+      "w": 1280,
+      "x": 2160,
+      "y": 2488
+    },
+    "TabletShelf.dc.html": {
+      "h": 800,
+      "is_interactive": true,
+      "radius": 20,
+      "title": "平板横屏 · 书架（继续阅读可左右滑动）",
+      "w": 1280,
+      "x": 800,
+      "y": 2488
+    },
+    "TxtEncoding.dc.html": {
+      "h": 844,
+      "radius": 28,
+      "title": "TXT · 编码与分章",
+      "w": 390,
+      "x": 1880,
+      "y": 11138
+    },
+    "UiSpec.dc.html": {
+      "h": 1880,
+      "radius": 20,
+      "title": "UI 规范（最终版基准）",
+      "w": 1280,
+      "x": 0,
+      "y": 17744
+    },
+    "ReaderFootnote.dc.html": {"x": 0, "y": 14870, "w": 390, "h": 844, "title": "阅读器 · 脚注气泡", "is_interactive": true, "radius": 28},
+    "ImageViewer.dc.html": {"x": 470, "y": 14870, "w": 390, "h": 844, "title": "图片查看（放大 200%）", "is_interactive": true, "radius": 28},
+    "ReaderFinish.dc.html": {"x": 940, "y": 14870, "w": 390, "h": 844, "title": "阅读器 · 读完确认", "is_interactive": true, "radius": 28},
+    "ArticleMore.dc.html": {"x": 1410, "y": 14870, "w": 390, "h": 844, "title": "文章 · 更多菜单", "is_interactive": true, "radius": 28},
+    "TabletReaderToolbar.dc.html": {"x": 0, "y": 16314, "w": 1280, "h": 800, "title": "平板阅读器 · 工具栏展开", "is_interactive": true, "radius": 20},
+    "TabletReaderToc.dc.html": {"x": 1360, "y": 16314, "w": 1280, "h": 800, "title": "平板阅读器 · 目录侧栏", "is_interactive": true, "radius": 20},
+    "FoldReaderToolbar.dc.html": {"x": 2720, "y": 16314, "w": 720, "h": 830, "title": "折叠屏阅读器 · 工具栏展开", "is_interactive": true, "radius": 24},
+    "FoldReaderToc.dc.html": {"x": 3520, "y": 16314, "w": 720, "h": 830, "title": "折叠屏阅读器 · 目录侧栏", "is_interactive": true, "radius": 24},
+    "TocSidebar.dc.html": {"x": 4320, "y": 16314, "w": 400, "h": 800, "title": "组件 · 目录侧栏"},
+    "CaptureTask.dc.html": {"x": 0, "y": 12382, "w": 390, "h": 844, "title": "保存任务 · 进行中（阶段与取消）", "is_interactive": true, "radius": 28},
+    "CaptureFailed.dc.html": {"x": 470, "y": 12382, "w": 390, "h": 844, "title": "保存任务 · 失败（原文不可访问）", "radius": 28},
+    "ArticleUnverified.dc.html": {"x": 940, "y": 12382, "w": 390, "h": 844, "title": "文章 · 全文完整性未确认", "radius": 28},
+    "ArticleUpdateFailed.dc.html": {"x": 1410, "y": 12382, "w": 390, "h": 844, "title": "文章 · 更新失败，旧版可读", "radius": 28},
+    "RssRefreshing.dc.html": {"x": 1880, "y": 12382, "w": 390, "h": 844, "title": "RSS · 正在刷新", "radius": 28},
+    "RssOffline.dc.html": {"x": 2350, "y": 12382, "w": 390, "h": 844, "title": "RSS · 网络不可用", "radius": 28},
+    "FeedManage.dc.html": {"x": 2820, "y": 12382, "w": 390, "h": 844, "title": "RSS · 订阅源管理（分组 / OPML）", "is_interactive": true, "radius": 28},
+    "FeedDeleteConfirm.dc.html": {"x": 3290, "y": 12382, "w": 390, "h": 844, "title": "RSS · 删除订阅确认", "is_interactive": true, "radius": 28},
+    "ReaderBookmarked.dc.html": {"x": 0, "y": 13626, "w": 390, "h": 844, "title": "阅读器 · 已添加书签", "radius": 28},
+    "StorageFull.dc.html": {"x": 470, "y": 13626, "w": 390, "h": 844, "title": "导入 · 空间不足", "is_interactive": true, "radius": 28},
+    "CategoryPicker.dc.html": {"x": 940, "y": 13626, "w": 390, "h": 844, "title": "书架 · 加入分类", "is_interactive": true, "radius": 28},
+    "CategoryManage.dc.html": {"x": 1410, "y": 13626, "w": 390, "h": 844, "title": "书架 · 管理分类", "is_interactive": true, "radius": 28},
+    "BatchDeleteConfirm.dc.html": {"x": 1880, "y": 13626, "w": 390, "h": 844, "title": "书架 · 批量删除确认", "is_interactive": true, "radius": 28}
+  },
+  "createdOnFiles": {
+    "at": "2026-10-04T02:40:00+08:00",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "row1": {
+      "kind": "title1",
+      "maxW": 3080,
+      "text": "主栏目 · 浮动胶囊导航 · 应用图标",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "row10": {
+      "kind": "title1",
+      "maxW": 3680,
+      "text": "补充状态：摘要、更新、定位恢复、解析失败、编码、OPML、无结果、无未读",
+      "w": 240,
+      "x": 0,
+      "y": 10838
+    },
+    "row11": {
+      "kind": "title1",
+      "maxW": 3680,
+      "text": "审核补充：保存任务、文章异常、RSS 刷新与订阅管理",
+      "w": 240,
+      "x": 0,
+      "y": 12082
+    },
+    "row12": {"kind": "title1", "maxW": 2270, "text": "审核补充：书签、空间不足、分类、批量删除", "x": 0, "y": 13326},
+    "row13": {"kind": "title1", "maxW": 1280, "text": "UI 规范", "x": 0, "y": 17444},
+    "row14": {"kind": "title1", "maxW": 1800, "text": "阅读交互：脚注、图片、读完、文章更多", "x": 0, "y": 14570},
+    "row15": {"kind": "title1", "maxW": 4720, "text": "平板与折叠屏阅读器：工具栏与目录侧栏", "x": 0, "y": 16014},
+    "row2": {
+      "kind": "title1",
+      "maxW": 2270,
+      "text": "阅读、文章与保存状态",
+      "w": 240,
+      "x": 0,
+      "y": 944
+    },
+    "row3": {
+      "kind": "title1",
+      "maxW": 3440,
+      "text": "平板与折叠屏适配",
+      "w": 240,
+      "x": 0,
+      "y": 2188
+    },
+    "row4": {
+      "kind": "title1",
+      "maxW": 2460,
+      "text": "继续阅读：无记录 / 一本 / 空书架",
+      "w": 240,
+      "x": 0,
+      "y": 3418
+    },
+    "row5": {
+      "kind": "title1",
+      "maxW": 4000,
+      "text": "平板：两本 / 一本 / 空书架",
+      "w": 240,
+      "x": 0,
+      "y": 4662
+    },
+    "row6": {
+      "kind": "title1",
+      "maxW": 3210,
+      "text": "阅读器：面板、目录、书签、搜索、夜间、PDF、漫画",
+      "w": 240,
+      "x": 0,
+      "y": 5862
+    },
+    "row7": {
+      "kind": "title1",
+      "maxW": 2740,
+      "text": "书架：详情、删除、导入、批量选择、继续阅读列表",
+      "w": 240,
+      "x": 0,
+      "y": 7106
+    },
+    "row8": {
+      "kind": "title1",
+      "maxW": 3210,
+      "text": "稍后阅读与 RSS：添加、异常、空状态",
+      "w": 240,
+      "x": 0,
+      "y": 8350
+    },
+    "row9": {
+      "kind": "title1",
+      "maxW": 2270,
+      "text": "设置与数据：存储、备份、恢复、会话",
+      "w": 240,
+      "x": 0,
+      "y": 9594
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Later.dc.html",
+    "Rss.dc.html",
+    "TabBar.dc.html",
+    "AppIcon.dc.html",
+    "Reader.dc.html",
+    "ReaderToolbar.dc.html",
+    "ReaderSettings.dc.html",
+    "Article.dc.html",
+    "Capture.dc.html",
+    "FoldShelf.dc.html",
+    "TabletShelf.dc.html",
+    "TabletReader.dc.html",
+    "StatePhoneNoRecent.dc.html",
+    "StatePhoneEmpty.dc.html",
+    "StateFoldOne.dc.html",
+    "StateFoldEmpty.dc.html",
+    "StateTabletTwo.dc.html",
+    "StateTabletOne.dc.html",
+    "StateTabletEmpty.dc.html",
+    "ReaderPanel.dc.html",
+    "ReaderToc.dc.html",
+    "ReaderBookmarks.dc.html",
+    "ReaderSearch.dc.html",
+    "ReaderDark.dc.html",
+    "PdfReader.dc.html",
+    "ComicReader.dc.html",
+    "BookDetail.dc.html",
+    "DeleteConfirm.dc.html",
+    "ImportProgress.dc.html",
+    "ShelfSelect.dc.html",
+    "StatePhoneOne.dc.html",
+    "ContinueList.dc.html",
+    "AddLink.dc.html",
+    "ShareChoose.dc.html",
+    "NeedsAction.dc.html",
+    "LaterEmpty.dc.html",
+    "RssAdd.dc.html",
+    "FeedDetail.dc.html",
+    "RssEmpty.dc.html",
+    "Settings.dc.html",
+    "Storage.dc.html",
+    "Backup.dc.html",
+    "RestorePreview.dc.html",
+    "SiteSessions.dc.html",
+    "ArticleSummary.dc.html",
+    "ArticleVersion.dc.html",
+    "ReaderRelocated.dc.html",
+    "ReaderError.dc.html",
+    "TxtEncoding.dc.html",
+    "OpmlResult.dc.html",
+    "ShelfSearchEmpty.dc.html",
+    "RssNoUnread.dc.html",
+    "CaptureTask.dc.html",
+    "CaptureFailed.dc.html",
+    "ArticleUnverified.dc.html",
+    "ArticleUpdateFailed.dc.html",
+    "RssRefreshing.dc.html",
+    "RssOffline.dc.html",
+    "FeedManage.dc.html",
+    "FeedDeleteConfirm.dc.html",
+    "ReaderBookmarked.dc.html",
+    "StorageFull.dc.html",
+    "CategoryPicker.dc.html",
+    "CategoryManage.dc.html",
+    "BatchDeleteConfirm.dc.html",
+    "ReaderFootnote.dc.html",
+    "ImageViewer.dc.html",
+    "ReaderFinish.dc.html",
+    "ArticleMore.dc.html",
+    "TabletReaderToolbar.dc.html",
+    "TabletReaderToc.dc.html",
+    "FoldReaderToolbar.dc.html",
+    "FoldReaderToc.dc.html",
+    "TocSidebar.dc.html",
+    "UiSpec.dc.html"
+  ],
+  "pages": [],
+  "title": "本地阅读器 UI 设计"
+}

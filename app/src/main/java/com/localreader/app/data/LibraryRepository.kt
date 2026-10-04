@@ -17,18 +17,26 @@ class LibraryRepository(private val context: Context) {
     val db = LibraryDb(context)
     private val library = File(context.filesDir, "library").apply { mkdirs() }
     private val staging = File(context.filesDir, "import-staging").apply { mkdirs() }
+    private val trash = File(context.filesDir, "trash").apply { mkdirs() }
+    @Volatile private var recovered = false
 
     /** Run before accepting operations. Metadata is committed only after a complete private directory exists. */
-    fun recover() {
+    @Synchronized fun recover() {
+        if (recovered) return // every ViewModel/Activity instance shares one repository; run once per process
         staging.listFiles()?.forEach { it.deleteRecursively() }
+        // Directories the database does not know are moved to trash, never deleted outright: a rebuilt (empty)
+        // database must not erase the user's books. Trash entries are named "<millis>-<id>" and purged after 7 days.
+        val now = System.currentTimeMillis()
+        trash.listFiles()?.filter { (it.name.substringBefore('-').toLongOrNull() ?: 0L) < now - TRASH_RETENTION_MS }?.forEach { it.deleteRecursively() }
         val books = db.books()
         val ids = books.map { it.id }.toSet()
-        library.listFiles()?.filter { it.name !in ids }?.forEach { it.deleteRecursively() }
+        library.listFiles()?.filter { it.name !in ids }?.forEach { it.renameTo(File(trash, "$now-${it.name}")) }
         books.forEach { book ->
             val keep = db.retainedVersions(book.id) + book.version
             File(File(library, book.id), "versions").listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
         }
         // Old index versions are retained as locator backups; active books are never auto-deleted.
+        recovered = true
     }
     fun directory(book: Book) = File(File(library, book.id), "versions/${book.version}")
     fun engine(book: Book) = TxtEngine(directory(book), book.version)
@@ -52,8 +60,9 @@ class LibraryRepository(private val context: Context) {
             require(extension == "txt" || mime == "text/plain" || (extension.isEmpty() && mime.startsWith("text/"))) { "当前增量只支持 TXT；EPUB、MOBI、PDF 和漫画尚未实现" }
             require((declaredSize ?: 1) <= TxtParser.MAX_BYTES) { "文件超过 128 MB 限制" }
             val available = StatFs(staging.absolutePath).availableBytes
-            // Worst case: one-byte blank lines each consume a 28-byte record plus decoded text and source.
-            val needed = (declaredSize?.coerceAtLeast(0) ?: 1024 * 1024) * 34 + 8 * 1024 * 1024
+            // Original copy + UTF-8 text (<= ~1.5x) + index; pathological blank-line files are stopped by the paragraph cap
+            // and by the streaming free-space checks, so a flat multiple is enough up front.
+            val needed = (declaredSize?.coerceAtLeast(0) ?: 1024 * 1024) * 4 + 8 * 1024 * 1024
             require(available > needed) { "空间不足：预计需 ${needed / 1048576} MB，可用 ${available / 1048576} MB" }
             val original = File(task, "original.txt")
             val digest = MessageDigest.getInstance("SHA-256")
@@ -66,7 +75,7 @@ class LibraryRepository(private val context: Context) {
                         val count = input.read(buffer); if (count < 0) break
                         copied += count
                         require(copied <= TxtParser.MAX_BYTES) { "文件超过 128 MB 限制" }
-                        if (copied % (1024 * 1024) < buffer.size) require(StatFs(staging.absolutePath).availableBytes > copied * 33 + 8 * 1024 * 1024) { "空间不足，导入已停止" }
+                        if (copied % (1024 * 1024) < buffer.size) require(StatFs(staging.absolutePath).availableBytes > copied * 4 + 8 * 1024 * 1024) { "空间不足，导入已停止" }
                         digest.update(buffer, 0, count); output.write(buffer, 0, count)
                     }
                     output.fd.sync()
@@ -76,13 +85,13 @@ class LibraryRepository(private val context: Context) {
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
             db.byHash(hash)?.let { return ImportResult(name, "重复内容，已保留原进度与书签", it.id) }
             val version = UUID.randomUUID().toString()
-            val check: () -> Unit = {
+            val guard: () -> Unit = {
                 if (cancelled()) throw ImportCancelled()
                 require(StatFs(staging.absolutePath).availableBytes > 8 * 1024 * 1024) { "空间不足，导入已停止" }
             }
-            check()
-            val detected = TxtParser.detect(original, check)
-            val parsed = TxtParser.build(original, File(task, "versions/$version"), detected, check)
+            guard()
+            val detected = TxtParser.detect(original, guard)
+            val parsed = TxtParser.build(original, File(task, "versions/$version"), detected, guard)
             if (cancelled()) throw ImportCancelled()
             val id = UUID.randomUUID().toString()
             val book = Book(id, name.substringBeforeLast('.', name), "作者未知", hash, copied, System.currentTimeMillis(), 0,
@@ -93,7 +102,12 @@ class LibraryRepository(private val context: Context) {
             committed = null
             return ImportResult(name, "导入成功 · ${parsed.encoding}", id)
         } catch (e: Exception) {
-            return ImportResult(name, if (e is ImportCancelled) "已取消" else e.message?.take(180) ?: "导入失败，请重新选择文件")
+            val reason = when (e) {
+                is ImportCancelled -> "已取消"
+                is java.nio.charset.CharacterCodingException -> "文本编码无法识别；请先用文本编辑器另存为 UTF-8 后重试"
+                else -> e.message?.take(180) ?: "导入失败，请重新选择文件"
+            }
+            return ImportResult(name, reason)
         } finally { task.deleteRecursively(); committed?.deleteRecursively() }
     }
 
@@ -116,4 +130,5 @@ class LibraryRepository(private val context: Context) {
             destination = null
         } finally { task.deleteRecursively(); destination?.deleteRecursively() }
     }
+    private companion object { const val TRASH_RETENTION_MS = 7L * 24 * 60 * 60 * 1000 }
 }

@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.test.platform.app.InstrumentationRegistry
 import com.localreader.app.core.Locator
+import com.localreader.app.data.Book
 import com.localreader.app.data.LibraryRepository
 import com.localreader.app.ui.ReaderViewModel
 import com.localreader.app.ui.WebReaderAdapter
@@ -213,6 +214,90 @@ class LibraryPersistenceTest {
             assertTrue(it.moveToFirst()); assertEquals("保留书签",it.getString(0)); assertEquals(0.5,it.getDouble(1),0.00001)
         }
     }
+    @Test fun upgradeUsesPaginatedColumnDefaultAndCreatesBackupTable() {
+        repository.db.close()
+        val path = context.getDatabasePath("library.db")
+        SQLiteDatabase.deleteDatabase(path)
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { old ->
+            old.execSQL("CREATE TABLE books(id TEXT PRIMARY KEY,title TEXT,current_offset INTEGER,characters INTEGER)")
+            old.execSQL("CREATE TABLE bookmarks(id INTEGER PRIMARY KEY,book_id TEXT,source_offset INTEGER,excerpt TEXT)")
+            old.execSQL("INSERT INTO books VALUES('existing','保留书籍',250,1000)")
+            old.version = 1
+        }
+        repository = LibraryRepository(context)
+        // The legacy fixture lacks NOT NULL columns, so only the column default is asserted here.
+        repository.db.writableDatabase.rawQuery("SELECT dflt_value FROM pragma_table_info('books') WHERE name='flow'", null).use {
+            assertTrue(it.moveToFirst()); assertEquals("'paginated'", it.getString(0))
+        }
+        repository.db.writableDatabase.rawQuery("SELECT COUNT(*) FROM locator_backups", null).use { assertTrue(it.moveToFirst()) }
+    }
+    private fun createLegacyDatabase(version: Int, withFlow: Boolean, withBackups: Boolean) {
+        repository.db.close()
+        val path = context.getDatabasePath("library.db")
+        SQLiteDatabase.deleteDatabase(path)
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { old ->
+            old.execSQL("""CREATE TABLE books(id TEXT PRIMARY KEY,title TEXT NOT NULL,author TEXT NOT NULL,
+                hash TEXT NOT NULL UNIQUE,bytes INTEGER NOT NULL,imported INTEGER NOT NULL,last_read INTEGER NOT NULL DEFAULT 0,
+                encoding TEXT NOT NULL,version TEXT NOT NULL,paragraphs INTEGER NOT NULL,characters INTEGER NOT NULL,
+                current_offset INTEGER NOT NULL DEFAULT 0,current_paragraph INTEGER NOT NULL DEFAULT 0,current_character INTEGER NOT NULL DEFAULT 0,
+                current_fraction REAL NOT NULL DEFAULT 0,furthest INTEGER NOT NULL DEFAULT 0,font_size REAL NOT NULL DEFAULT 16,theme TEXT NOT NULL DEFAULT 'white'""" +
+                (if (withFlow) ",flow TEXT NOT NULL DEFAULT 'paginated')" else ")"))
+            old.execSQL("""CREATE TABLE bookmarks(id INTEGER PRIMARY KEY AUTOINCREMENT,book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                version TEXT NOT NULL,source_offset INTEGER NOT NULL,paragraph INTEGER NOT NULL,character INTEGER NOT NULL,fallback_fraction REAL NOT NULL DEFAULT 0,
+                excerpt TEXT NOT NULL,created INTEGER NOT NULL,UNIQUE(book_id,version,source_offset))""")
+            if (withBackups) old.execSQL("""CREATE TABLE locator_backups(id INTEGER PRIMARY KEY AUTOINCREMENT,book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                version TEXT NOT NULL,payload TEXT NOT NULL,created INTEGER NOT NULL)""")
+            old.execSQL("INSERT INTO books(id,title,author,hash,bytes,imported,last_read,encoding,version,paragraphs,characters,current_offset,current_paragraph,current_character,current_fraction,furthest,font_size,theme) " +
+                "VALUES('legacy','旧书','作者','h1',10,1,5,'UTF-8','v-old',3,100,40,1,2,0.4,60,22,'dark')")
+            old.execSQL("INSERT INTO bookmarks(book_id,version,source_offset,paragraph,character,fallback_fraction,excerpt,created) VALUES('legacy','v-old',40,1,2,0.4,'旧书签',9)")
+            old.version = version
+        }
+    }
+    @Test fun realV2SchemaMigratesKeepingOldBooksScrolledAndNewBooksPaginated() {
+        createLegacyDatabase(version = 2, withFlow = false, withBackups = true)
+        repository = LibraryRepository(context)
+        val legacy = requireNotNull(repository.db.book("legacy"))
+        assertEquals("scrolled", legacy.flow); assertEquals(22f, legacy.fontSize, 0.01f); assertEquals("dark", legacy.theme)
+        assertEquals(40L, legacy.current.sourceOffset); assertEquals(60L, legacy.furthest); assertEquals(0.4, legacy.current.fallbackFraction, 0.0001)
+        assertEquals("旧书签", repository.db.bookmarks("legacy").single().excerpt)
+        val fresh = Book("fresh", "新书", "作者未知", "h2", 10, 2, 0, "UTF-8", "v-new", 1, 10, Locator.Text("v-new", 0, 0), 0, 16f, "white")
+        repository.db.insert(fresh)
+        assertEquals("paginated", requireNotNull(repository.db.book("fresh")).flow)
+        assertEquals("scrolled", requireNotNull(repository.db.book("legacy")).flow)
+    }
+    @Test fun versionThreeDatabaseMissingBackupTableIsRepairedOnOpen() {
+        createLegacyDatabase(version = 3, withFlow = true, withBackups = false)
+        repository = LibraryRepository(context)
+        assertTrue(repository.db.retainedVersions("legacy").isEmpty()) // would throw "no such table" without the repair
+        repository.recover()
+        assertNotNull(repository.db.book("legacy"))
+    }
+    @Test fun recoverMovesUnknownDirectoriesToTrashAndRunsOncePerRepository() {
+        val orphan = File(context.filesDir, "library/lost-book").apply { mkdirs(); File(this, "original.txt").writeText("keep me") }
+        repository.db.close(); repository = LibraryRepository(context)
+        repository.recover()
+        assertFalse(orphan.exists())
+        val moved = File(context.filesDir, "trash").listFiles().orEmpty().single { it.name.endsWith("-lost-book") }
+        assertEquals("keep me", File(moved, "original.txt").readText())
+        File(context.filesDir, "library/second-orphan").mkdirs()
+        repository.recover() // second call in the same process must be a no-op
+        assertTrue(File(context.filesDir, "library/second-orphan").exists())
+        File(context.filesDir, "library/second-orphan").deleteRecursively(); moved.deleteRecursively()
+    }
+    @Test fun reencodingRescalesPositionWhenCharacterCountChanges() {
+        // "中" is 3 bytes in UTF-8 but 2 in GB18030; decoding UTF-8 bytes as GB18030 changes the character count.
+        val text = "中".repeat(400)
+        val id = requireNotNull(repository.import(fixture(text.toByteArray())).bookId)
+        val old = requireNotNull(repository.db.book(id))
+        repository.db.savePosition(id, Locator.Text(old.version, 200, 0, 200, 0.5))
+        val before = requireNotNull(repository.db.book(id))
+        repository.reencode(before, "ISO-8859-1")
+        val after = requireNotNull(repository.db.book(id))
+        assertNotEquals(old.characters, after.characters)
+        val expected = (200 * (after.characters.toDouble() / old.characters)).toLong()
+        assertEquals(expected.toDouble(), after.current.sourceOffset.toDouble(), 1.0)
+        assertTrue(after.current.sourceOffset <= after.characters - 1)
+    }
     @Test fun realWebViewLoadsLocalHtmlFontsAndPositionBridgeAndDestroysDeadRenderer() {
         val payload = "第一章 安全样本\n中文 English 123４５６ <script>window.attacked=true</script>\n" + "正文段落。\n".repeat(80)
         val book = requireNotNull(repository.db.book(requireNotNull(repository.import(fixture(payload.toByteArray())).bookId)))
@@ -220,6 +305,7 @@ class LibraryPersistenceTest {
         val publication = TxtPublication(engine)
         val position = AtomicReference<Locator.Text?>()
         val error = AtomicReference<String?>()
+        val crash = AtomicReference<RendererEvent.Crashed?>()
         lateinit var adapter: WebReaderAdapter
         var adapterCreated = false
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -229,6 +315,7 @@ class LibraryPersistenceTest {
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
                         is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
                         is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Crashed -> { crash.set(event); error.set(event.message) }
                         else -> Unit
                     } }
                     adapterCreated = true
@@ -253,7 +340,14 @@ class LibraryPersistenceTest {
                 evaluate("ReaderEvents.postMessage(JSON.stringify({protocol:1,sessionId:'wrong-session',revision:'wrong',layoutEpoch:1,commandId:1,type:'relocated',target:{section:0,blockId:'-1',character:-1}}));void 0")
                 Thread.sleep(150); assertEquals(before, position.get())
                 scenario.onActivity {
-                    assertTrue(adapter.view.webViewClient.onRenderProcessGone(adapter.view, null))
+                    val renderer = requireNotNull(adapter.view.webViewRenderProcess) {
+                        "The loaded WebView must expose its isolated renderer process"
+                    }
+                    assertTrue("The platform must accept renderer termination", renderer.terminate())
+                }
+                waitUntil(16000) { crash.get() != null }
+                assertTrue(crash.get()?.message?.contains("已停止") == true)
+                scenario.onActivity {
                     assertNull(adapter.view.parent)
                     adapter.render(publication, book.current, 1, ReaderRules(fontSize = 20f,theme = "dark")) // invalidated view must never be reused
                     adapter.destroy() // idempotent cleanup
@@ -276,6 +370,7 @@ class LibraryPersistenceTest {
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
                         is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
                         is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Crashed -> error.set(event.message)
                         else -> Unit
                     } }
                     val parent = android.widget.FrameLayout(activity)
@@ -314,6 +409,7 @@ class LibraryPersistenceTest {
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
                         is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
                         is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
                         RendererEvent.Loading -> ready.set(false)
                     } }
@@ -357,6 +453,7 @@ class LibraryPersistenceTest {
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
                         is RendererEvent.Position -> position.set(event.locator)
                         is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Crashed -> error.set(event.message)
                         else -> Unit
                     } }
                     activity.setContentView(adapter.view)
@@ -403,6 +500,7 @@ class LibraryPersistenceTest {
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
                         is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
                         is RendererEvent.Error -> error.set(event.message)
+                        is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
                         RendererEvent.Loading -> ready.set(false)
                     } }

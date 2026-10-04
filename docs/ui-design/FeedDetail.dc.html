@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RSS · 订阅源详情</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 8px 0; box-sizing: border-box; display: flex; align-items: center; gap: 4px">
+    <a href="Rss.dc.html" aria-label="返回" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #1A1B1E"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></a>
+    <span style="font-size: 16px; font-weight: 500">订阅源</span>
+  </div>
+
+  <div style="padding: 0 20px; display: flex; align-items: center; gap: 14px">
+    <span style="width: 52px; height: 52px; border-radius: 14px; background: #8C2F2B; color: #FFFFFF; font-size: 20px; font-weight: 500; display: flex; align-items: center; justify-content: center">城</span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+      <div style="font-size: 18px; font-weight: 500">[城市晚报]</div>
+      <div style="font-size: 12px; font-weight: 300; color: #63666C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[源地址]/rss.xml</div>
+    </div>
+  </div>
+
+  <div style="margin: 16px 20px 0; padding: 12px 14px; border-radius: 14px; background: #FBF1E4; display: flex; flex-direction: column; gap: 4px">
+    <span style="font-size: 13px; font-weight: 500; color: #8A4600">来源暂时限制请求，稍后自动重试</span>
+    <span style="font-size: 12px; font-weight: 300; color: #8A4600">最后成功更新：昨天 21:30 · 按服务端要求约 2 小时后重试</span>
+  </div>
+
+  <div style="margin: 16px 20px 0; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <span style="font-size: 12px; font-weight: 300; color: #63666C; padding: 0 2px">全文策略</span>
+      <div style="height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #ECECE8; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px">
+        <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(20,22,26,0.1); font: inherit; font-size: 13px; font-weight: 500; color: #1F5FCC">自动获取全文</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">仅 Feed 内容</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">手动</button>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <span style="font-size: 12px; font-weight: 300; color: #63666C; padding: 0 2px">图片下载</span>
+      <div style="height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #ECECE8; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px">
+        <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(20,22,26,0.1); font: inherit; font-size: 13px; font-weight: 500; color: #1F5FCC">仅 Wi-Fi</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">任何网络</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin: 16px 20px 0; border-radius: 16px; background: #FFFFFF">
+    <div style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #ECECE8"><span style="font-size: 15px; font-weight: 400">名称</span><span style="font-size: 14px; font-weight: 300; color: #63666C">[城市晚报] ›</span></div>
+    <div style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #ECECE8"><span style="font-size: 15px; font-weight: 400">分组</span><span style="font-size: 14px; font-weight: 300; color: #63666C">国际 ›</span></div>
+    <div style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between"><span style="font-size: 15px; font-weight: 400">网站</span><span style="font-size: 14px; font-weight: 300; color: #63666C">[机构官网] ›</span></div>
+  </div>
+
+  <div style="margin: 12px 20px 0; border-radius: 16px; background: #FFFFFF">
+    <button type="button" style="width: 100%; height: 50px; border: none; border-bottom: 0.5px solid #ECECE8; background: transparent; font: inherit; font-size: 15px; font-weight: 400; color: #1F5FCC">暂停更新</button>
+    <a href="FeedDeleteConfirm.dc.html" style="width: 100%; height: 50px; font-size: 15px; font-weight: 400; color: #C23B2E; text-decoration: none; display: flex; align-items: center; justify-content: center">删除订阅</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

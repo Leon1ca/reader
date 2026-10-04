@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>书架 · 搜索无结果</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="padding: 38px 16px 0 20px; display: flex; align-items: center; gap: 10px">
+    <label style="flex: 1; display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border-radius: 12px; background: rgba(20,22,26,0.05); color: #63666C; font-size: 15px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.75" cy="10.75" r="6.25"></circle><path d="M15.4 15.4l4.6 4.6"></path></svg>
+      <input type="search" value="百年孤独" aria-label="搜索书名、作者" style="flex: 1; border: none; background: transparent; font: inherit; font-weight: 400; color: #1A1B1E; outline: none; min-width: 0">
+    </label>
+    <a href="Main.dc.html" style="font-size: 15px; font-weight: 400; color: #1F5FCC; text-decoration: none; height: 44px; display: flex; align-items: center">取消</a>
+  </div>
+
+  <div style="position: absolute; left: 40px; right: 40px; top: 220px; display: flex; flex-direction: column; align-items: center; text-align: center">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#B8B3A7" stroke-width="0.9" stroke-linecap="round" aria-hidden="true"><circle cx="10.75" cy="10.75" r="6.25"></circle><path d="M15.4 15.4l4.6 4.6"></path><path d="M8.5 10.75h4.5"></path></svg>
+    <h2 style="margin: 20px 0 0; font-size: 17px; font-weight: 500">书架中没有“百年孤独”</h2>
+    <p style="margin: 8px 0 0; font-size: 13px; font-weight: 300; line-height: 1.7; color: #63666C">当前仅搜索书名和作者。检查是否有错别字，或导入这本书。</p>
+    <a href="ImportProgress.dc.html" style="margin-top: 22px; height: 44px; padding: 0 24px; border-radius: 22px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1F5FCC; font-size: 14px; font-weight: 400; text-decoration: none; display: flex; align-items: center">导入图书</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>UI 规范</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+</style>
+</helmet>
+<div style="width: 1280px; height: 1880px; box-sizing: border-box; padding: 56px 64px; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 40px; row-gap: 36px; align-content: start">
+
+  <div style="grid-column: span 3; display: flex; align-items: baseline; gap: 16px">
+    <h1 style="margin: 0; font-size: 32px; font-weight: 500; letter-spacing: 1px">UI 规范</h1>
+    <span style="font-size: 14px; font-weight: 300; color: #63666C">以下数值为本设计稿的统一基准，单位 dp / sp</span>
+  </div>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 17px; font-weight: 500">颜色</h2>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 6px 16px">
+      <sc-for list="{{colors}}" as="c" hint-placeholder-count="12">
+        <div style="height: 40px; display: flex; align-items: center; gap: 12px; border-bottom: 0.5px solid #F0F0EC">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: {{c.hex}}; box-shadow: inset 0 0 0 0.5px rgba(20,22,26,0.15); flex: none"></span>
+          <span style="flex: 1; font-size: 13px; font-weight: 400">{{c.name}}</span>
+          <span style="font-size: 12px; font-weight: 300; color: #63666C; font-variant-numeric: tabular-nums">{{c.hex}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 17px; font-weight: 500">字体</h2>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 6px 16px">
+      <sc-for list="{{type}}" as="t" hint-placeholder-count="9">
+        <div style="min-height: 44px; display: flex; align-items: center; gap: 12px; border-bottom: 0.5px solid #F0F0EC">
+          <span style="flex: 1; {{t.style}}">{{t.sample}}</span>
+          <span style="font-size: 12px; font-weight: 300; color: #63666C; white-space: nowrap">{{t.spec}}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C">界面：思源黑体（Noto Sans SC）· 正文与书名：思源宋体（Noto Serif SC）。最重只用 500，不使用粗体。</div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 17px; font-weight: 500">圆角与尺寸</h2>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 6px 16px">
+      <sc-for list="{{sizes}}" as="s" hint-placeholder-count="12">
+        <div style="height: 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #F0F0EC">
+          <span style="font-size: 13px; font-weight: 400">{{s.name}}</span>
+          <span style="font-size: 12px; font-weight: 300; color: #63666C">{{s.value}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="grid-column: span 3; display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 17px; font-weight: 500">组件与图标</h2>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 20px; display: flex; flex-wrap: wrap; gap: 28px; align-items: center">
+      <button type="button" style="height: 48px; padding: 0 28px; border-radius: 24px; border: none; background: #1F5FCC; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 400">主按钮 48</button>
+      <button type="button" style="height: 44px; padding: 0 22px; border-radius: 22px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1F5FCC; font: inherit; font-size: 14px; font-weight: 400">次按钮 44</button>
+      <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: none; background: #24262A; color: #FFFFFF; font: inherit; font-size: 13px; font-weight: 400">筛选 30</button>
+      <div style="width: 220px; height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #ECECE8; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px">
+        <span style="border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(20,22,26,0.1); font-size: 13px; font-weight: 500; color: #1F5FCC; display: flex; align-items: center; justify-content: center">分段 40</span>
+        <span style="font-size: 13px; color: #44474D; display: flex; align-items: center; justify-content: center">选项</span>
+      </div>
+      <span style="width: 36px; height: 36px; border-radius: 18px; background: rgba(20,22,26,0.05); display: flex; align-items: center; justify-content: center; color: #2A2C30"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5.75" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="18.25" cy="12" r="1.5"></circle></svg></span>
+      <span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: #1E6B45"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 12.2l2.4 2.3 4.6-4.8"></path></svg>完成</span>
+      <span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: #8A4600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>部分 / 需处理</span>
+      <span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: #63666C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>等待</span>
+      <span style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C; flex: 1; min-width: 260px">图标：24 栅格，线宽 1.5（导航/工具栏，选中改实心）· 18 尺寸 1.6（顶部圆钮）· 14 尺寸 1.8（状态）。状态一律“图标 + 文字”，不只靠颜色。</span>
+    </div>
+  </section>
+
+  <section style="grid-column: span 3; display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 17px; font-weight: 500">层级、封面与动效</h2>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 24px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; align-items: start">
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <div style="height: 72px; border-radius: 18px; background: #FFFFFF; box-shadow: 0 0 0 0.5px rgba(20,22,26,0.05), 0 1px 2px rgba(20,22,26,0.04), 0 8px 24px -10px rgba(20,22,26,0.16)"></div>
+        <span style="font-size: 13px; font-weight: 500">E1 · 内容卡片</span>
+        <span style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C">0.5px 描边 + 2px 近影 + 24px 柔影（-10 收缩）。用于继续阅读、文章卡片。</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <div style="height: 62px; border-radius: 31px; background: rgba(255,255,255,0.9); box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.8), 0 0 0 0.5px rgba(20,22,26,0.06), 0 14px 32px -12px rgba(20,22,26,0.28)"></div>
+        <span style="font-size: 13px; font-weight: 500">E2 · 悬浮胶囊</span>
+        <span style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C">毛玻璃 24px + 饱和度 1.4–1.6；顶部 0.5px 高光。选中项为浅蓝渐变药丸。</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <div style="height: 72px; border-radius: 16px; background: #FFFFFF; box-shadow: 0 0 0 0.5px rgba(20,22,26,0.08), 0 18px 40px -10px rgba(20,22,26,0.3)"></div>
+        <span style="font-size: 13px; font-weight: 500">E3 · 菜单 / 弹层</span>
+        <span style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C">更多菜单、脚注气泡、读完卡片。背景遮罩 8–32% 不透明度。</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px; align-items: flex-start">
+        <div style="width: 54px; height: 72px; border-radius: 2px 5px 5px 2px; background-color: #8C2F2B; background-image: linear-gradient(90deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.08) 2px, rgba(255,255,255,0.16) 3px, rgba(255,255,255,0) 7px, rgba(0,0,0,0.05) 9px, rgba(0,0,0,0) 14px), linear-gradient(160deg, rgba(255,255,255,0.12), rgba(255,255,255,0) 40%, rgba(0,0,0,0.08)); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 10px 18px -8px rgba(30,25,20,0.38); position: relative"><span style="position: absolute; inset: 5px 5px 5px 8px; border: 0.5px solid rgba(246,230,207,0.4)"></span></div>
+        <span style="font-size: 13px; font-weight: 500">封面</span>
+        <span style="font-size: 12px; font-weight: 300; line-height: 1.7; color: #63666C">3:4；书脊暗线 + 高光 + 斜向光泽；无封面时用书名生成占位，古籍类加细边框。</span>
+      </div>
+    </div>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 0 20px">
+      <sc-for list="{{motion}}" as="m" hint-placeholder-count="5">
+        <div style="min-height: 46px; display: flex; align-items: center; gap: 16px; {{m.border}}">
+          <span style="width: 180px; flex: none; font-size: 13px; font-weight: 500">{{m.name}}</span>
+          <span style="flex: 1; font-size: 13px; font-weight: 300; color: #44474D">{{m.desc}}</span>
+          <span style="font-size: 12px; font-weight: 300; color: #63666C; font-variant-numeric: tabular-nums">{{m.dur}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1880}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const colors = [
+      ['主色', '#1F5FCC'], ['主色浅底', '#E9F0FC'], ['文字 · 主要', '#1A1B1E'], ['文字 · 正文/控件', '#44474D'],
+      ['文字 · 次要', '#63666C'], ['页面背景', '#F7F7F5'], ['卡片', '#FFFFFF'], ['分段/输入底', '#ECECE8'],
+      ['成功', '#1E6B45'], ['提醒', '#8A4600'], ['提醒浅底', '#FBF1E4'], ['危险', '#C23B2E'],
+      ['危险浅底', '#FBEAE7'], ['中性浅底', '#EDEDEA'],
+      ['阅读 · 纸色', '#F3ECDF'], ['阅读 · 面板', '#FBF8F2'], ['阅读 · 控件底', '#F0EADF'],
+      ['阅读 · 正文', '#2B2620'], ['阅读 · 页眉页码', '#5A5040'], ['阅读 · 次要', '#6B604F'],
+      ['夜间 · 背景', '#1A1917'], ['夜间 · 正文', '#B9B2A6']
+    ].map(([name, hex]) => ({ name, hex }));
+    const type = [
+      ['页面标题', 'font-size: 26px; font-weight: 500;', '26 / 500'],
+      ['文章 / 详情标题', "font-family: 'Noto Serif SC', serif; font-size: 22px; font-weight: 500;", '宋 22–24 / 500'],
+      ['二级页 / 弹层标题', 'font-size: 16px; font-weight: 500;', '16–17 / 500'],
+      ['列表值 / 次按钮', 'font-size: 14px; font-weight: 400;', '14 / 400'],
+      ['封面元信息', 'font-size: 11px; font-weight: 300; color: #63666C;', '11 / 300'],
+      ['区块标题', 'font-size: 17px; font-weight: 500;', '17 / 500'],
+      ['卡片标题', 'font-size: 15px; font-weight: 500;', '15 / 500'],
+      ['列表项', 'font-size: 15px; font-weight: 400;', '15 / 400'],
+      ['正文辅助', 'font-size: 13px; font-weight: 300;', '13 / 300'],
+      ['说明文字', 'font-size: 12px; font-weight: 300; color: #63666C;', '12 / 300'],
+      ['导航标签', 'font-size: 10px; font-weight: 400;', '10 / 400'],
+      ['阅读正文', "font-family: 'Noto Serif SC', serif; font-size: 18px; line-height: 1.75;", '宋 18 / 1.75'],
+      ['阅读页眉页码', 'font-size: 13px; color: #5A5040; letter-spacing: 1px;', '13 · 12']
+    ].map(([sample, style, spec]) => ({ sample, style, spec }));
+    const sizes = [
+      ['底部弹层', '圆角 24'], ['内容卡片', '圆角 18'], ['列表分组', '圆角 16 · 行高 50'], ['提示条', '圆角 14 · 高 40'],
+      ['分段控件', '高 40 · 圆角 12 / 9'], ['主按钮（底部）', '高 48 · 圆角 24'], ['紧凑按钮（空状态/卡片内）', '高 44 · 圆角 22'], ['行内按钮 / 筛选', '高 30 · 圆角 15'],
+      ['顶部圆钮', '36 · 图标 18'], ['阅读器圆钮', '30 · 图标 12 · 热区 44'], ['返回箭头', '22 · 线宽 1.6 · 热区 44'], ['悬浮导航', '高 62 · 圆角 31 · 距底 22'],
+      ['最小触控热区', '48（视觉可小于热区）'], ['封面比例', '3 : 4'], ['页面边距', '手机 20 · 折叠 32 · 平板 48']
+    ].map(([name, value]) => ({ name, value }));
+    const mraw = [
+      ['按压反馈', '卡片与按钮缩放至 0.97，背景加深 4%', '100ms'],
+      ['工具栏显隐', '顶部文字交叉淡入；底部胶囊上移 12dp 并淡入', '220ms'],
+      ['底部弹层 / 全屏卡片', '自下而上，减速曲线；遮罩同步淡入', '280ms'],
+      ['继续阅读横滑', '按卡片吸附，露出下一张约 40dp 提示可滑动', '—'],
+      ['状态变化', '保存进度条平滑推进；完成时图标由圈转勾', '200ms']
+    ];
+    const motion = mraw.map((r, i) => ({ name: r[0], desc: r[1], dur: r[2], border: i < mraw.length - 1 ? 'border-bottom: 0.5px solid #F0F0EC;' : '' }));
+    return { colors, type, sizes, motion };
+  }
+}
+</script>
+</body>
+</html>

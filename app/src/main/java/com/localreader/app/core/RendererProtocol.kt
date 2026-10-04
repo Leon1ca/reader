@@ -11,9 +11,12 @@ interface RendererBackend {
 }
 sealed interface RendererEvent {
     data object Loading : RendererEvent
-    data class Position(val locator: Locator) : RendererEvent
+    /** reason: "scroll" / "page" are user navigation; "anchor" is a programmatic restore or jump. */
+    data class Position(val locator: Locator, val reason: String = "scroll") : RendererEvent
     data class Ready(val profileId: String, val activeViews: Int, val nearby: Boolean = false) : RendererEvent
     data class Error(val message: String) : RendererEvent
+    /** The system renderer process died; the host may rebuild the renderer from the last known locator. */
+    data class Crashed(val message: String) : RendererEvent
 }
 data class RendererIdentity(val sessionId: String, val revision: String, val layoutEpoch: Int, val commandId: Int)
 

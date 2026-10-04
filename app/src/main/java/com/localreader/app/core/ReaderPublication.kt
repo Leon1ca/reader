@@ -69,7 +69,6 @@ class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit =
         val offset = block.sourceOffset + character
         return Locator.Text(revision, offset, paragraph, character, offset.toDouble() / source.index.totalCharacters.coerceAtLeast(1))
     }
-    companion object { const val BLOCKS_PER_SECTION = 64 }
 }
 
 /** An authored, inert article fixture. This is not a web import/clip/RSS pipeline. */

@@ -44,7 +44,13 @@ class TxtEngineTest {
         }
     }
     @Test fun corruptedAndBinaryDocumentsAreRejected() {
-        listOf(byteArrayOf(), byteArrayOf(0, 1, 2, 3, 0, 65), byteArrayOf(-1), "%PDF-1.7\u0000binary".toByteArray()).forEach { bytes ->
+        listOf(
+            byteArrayOf(),
+            byteArrayOf(0, 1, 2, 3, 0, 65),
+            // 0xFF rejects multibyte decoders; Latin-1 produces mostly C1 controls.
+            ByteArray(64) { if (it == 0) 0xFF.toByte() else (0x80 + it % 32).toByte() },
+            "%PDF-1.7\u0000binary".toByteArray()
+        ).forEach { bytes ->
             val source = temporary.newFile().apply { writeBytes(bytes) }
             assertThrows(Exception::class.java) { TxtParser.build(source, temporary.newFolder()) }
         }
@@ -58,6 +64,75 @@ class TxtEngineTest {
             val halfway = engine.resolve(Locator.Text("old-version", Long.MAX_VALUE, 999999, fallbackFraction = 0.5))
             assertTrue(halfway.nearby); assertEquals(((engine.index.totalCharacters - 1) / 2 / TxtParser.MAX_BLOCK).toInt(), halfway.paragraph)
             assertThrows(IllegalArgumentException::class.java) { engine.resolve(Locator.Page("v", 2, 0.0, 0.0)) }
+        }
+    }
+    @Test fun undecodableBytesFallBackThroughLegacyEncodingsInsteadOfFailing() {
+        // Truncated multi-byte lead byte is invalid UTF-8 and also invalid GB18030/Big5/Shift_JIS; Latin-1 always decodes.
+        val source = temporary.newFile().apply { writeBytes("caf".toByteArray() + byteArrayOf(0xE9.toByte())) }
+        assertEquals("ISO-8859-1", TxtParser.detect(source))
+        val gb = temporary.newFile().apply { writeBytes("第一章 开始\n你好".toByteArray(Charset.forName("GB18030"))) }
+        assertEquals("GB18030", TxtParser.detect(gb))
+        TxtParser.build(source, temporary.newFolder(), "ISO-8859-1")
+        // A lone 0xFF is a legal Latin-1 character, not corruption; only control-heavy data is rejected.
+        val single = temporary.newFile().apply { writeBytes(byteArrayOf(-1)) }
+        assertEquals("ISO-8859-1", TxtParser.detect(single))
+        TxtParser.build(single, temporary.newFolder(), "ISO-8859-1")
+    }
+    @Test fun carriageReturnAtTheBlockLimitStillStartsANewParagraph() {
+        listOf(2046, 2047, 2048).forEach { n ->
+            listOf("\r" to 1, "\r\n" to 2).forEach { (eol, width) ->
+                val text = "a".repeat(n) + eol + "第二章 回来\n正文"
+                parse(text.toByteArray()).use { engine ->
+                    val heading = (0 until engine.index.paragraphs).map(engine::block).single { it.text == "第二章 回来" }
+                    assertFalse("n=$n eol=${eol.length}", heading.continuation)
+                    assertTrue("n=$n eol=${eol.length}", heading.heading)
+                    assertEquals((n + width).toLong(), heading.sourceOffset)
+                    assertEquals(text.length.toLong(), engine.index.totalCharacters)
+                    if (n < 2048) {
+                        val html = TxtPublication(engine).section(0).html
+                        assertTrue("n=$n eol=${eol.length}", Regex("</span></p><h2[^>]*><span[^>]*>第二章 回来").containsMatchIn(html))
+                    }
+                }
+            }
+        }
+    }
+    @Test fun anchorsFromAnotherIndexVersionResolveByFractionNotByStaleOffset() {
+        parse("正文。".repeat(30000).toByteArray()).use { engine ->
+            val stale = Locator.Text("old-version", 0, 0, 0, fallbackFraction = 0.5)
+            val resolved = engine.resolve(stale)
+            assertTrue(resolved.nearby)
+            assertEquals(((engine.index.totalCharacters - 1) / 2 / TxtParser.MAX_BLOCK).toInt(), resolved.paragraph)
+            // The same offset under the current version is trusted exactly.
+            assertEquals(0, engine.resolve(Locator.Text("version-a", 0, 0, 0, fallbackFraction = 0.5)).paragraph)
+        }
+    }
+    @Test fun loneCarriageReturnsSplitLinesAndKeepOffsetsConsistent() {
+        val text = "第一章 开始\r正文一\r第二章 回来\r正文二\r\n结尾"
+        parse(text.toByteArray()).use { engine ->
+            assertEquals(5, engine.index.paragraphs)
+            assertEquals(listOf("第一章 开始", "正文一", "第二章 回来", "正文二", "结尾"), (0 until 5).map { engine.block(it).text })
+            assertEquals(2, engine.index.chapters.size)
+            assertEquals(text.length.toLong(), engine.index.totalCharacters)
+            var expected = 0L
+            (0 until 5).forEach { assertEquals(expected, engine.block(it).sourceOffset); expected += listOf(7, 4, 7, 5, 2)[it] }
+        }
+    }
+    @Test fun whitespaceOnlyFilesAreRejected() {
+        listOf("\n", "\n\n  \r\n\t", "\u3000\u3000\n").forEach { content ->
+            val source = temporary.newFile().apply { writeText(content) }
+            assertThrows(IllegalArgumentException::class.java) { TxtParser.build(source, temporary.newFolder()) }
+        }
+    }
+    @Test fun headingRulesRejectSentencesAndBareChapterWords() {
+        val text = "第一节课我就迟到了。\nChapter and verse\n正文。\nChapter 3 The Road\n第三章 归来\n正文。"
+        parse(text.toByteArray()).use { engine ->
+            assertEquals(listOf("Chapter 3 The Road", "第三章 归来"), engine.index.chapters.map { it.title })
+        }
+    }
+    @Test fun aSingleHeadingFallsBackToSectionsInsteadOfAOneEntryContents() {
+        parse(("序言\n" + "正文。".repeat(30000)).toByteArray()).use { engine ->
+            assertTrue(engine.index.chapters.size >= 2)
+            assertTrue(engine.index.chapters.first().title.startsWith("分段"))
         }
     }
     @Test fun twentyMegabyteSourceBuildsWithoutOneHugeBlock() {

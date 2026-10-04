@@ -22,9 +22,9 @@ EPUB、MOBI、PDF、漫画、网页剪藏、RSS、分类、本地字体导入、
 
 ## 构建
 
-固定版本：AGP 8.9.2、Gradle 8.11.1、JDK 17、Kotlin / Compose 编译插件 2.1.20、Compose BOM 2025.04.01、compile / target SDK 35、min SDK 29。Wrapper 带 Gradle 官方分发 SHA-256 校验。依赖从 Google Maven / Maven Central 解析，没有动态版本。首次构建需要下载依赖；安装后本应用不联网。
+固定版本：AGP 9.3.3、Gradle 9.5.1、JDK 17、AGP 内置 Kotlin / Compose 编译插件 2.2.10、Compose BOM 2026.09.00、compile SDK 37.0 / target SDK 37、min SDK 29。Wrapper 带 Gradle 官方分发 SHA-256 校验。依赖从 Google Maven / Maven Central 解析，没有动态版本。首次构建需要下载依赖；安装后本应用不联网。Kotlin 和 lint 将警告视为构建失败，不使用警告基线。
 
-配置 Android SDK（安装 API 35 与相应 Build Tools），在 `local.properties` 设置 `sdk.dir`，或设置 `ANDROID_HOME`。将 `JAVA_HOME` 指向 JDK 17：
+配置 Android SDK（安装 API 37.0 与 Build Tools 36.0.0），在 `local.properties` 设置 `sdk.dir`，或设置 `ANDROID_HOME`。将 `JAVA_HOME` 指向 JDK 17：
 
 ```sh
 export JAVA_HOME=/path/to/jdk17
@@ -58,14 +58,14 @@ adb shell am instrument -w com.localreader.app.test/androidx.test.runner.Android
 
 应用未声明 INTERNET、READ_EXTERNAL_STORAGE、MANAGE_EXTERNAL_STORAGE 等权限。云备份与设备迁移显式排除私有文件、数据库及设置；无账号或远程分析。**当前没有手动备份，卸载 / 清除应用数据会丢失书库、进度与书签。**
 
-导入写入独立暂存目录，复制时同步文件并计算 SHA-256。原始副本、规范化正文、固定记录索引及元信息都准备完成后，将整个目录重命名到私有书库，再事务插入书目。进程终止后，下次启动清理未提交暂存与无数据库引用目录；不会把半成品展示成可读书。删除先删除数据库记录和关联数据，再回收私有目录；文件回收中断留下的孤儿会在启动时清理。编码切换产生的新索引在事务提交前终止时同样会清理；成功切换的历史索引保留为定位备份。
+导入写入独立暂存目录，复制时同步文件并计算 SHA-256。原始副本、规范化正文、固定记录索引及元信息都准备完成后，将整个目录重命名到私有书库，再事务插入书目。进程终止后，下次启动清理未提交暂存；无数据库引用的书目录移入 `trash/` 保留 7 天后才清除（数据库被重建为空库时不会丢书）；不会把半成品展示成可读书。删除先删除数据库记录和关联数据，再回收私有目录；文件回收中断留下的孤儿会在启动时清理。编码切换产生的新索引在事务提交前终止时同样会清理；成功切换的历史索引保留为定位备份。
 
 每个索引块最多约 2048 个 UTF-16 单元（emoji 边界可多一个），28 字节记录随机访问，TXT 源缓存最近 64 块。v2 延续标记兼容旧 v1 索引。内容适配只扫描索引元数据规划章节，不为规划解码整本书；每个资源源字符最多 131136、生成 HTML 最多 2 MiB，优先保留物理段落。极端单段超过 128 KiB UTF-8 内容时仍须技术切分；前后段距与重复缩进已消除，跨 iframe 断行仍可能不同，未声称严格一致。内核最多 8 个活动 view，前方淘汰补偿高度以保持当前位置；原生仅缓存 2 个章节响应。字体是共享离线资产，不嵌入正文或转成 base64。
 
 `TxtTextSource` 专属文本索引；`ReaderPublication` 提供章节 / 资源清单与来源定位映射；`RuleCompiler` 生成独立默认规则和用户设置；`RendererBackend` 只接受打开、定位、翻页、规则更新和关闭。TXT 进度仍使用原始解码文本 UTF-16 偏移，文章样本使用稳定 block / element ID；分页页码、像素及 JS Range 不写入数据库。字体声明直接内联自固定 OFL manifest，避免 @import 尚未到达时提前 Ready；等待字体、尺寸相关图片和稳定几何后恢复来源锚点。被替代的加载重建渲染实例，旧事件由会话 / revision / epoch / command ID 拒绝。完整升级约束见架构文档。
 
-WebView 禁 file / content 访问、外部导航、弹窗及网络回退。可信 HTTPS host 模块与惰性正文 iframe 分开：正文 sandbox 不允许脚本，HTTP CSP 再次禁止脚本、连接、嵌套 frame、表单和 base 修改。资源必须命中当前随机会话的确切清单，未命中返回 403。原生 WebMessage 接口验证唯一 origin 和主 frame，接受有界 JSON 的定位事件，不暴露文件、SQL 或任意网络操作。Debug 可调试 WebView，Release 不开放；renderer 退出销毁 WebView，需返回书架重开。
-输入当前限 128 MB。空间预检采用包含逐行索引开销的保守上限（约输入体积 34 倍），解析中仍检测余量；多空行文件可能产生较大索引，故此预检可能拒绝本能放下的文件。磁盘不足或单项损坏仅使该项失败。取消解析会在读取检查点停止并清理本项；杀进程可能退回最近一次成功提交位置。设备断电、极限磁盘故障与最低 API 真机尚需专项验收，不把架构说明等同故障实测。
+WebView 禁 file / content 访问、外部导航、弹窗及网络回退。可信 HTTPS host 模块与惰性正文 iframe 分开：正文 sandbox 不允许脚本，HTTP CSP 再次禁止脚本、连接、嵌套 frame、表单和 base 修改。资源必须命中当前随机会话的确切清单，未命中返回 403。原生 WebMessage 接口验证唯一 origin 和主 frame，接受有界 JSON 的定位事件，不暴露文件、SQL 或任意网络操作。Debug 可调试 WebView，Release 不开放；TXT renderer 退出后销毁失效 WebView，从最近来源位置原地自动重建最多两次，连续失败后可点击重试。此说明不代表真实系统进程终止场景已全部验收。
+输入当前限 128 MB。空间预检按输入体积约 4 倍加 8 MB 余量，解析和复制过程中持续检测剩余空间；段落数上限 400 万（超出视为异常文本，拒绝导入）。磁盘不足或单项损坏仅使该项失败。取消解析会在读取检查点停止并清理本项；杀进程可能退回最近一次成功提交位置。设备断电、极限磁盘故障与最低 API 真机尚需专项验收，不把架构说明等同故障实测。
 
 数据库 schema 为 v3，提供 v1 / v2→v3 非破坏性迁移，保留当前位置、备用比例、书签和已有字号 / 主题；旧书保留连续滚动模式，新书默认分页；后续升级仍须新增迁移并回归，禁止销毁重建用户书库。Readest AGPL 应用代码未被复制；MIT foliate 仅固定实际使用的 paginator 和可重放窄补丁，当前直接依赖见 `docs/DEPENDENCIES.md`；字体来自各自官方 OFL 来源并固定哈希，发布前仍需完整传递依赖与许可审查。
 

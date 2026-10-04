@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文章阅读器</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #FFFFFF; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 16px 0 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between">
+    <a href="{{backHref}}" aria-label="{{backLabel}}" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #1A1B1E"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></a>
+    <a href="ArticleMore.dc.html" aria-label="更多" style="width: 36px; height: 36px; background: rgba(20,22,26,0.05); border-radius: 18px; color: #2A2C30; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5.75" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="18.25" cy="12" r="1.5"></circle></svg></a>
+  </div>
+
+  <article style="padding: 4px 24px 0">
+    <h1 style="margin: 0; font-family: 'Noto Serif SC', serif; font-size: 24px; line-height: 1.45; font-weight: 500; letter-spacing: 0.3px">{{title}}</h1>
+    <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 300; color: #63666C">
+      <span style="width: 22px; height: 22px; border-radius: 11px; background: #E9E3D7"></span>
+      <span style="color: #44474D; font-weight: 400">{{source}}</span><span>· {{date}}</span>
+    </div>
+
+    <sc-if value="{{isPartial}}" hint-placeholder-val="{{true}}">
+      <a href="Capture.dc.html" style="margin-top: 14px; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 40px; border-radius: 14px; background: #FBF1E4; color: #8A4600; text-decoration: none; font-size: 12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+        <span style="flex: 1; font-weight: 400">文字已离线，缺 3 张图片</span>
+        <span style="font-weight: 500">保存详情 ›</span>
+      </a>
+    </sc-if>
+    <sc-if value="{{isSummary}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 40px; border-radius: 14px; background: #EDEDEA; color: #44474D; font-size: 12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6h12M6 10h12M6 14h7"></path></svg>
+        <span style="flex: 1; font-weight: 400">摘要已保存</span>
+      </div>
+    </sc-if>
+    <sc-if value="{{isUpdated}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 14px; padding: 12px; border-radius: 14px; background: #E9F0FC; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: #1F5FCC"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"></path><path d="M19.5 4.5v4h-4"></path></svg>原文已更新，新版本已下载完成</div>
+        <div style="display: flex; gap: 8px">
+          <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: none; background: #1F5FCC; color: #FFFFFF; font: inherit; font-size: 12px; font-weight: 400">切换到新版本</button>
+          <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 0.5px solid #C9D4EA; background: #FFFFFF; color: #1F5FCC; font: inherit; font-size: 12px; font-weight: 400">保留当前版本</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isUnverified}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 14px; padding: 12px; border-radius: 14px; background: #FBF1E4; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: #8A4600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 8v5M12 16v.5"></path></svg>已保存，全文完整性未确认</div>
+        <div style="font-size: 12px; font-weight: 300; line-height: 1.6; color: #8A4600">页面可能有折叠或“展开全文”。请对照原文检查结尾是否完整。</div>
+        <div style="display: flex; gap: 8px">
+          <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: none; background: #8A4600; color: #FFFFFF; font: inherit; font-size: 12px; font-weight: 400">内容完整，确认</button>
+          <a href="NeedsAction.dc.html" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 0.5px solid #E7C9A4; background: #FFFFFF; color: #8A4600; font-size: 12px; font-weight: 400; text-decoration: none; display: flex; align-items: center">在网页中重新获取</a>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{isStale}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 14px; padding: 0 6px 0 12px; height: 40px; border-radius: 14px; background: #EDEDEA; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: #44474D">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+        <span style="flex: 1">更新失败，原有离线版本未受影响</span>
+        <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: none; background: #FFFFFF; font: inherit; font-size: 12px; font-weight: 500; color: #44474D">重试</button>
+      </div>
+    </sc-if>
+
+    <div style="margin-top: 20px; font-family: 'Noto Serif SC', serif; font-size: 17px; line-height: 1.8; text-align: justify">
+      <p style="margin: 0 0 14px">{{lead}}</p>
+      <sc-if value="{{notSummary}}" hint-placeholder-val="{{true}}">
+        <figure style="margin: 4px 0 0">
+          <a href="ImageViewer.dc.html" aria-label="查看大图：三种常见手冲壶对比" style="display: block; position: relative; height: 168px; border-radius: 14px; overflow: hidden; background: linear-gradient(170deg, #E8DFCE 0%, #D7C7A9 55%, #BFA781 100%)">
+            <span style="position: absolute; left: 44px; bottom: 30px; width: 54px; height: 82px; border-radius: 6px 6px 10px 10px; background: linear-gradient(90deg, #3A3B3D, #6D6F72 45%, #2E2F31)"></span>
+            <span style="position: absolute; left: 124px; bottom: 30px; width: 60px; height: 74px; border-radius: 7px 7px 11px 11px; background: linear-gradient(90deg, #B8805A, #D9A37B 45%, #9C6847)"></span>
+            <span style="position: absolute; left: 210px; bottom: 30px; width: 50px; height: 88px; border-radius: 5px 5px 9px 9px; background: linear-gradient(90deg, #DADAD6, #F6F6F3 45%, #BDBDB8)"></span>
+            <span style="position: absolute; left: 0; right: 0; bottom: 0; height: 30px; background: linear-gradient(180deg, #8F7656, #6E5A41)"></span>
+          </a>
+          <figcaption style="margin-top: 8px; font-family: 'Noto Sans SC', sans-serif; font-size: 12px; font-weight: 300; color: #63666C; text-align: center">[图注] 三种常见手冲壶对比</figcaption>
+        </figure>
+        <h2 style="margin: 22px 0 10px; font-size: 18px; font-weight: 500">一、先买磨豆机</h2>
+        <p style="margin: 0 0 14px">[正文示例] 预磨的粉放上一周，香气已散去大半。与其升级咖啡机，不如先把预算放在研磨上。</p>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{isPartial}}" hint-placeholder-val="{{true}}">
+      <figure style="margin: 6px 0 0">
+        <button type="button" style="width: 100%; height: 150px; border-radius: 14px; border: 1px dashed #D3CDBE; background: #F6F3EC; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 400; color: #6B604F">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"></rect><path d="M3.5 15l4.5-4 4 3.5 3-2.5 5.5 4.5"></path><path d="M4 4l16 16"></path></svg>
+          图片未保存 · 轻点重试
+        </button>
+        <figcaption style="margin-top: 8px; font-size: 12px; font-weight: 300; color: #63666C; text-align: center">[图注] 不同研磨度的咖啡粉对比</figcaption>
+      </figure>
+    </sc-if>
+
+    <sc-if value="{{isSummary}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 8px; padding: 20px; border-radius: 18px; background: #F7F7F5; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center">
+        <div style="font-size: 14px; font-weight: 400; color: #44474D">以下内容需要联网获取</div>
+        <div style="font-size: 12px; font-weight: 300; color: #63666C">当前为移动网络，下载全文约 1.2 MB（含 6 张图片）</div>
+        <div style="display: flex; gap: 8px">
+          <button type="button" style="height: 44px; padding: 0 22px; border-radius: 22px; border: none; background: #1F5FCC; color: #FFFFFF; font: inherit; font-size: 14px; font-weight: 400">下载全文</button>
+          <button type="button" style="height: 44px; padding: 0 18px; border-radius: 22px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1A1B1E; font: inherit; font-size: 14px; font-weight: 400">打开原文</button>
+        </div>
+      </div>
+    </sc-if>
+  </article>
+
+  <nav aria-label="文章工具" style="position: absolute; left: 16px; right: 16px; bottom: 22px; height: 62px; padding: 4px; box-sizing: border-box; border-radius: 31px; background: rgba(255,255,255,0.88); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 0.5px solid rgba(20,22,26,0.08); box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.8), 0 0 0 0.5px rgba(20,22,26,0.06), 0 14px 32px -12px rgba(20,22,26,0.28); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; color: #44474D">
+    <button type="button" style="border: none; background: transparent; color: inherit; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: inherit; font-size: 10px; letter-spacing: 0.4px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 4.75h5.75v5.75M19.25 4.75L11 13"></path><path d="M17.25 13.5v4.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5v-9.5a1.5 1.5 0 0 1 1.5-1.5h4.25"></path></svg>原文</button>
+    <button type="button" style="border: none; background: transparent; color: inherit; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: inherit; font-size: 10px; letter-spacing: 0.4px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.75" y="4.75" width="16.5" height="4.5" rx="1.2"></rect><path d="M5.25 9.25v9a1.5 1.5 0 0 0 1.5 1.5h10.5a1.5 1.5 0 0 0 1.5-1.5v-9"></path><path d="M10 13h4"></path></svg>归档</button>
+    <button type="button" style="border: none; background: transparent; color: inherit; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: inherit; font-size: 10px; letter-spacing: 0.4px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 4.2l2.35 4.8 5.3.75-3.83 3.73.9 5.27L12 16.27l-4.72 2.48.9-5.27-3.83-3.73 5.3-.75z"></path></svg>收藏</button>
+    <button type="button" style="border: none; background: transparent; color: inherit; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: inherit; font-size: 10px; letter-spacing: 0.4px"><span aria-hidden="true" style="height: 24px; display: flex; align-items: flex-end; font-family: 'Noto Serif SC', serif; line-height: 1; padding-bottom: 2px; box-sizing: border-box"><span style="font-size: 19px">A</span><span style="font-size: 14px">a</span></span>设置</button>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"state":{"editor":"enum","options":["partial","summary","updated","unverified","stale"],"default":"partial"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.props.state ?? 'partial';
+    const summary = s === 'summary';
+    return {
+      isPartial: s === 'partial',
+      isSummary: summary,
+      isUpdated: s === 'updated',
+      isUnverified: s === 'unverified',
+      isStale: s === 'stale',
+      backHref: summary ? 'Rss.dc.html' : 'Later.dc.html',
+      backLabel: summary ? '返回 RSS' : '返回稍后阅读',
+      notSummary: !summary,
+      title: summary ? '[示例标题] 港口自动化改造进入第二阶段' : '一份写给新手的家庭咖啡器具清单',
+      source: summary ? '[东方观察]' : '[公众号名]',
+      date: summary ? '今天 07:40' : '发布于 2026-09-28',
+      lead: summary ? '[摘要占位] 订阅源只提供了这段摘要，正文需要从原网页获取。' : '[正文示例] 第一次在家做咖啡，最容易犯的错，是一开始就买齐所有器具。其实真正决定味道的，只有三样东西：新鲜的豆子、稳定的研磨，和一把能控制水流的壶。'
+    };
+  }
+}
+</script>
+</body>
+</html>

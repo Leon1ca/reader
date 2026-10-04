@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>阅读器 · 书内搜索</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F3ECDF; font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+
+  <div style="position: absolute; inset: 0; background: rgba(43,38,32,0.18)"></div>
+
+  <section aria-label="书内搜索" style="position: absolute; left: 0; right: 0; top: 44px; bottom: 0; border-radius: 24px 24px 0 0; background: #FBF8F2; box-shadow: 0 -8px 30px rgba(43,38,32,0.12); display: flex; flex-direction: column">
+    <div style="width: 36px; height: 4px; border-radius: 2px; background: #DDD4C4; align-self: center; margin-top: 10px"></div>
+
+    <div style="padding: 14px 16px 0 20px; display: flex; align-items: center; gap: 10px">
+      <label style="flex: 1; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 12px; border-radius: 12px; background: #F0EADF; color: #6B604F; font-size: 15px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.75" cy="10.75" r="6.25"></circle><path d="M15.4 15.4l4.6 4.6"></path></svg>
+        <input type="search" value="故乡" aria-label="在书中搜索" style="flex: 1; border: none; background: transparent; font: inherit; font-weight: 400; color: #2B2620; outline: none; min-width: 0">
+        <span aria-hidden="true" style="width: 16px; height: 16px; border-radius: 8px; background: #CFC5B2; color: #FBF8F2; display: flex; align-items: center; justify-content: center"><svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l8 8M10 2L2 10"></path></svg></span>
+      </label>
+      <a href="ReaderToolbar.dc.html" style="font-size: 15px; font-weight: 400; color: #1F5FCC; text-decoration: none; height: 44px; display: flex; align-items: center">取消</a>
+    </div>
+
+    <div style="padding: 16px 20px 6px; display: flex; justify-content: space-between; font-size: 12px; font-weight: 300; color: #6B604F"><span>找到 14 处</span><span>当前章节优先</span></div>
+
+    <div style="padding: 6px 20px 2px; font-size: 12px; font-weight: 500; color: #5A5040; letter-spacing: 0.5px">故乡 <span style="font-weight: 300; color: #6B604F">· 5 处</span></div>
+    <ul style="list-style: none; margin: 0; padding: 0 20px; display: flex; flex-direction: column">
+      <li style="padding: 12px 0; border-bottom: 0.5px solid #EAE2D3; display: flex; gap: 12px">
+        <div style="flex: 1; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7">……回到相隔二千余里，别了二十余年的<mark style="background: #F9E3A6; color: inherit; border-radius: 2px; padding: 0 1px">故乡</mark>去。</div>
+        <span style="font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; flex: none; padding-top: 3px">66</span>
+      </li>
+      <li style="padding: 12px 0; border-bottom: 0.5px solid #EAE2D3; display: flex; gap: 12px">
+        <div style="flex: 1; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7">……时候既然是深冬；渐近<mark style="background: #F9E3A6; color: inherit; border-radius: 2px; padding: 0 1px">故乡</mark>时，天气又阴晦了……</div>
+        <span style="font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; flex: none; padding-top: 3px">66</span>
+      </li>
+      <li style="padding: 12px 0; border-bottom: 0.5px solid #EAE2D3; display: flex; gap: 12px">
+        <div style="flex: 1; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7">……这不是我二十年来时时记得的<mark style="background: #F9E3A6; color: inherit; border-radius: 2px; padding: 0 1px">故乡</mark>？</div>
+        <span style="font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; flex: none; padding-top: 3px">66</span>
+      </li>
+      <li style="padding: 12px 0; border-bottom: 0.5px solid #EAE2D3; display: flex; gap: 12px">
+        <div style="flex: 1; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7">……于是我自己解释说：<mark style="background: #F9E3A6; color: inherit; border-radius: 2px; padding: 0 1px">故乡</mark>本也如此……</div>
+        <span style="font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; flex: none; padding-top: 3px">66</span>
+      </li>
+    </ul>
+
+    <div style="padding: 16px 20px 2px; font-size: 12px; font-weight: 500; color: #5A5040; letter-spacing: 0.5px">自序 <span style="font-weight: 300; color: #6B604F">· 1 处</span></div>
+    <ul style="list-style: none; margin: 0; padding: 0 20px; display: flex; flex-direction: column">
+      <li style="padding: 12px 0; border-bottom: 0.5px solid #EAE2D3; display: flex; gap: 12px">
+        <div style="flex: 1; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7">……[自序中提及“<mark style="background: #F9E3A6; color: inherit; border-radius: 2px; padding: 0 1px">故乡</mark>”的上下文片段]……</div>
+        <span style="font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; flex: none; padding-top: 3px">3</span>
+      </li>
+    </ul>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

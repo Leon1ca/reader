@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>阅读器 · 平板双页</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<div style="width: 1280px; height: 800px; position: relative; overflow: hidden; background-color: #F3ECDF; background-image: radial-gradient(120% 90% at 50% 40%, rgba(255,255,255,0.28), rgba(255,255,255,0) 60%), radial-gradient(140% 120% at 50% 50%, rgba(0,0,0,0) 60%, rgba(90,70,40,0.06)); font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 72px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 400; letter-spacing: 1px; color: #5A5040">呐喊</div>
+
+  <a href="TabletReaderToolbar.dc.html" aria-label="轻点呼出工具栏" style="position: absolute; top: 72px; bottom: 96px; left: 0; right: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); text-decoration: none; color: inherit">
+    <div style="padding: 0 64px 0 80px; overflow: hidden; font-family: 'Noto Serif SC', serif">
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">阿！这不是我二十年来时时记得的故乡？</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">我所记得的故乡全不如此。我的故乡好得多了。但要我记起他的美丽，说出他的佳处来，却又没有影像，没有言辞了。仿佛也就如此。于是我自己解释说：故乡本也如此，——虽然没有进步，也未必有如我所感的悲凉，这只是我自己心情的改变罢了，因为我这次回乡，本没有什么好心绪。</p>
+    </div>
+    <div style="padding: 0 80px 0 64px; overflow: hidden; font-family: 'Noto Serif SC', serif; box-shadow: inset 1px 0 0 rgba(43,38,32,0.06)">
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">我这次是专为了别他而来的。我们多年聚族而居的老屋，已经公同卖给别姓了，交屋的期限，只在本年，所以必须赶在正月初一以前，永别了熟识的老屋，而且远离了熟识的故乡，搬家到我在谋食的异地去。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">第二日清早晨我到了我家的门口了。瓦楞上许多枯草的断茎当风抖着，正在说明这老屋难免易主的原因。几房的本家大约已经搬走了，所以很寂静。我到了自家的房外，我的母亲早已迎着出来了，接着便飞出了八岁的侄儿宏儿。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 19px; line-height: 1.8; text-align: justify">我的母亲很高兴，但也藏着许多凄凉的神情，教我坐下，歇息，喝茶，且不谈搬家的事。宏儿没有见过我，远远的对面站着只是看。</p>
+    </div>
+  </a>
+
+  <div style="position: absolute; bottom: 0; height: 96px; left: 0; right: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; font-size: 12px; font-weight: 400; letter-spacing: 0.8px; color: #5A5040; text-align: center; font-variant-numeric: tabular-nums">
+    <span>66</span><span>67</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

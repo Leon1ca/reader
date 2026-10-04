@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>书架 · 批量选择</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <header style="height: 84px; padding: 28px 16px 0; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between">
+    <button type="button" style="height: 44px; border: none; background: transparent; color: #1F5FCC; font: inherit; font-size: 15px; font-weight: 400; padding: 0 4px">全选</button>
+    <span style="font-size: 16px; font-weight: 500">已选 3 本</span>
+    <a href="Main.dc.html" style="height: 44px; color: #1F5FCC; font-size: 15px; font-weight: 500; text-decoration: none; display: flex; align-items: center; padding: 0 4px">完成</a>
+  </header>
+
+  <div style="padding: 12px 20px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 18px; row-gap: 20px">
+    <sc-for list="{{books}}" as="b" hint-placeholder-count="9">
+      <div style="display: flex; flex-direction: column; gap: 7px; min-width: 0">
+        <div style="aspect-ratio: 3 / 4; border-radius: 2px 5px 5px 2px; background-color: {{b.bg}}; background-image: linear-gradient(90deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.08) 2px, rgba(255,255,255,0.16) 3px, rgba(255,255,255,0) 7px, rgba(0,0,0,0.05) 9px, rgba(0,0,0,0) 14px), linear-gradient(160deg, rgba(255,255,255,0.12), rgba(255,255,255,0) 40%, rgba(0,0,0,0.08)); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 10px 18px -8px rgba(30,25,20,0.38); position: relative; overflow: hidden; {{b.dim}}">
+          <div style="position: absolute; top: 14px; left: 0; right: 0; display: flex; justify-content: center"><div style="writing-mode: vertical-rl; font-family: 'Noto Serif SC', serif; font-weight: 500; font-size: 15px; letter-spacing: 4px; color: {{b.fg}}">{{b.cover}}</div></div>
+          <sc-if value="{{b.sel}}" hint-placeholder-val="{{false}}">
+            <span style="position: absolute; right: 7px; bottom: 7px; width: 22px; height: 22px; border-radius: 11px; background: #1F5FCC; box-shadow: 0 0 0 2px #FFFFFF; display: flex; align-items: center; justify-content: center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+          </sc-if>
+          <sc-if value="{{b.unsel}}" hint-placeholder-val="{{true}}">
+            <span style="position: absolute; right: 7px; bottom: 7px; width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid #FFFFFF; background: rgba(0,0,0,0.18); box-sizing: border-box"></span>
+          </sc-if>
+        </div>
+        <div style="font-size: 13px; font-weight: 400; color: #1A1B1E; white-space: nowrap">{{b.short}}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <nav aria-label="批量操作" style="position: absolute; left: 16px; right: 16px; bottom: 22px; height: 62px; padding: 4px; box-sizing: border-box; border-radius: 31px; background: rgba(255,255,255,0.88); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 0.5px solid rgba(20,22,26,0.08); box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.8), 0 0 0 0.5px rgba(20,22,26,0.06), 0 14px 32px -12px rgba(20,22,26,0.28); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px">
+    <a href="CategoryPicker.dc.html" style="border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10px; letter-spacing: 0.4px; color: #44474D; text-decoration: none"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 7.5V18A1.5 1.5 0 0 0 5.25 19.5h13.5A1.5 1.5 0 0 0 20.25 18V9.5A1.5 1.5 0 0 0 18.75 8h-7l-2-2.5h-4.5A1.5 1.5 0 0 0 3.75 7z"></path><path d="M12 11v5M9.5 13.5h5"></path></svg>加入分类</a>
+    <button type="button" style="border: none; background: transparent; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: inherit; font-size: 10px; letter-spacing: 0.4px; color: #44474D"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.25"></circle><path d="M8.4 12.2l2.5 2.4 4.7-5"></path></svg>标为已读完</button>
+    <a href="BatchDeleteConfirm.dc.html" style="border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10px; letter-spacing: 0.4px; color: #C23B2E; text-decoration: none"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5h15M9.5 6.5V4.75h5V6.5"></path><path d="M6.5 6.5l.8 12.2a1.5 1.5 0 0 0 1.5 1.3h6.4a1.5 1.5 0 0 0 1.5-1.3l.8-12.2"></path></svg>删除</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const raw = [
+      ['红楼梦', '#8C2F2B', '#F6E6CF', true], ['陌生女人', '#3F4A5C', '#ECE7DD', false], ['傲慢与偏见', '#2E4A6B', '#EEF2F7', true],
+      ['瓦尔登湖', '#D9CBA5', '#2E2A1E', false], ['营造法式', '#5B5148', '#F0E6D7', false], ['漫画合集', '#E7A93A', '#2A2015', false],
+      ['庄子', '#262626', '#B5B5B5', true], ['唐诗三百首', '#6B7F5A', '#F1F0E4', false], ['罗密欧', '#B4583A', '#FBEDE4', false]
+    ];
+    const full = ['红楼梦', '一个陌生女人的来信', '傲慢与偏见', '瓦尔登湖', '营造法式', '漫画合集 第一卷', '庄子', '唐诗三百首', '罗密欧与朱丽叶'];
+    const books = raw.map((r, i) => {
+      const chars = Array.from(full[i]);
+      return {
+        cover: r[0], bg: r[1], fg: r[2], sel: r[3], unsel: !r[3],
+        dim: r[3] ? '' : 'opacity: 0.72;',
+        short: chars.length > 8 ? chars.slice(0, 7).join('') + '…' : full[i]
+      };
+    });
+    return { books };
+  }
+}
+</script>
+</body>
+</html>

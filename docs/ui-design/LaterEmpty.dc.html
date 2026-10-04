@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>稍后阅读 · 空状态</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+  <header style="padding: 30px 20px 0">
+    <h1 style="margin: 0; font-size: 26px; font-weight: 500; letter-spacing: 1px">稍后阅读</h1>
+  </header>
+
+  <div style="position: absolute; left: 32px; right: 32px; top: 200px; display: flex; flex-direction: column; align-items: center; text-align: center">
+    <svg width="112" height="88" viewBox="0 0 112 88" fill="none" stroke="#B8B3A7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="38" cy="54" r="15"></circle><circle cx="74" cy="54" r="15"></circle><path d="M51 50c3-2.5 7-2.5 10 0"></path><path d="M23 52l7-24a6 6 0 0 1 5.7-4.3H39"></path><path d="M89 52l-7-24a6 6 0 0 0-5.7-4.3H73"></path></svg>
+    <h2 style="margin: 24px 0 0; font-size: 17px; font-weight: 500; letter-spacing: 0.5px">还没有保存文章</h2>
+    <p style="margin: 8px 0 0; font-size: 13px; font-weight: 300; line-height: 1.7; color: #63666C">在微信、知乎或浏览器里点“分享”，选择本应用即可保存；也可以直接粘贴链接。</p>
+    <a href="AddLink.dc.html" style="margin-top: 24px; height: 44px; padding: 0 28px; border-radius: 22px; background: #1F5FCC; color: #FFFFFF; font-size: 15px; font-weight: 400; letter-spacing: 0.5px; text-decoration: none; display: flex; align-items: center">粘贴链接</a>
+  </div>
+
+  <div style="position: absolute; left: 0; bottom: 0">
+    <dc-import name="TabBar" active="later" hint-size="390px,112px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

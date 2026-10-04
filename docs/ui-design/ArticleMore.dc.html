@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文章 · 更多菜单</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;family=Noto+Serif+SC:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1A1B1E}a:hover{color:#1A1B1E}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+  <dc-import name="Article" state="partial" hint-size="390px,844px"></dc-import>
+  <div style="position: absolute; inset: 0; background: rgba(20,22,26,0.12)"></div>
+
+  <div role="menu" aria-label="更多操作" style="position: absolute; right: 16px; top: 76px; width: 232px; padding: 6px 0; border-radius: 16px; background: rgba(255,255,255,0.97); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 0 0 0.5px rgba(20,22,26,0.08), 0 18px 40px -10px rgba(20,22,26,0.3)">
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+      <div style="{{g.sep}}">
+        <sc-for list="{{g.items}}" as="m" hint-placeholder-count="2">
+          <a href="{{m.href}}" role="menuitem" style="box-sizing: border-box; height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; text-decoration: none; font-size: 15px; font-weight: 400; {{m.color}}">
+            <span>{{m.label}}</span>
+            <span style="font-size: 12px; font-weight: 300; color: #63666C">{{m.hint}}</span>
+          </a>
+        </sc-for>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const base = 'color: #1A1B1E;', danger = 'color: #C23B2E;';
+    const mk = (label, hint, href, color) => ({ label, hint, href, color: color || base });
+    const groups = [
+      { sep: '', items: [mk('标为已读', '', 'Later.dc.html'), mk('加入收藏', '', 'Article.dc.html')] },
+      { sep: 'border-top: 0.5px solid #ECECE8; margin-top: 4px; padding-top: 4px;', items: [mk('保存详情', '缺 3 张图', 'Capture.dc.html'), mk('重新获取全文', '', 'ArticleVersion.dc.html'), mk('复制原文链接', '', 'Article.dc.html'), mk('在浏览器中打开', '', 'Article.dc.html')] },
+      { sep: 'border-top: 0.5px solid #ECECE8; margin-top: 4px; padding-top: 4px;', items: [mk('移出稍后阅读', '', 'Later.dc.html', danger)] }
+    ];
+    return { groups };
+  }
+}
+</script>
+</body>
+</html>

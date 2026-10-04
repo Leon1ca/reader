@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>TXT · 编码与分章</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F3ECDF; font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; padding: 26px 64px 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center">
+    <span style="font-size: 13px; font-weight: 400; letter-spacing: 1px; color: #5A5040">瓦尔登湖</span>
+  </div>
+  <div style="position: absolute; top: 76px; left: 26px; right: 26px; font-family: 'Noto Serif SC', serif; font-size: 18px; line-height: 1.75; color: #8C8273; word-break: break-all">
+    <p style="margin: 0 0 10px">鍦ㄥ湪鏈夋湁锛屾湁涓€涓€鐭冲尖锛屽湪閭d腑闂翠骇鍑轰竴鍙</p>
+    <p style="margin: 0 0 10px">鐭崇尨锛屼粬鐪奸噸灏勫嚭涓ら亾閲戝厜锛屽啿浜嗗ぉ</p>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(43,38,32,0.18)"></div>
+
+  <section aria-label="编码与分章" style="position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 20px 30px; border-radius: 24px 24px 0 0; background: #FBF8F2; box-shadow: 0 -8px 30px rgba(43,38,32,0.12); display: flex; flex-direction: column; gap: 14px">
+    <div style="width: 36px; height: 4px; border-radius: 2px; background: #DDD4C4; align-self: center; margin-bottom: 4px"></div>
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <h2 style="margin: 0; font-size: 17px; font-weight: 500">文字显示乱码？</h2>
+      <span style="font-size: 12px; font-weight: 300; color: #6B604F">自动识别为 UTF-8，可能不准确。选择编码后预览效果。</span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 14px">
+      <span style="width: 44px; flex: none; font-size: 13px; font-weight: 400; color: #6B604F">编码</span>
+      <div style="flex: 1; height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #F0EADF; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px">
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 12px; font-weight: 400; color: #3B342A">UTF-8</button>
+        <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(43,38,32,0.12); font: inherit; font-size: 12px; font-weight: 500; color: #1F5FCC">GB18030</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 12px; font-weight: 400; color: #3B342A">UTF-16</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 12px; font-weight: 400; color: #3B342A">更多</button>
+      </div>
+    </div>
+
+    <div style="padding: 12px 14px; border-radius: 14px; background: #F0EADF; font-family: 'Noto Serif SC', serif; font-size: 14px; line-height: 1.7; color: #2B2620">[预览] 按所选编码解析后的开头几行正文，会显示在这里。</div>
+
+    <div style="display: flex; align-items: center; gap: 14px">
+      <span style="width: 44px; flex: none; font-size: 13px; font-weight: 400; color: #6B604F">分章</span>
+      <div style="flex: 1; height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #F0EADF; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px">
+        <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(43,38,32,0.12); font: inherit; font-size: 12px; font-weight: 500; color: #1F5FCC">第X章 · 18</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 12px; font-weight: 400; color: #3B342A">自定义规则</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 12px; font-weight: 400; color: #3B342A">按字数</button>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px; align-items: flex-start; font-size: 12px; font-weight: 300; line-height: 1.6; color: #8A4600">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+      重新解析后，原书签会尝试定位到附近位置；原始文件不受影响。
+    </div>
+
+    <button type="button" style="height: 48px; border-radius: 24px; border: none; background: #1F5FCC; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 400">按 GB18030 重新解析</button>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

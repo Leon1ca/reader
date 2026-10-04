@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>订阅源管理</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1A1B1E}a:hover{color:#1A1B1E}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 16px 0 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between">
+    <div style="display: flex; align-items: center; gap: 4px">
+      <a href="Rss.dc.html" aria-label="返回 RSS" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #1A1B1E"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></a>
+      <span style="font-size: 16px; font-weight: 500">订阅源 · 12</span>
+    </div>
+    <button type="button" style="height: 44px; border: none; background: transparent; color: #1F5FCC; font: inherit; font-size: 15px; font-weight: 400; padding: 0 4px">编辑分组</button>
+  </div>
+
+  <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+    <div style="padding: 12px 24px 6px; display: flex; justify-content: space-between; font-size: 12px; font-weight: 300; color: #63666C"><span>{{g.name}}</span><span>{{g.count}}</span></div>
+    <div style="margin: 0 20px; border-radius: 16px; background: #FFFFFF; padding: 0 16px">
+      <sc-for list="{{g.feeds}}" as="f" hint-placeholder-count="2">
+        <a href="FeedDetail.dc.html" style="min-height: 56px; display: flex; align-items: center; gap: 12px; text-decoration: none; {{f.border}}">
+          <span style="width: 30px; height: 30px; border-radius: 8px; background: {{f.bg}}; color: #FFFFFF; font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: center; flex: none">{{f.mark}}</span>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 15px; font-weight: 400; {{f.nameStyle}}">{{f.name}}</span>
+            <span style="font-size: 12px; font-weight: 400; {{f.statusStyle}}">{{f.status}}</span>
+          </span>
+          <span style="font-size: 14px; font-weight: 300; color: #63666C">›</span>
+        </a>
+      </sc-for>
+    </div>
+  </sc-for>
+
+  <div style="position: absolute; left: 20px; right: 20px; bottom: 34px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+    <a href="OpmlResult.dc.html" style="height: 48px; border-radius: 24px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1F5FCC; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">导入 OPML</a>
+    <button type="button" style="height: 48px; border-radius: 24px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1F5FCC; font: inherit; font-size: 15px; font-weight: 400">导出 OPML</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const ok = 'color: #63666C;', warn = 'color: #8A4600;';
+    const mk = (list) => list.map((f, i) => ({
+      name: f[0], mark: f[1], bg: f[2], status: f[3], statusStyle: f[4] ? warn : ok,
+      nameStyle: f[5] ? 'color: #63666C;' : 'color: #1A1B1E;',
+      border: i < list.length - 1 ? 'border-bottom: 0.5px solid #ECECE8;' : ''
+    }));
+    return {
+      groups: [
+        { name: '国际', count: '3 个', feeds: mk([
+          ['[东方观察]', '东', '#8C2F2B', '07:40 更新 · 全文策略：手动', false],
+          ['[城市晚报]', '城', '#9C6B2F', '来源暂时限制请求，稍后自动重试', true],
+          ['[本地新闻站]', '本', '#6E7177', '已暂停 · 仅支持 HTTP', true, true]
+        ]) },
+        { name: '科技', count: '5 个', feeds: mk([
+          ['[环宇科技周刊]', '环', '#2E4A6B', '08:15 更新 · 自动获取全文', false],
+          ['[数据新闻实验室]', '数', '#5B6E3E', '昨天更新 · 仅 Wi-Fi 下载图片', false]
+        ]) },
+        { name: '未分组', count: '1 个', feeds: mk([
+          ['[独立博客]', '独', '#4B3A52', '3 天前更新', false]
+        ]) }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

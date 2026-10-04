@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>阅读器 · 目录</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F3ECDF; font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+
+  <div style="position: absolute; inset: 0; background: rgba(43,38,32,0.18)"></div>
+
+  <section aria-label="目录与书签" style="position: absolute; left: 0; right: 0; top: 44px; bottom: 0; border-radius: 24px 24px 0 0; background: #FBF8F2; box-shadow: 0 -8px 30px rgba(43,38,32,0.12); display: flex; flex-direction: column; overflow: hidden">
+    <div style="width: 36px; height: 4px; border-radius: 2px; background: #DDD4C4; align-self: center; margin-top: 10px"></div>
+
+    <div style="padding: 14px 20px 0; display: flex; gap: 14px; align-items: center">
+      <div style="width: 48px; height: 64px; flex: none; border-radius: 2px 4px 4px 2px; background-color: #3E5C4E; background-image: linear-gradient(90deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.08) 2px, rgba(255,255,255,0.16) 3px, rgba(255,255,255,0) 7px); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 8px 14px -8px rgba(30,40,35,0.45); display: flex; justify-content: center; padding-top: 8px; box-sizing: border-box"><span style="writing-mode: vertical-rl; font-family: 'Noto Serif SC', serif; font-size: 11px; letter-spacing: 2px; color: #F2EAD8">呐喊</span></div>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+        <div style="font-family: 'Noto Serif SC', serif; font-size: 17px; font-weight: 500; letter-spacing: 0.5px">呐喊</div>
+        <div style="font-size: 12px; font-weight: 300; color: #6B604F">鲁迅 · 共 15 篇 · 已读 23%</div>
+      </div>
+      <a href="ReaderToolbar.dc.html" aria-label="关闭目录" style="width: 44px; height: 44px; margin-right: -8px; flex: none; display: flex; align-items: center; justify-content: center; text-decoration: none"><span style="width: 30px; height: 30px; border-radius: 15px; background: rgba(90,80,64,0.1); display: flex; align-items: center; justify-content: center; color: #4A4236"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l8 8M10 2L2 10"></path></svg></span></a>
+    </div>
+
+    <div style="margin: 16px 20px 0; height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #F0EADF; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px">
+      <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(43,38,32,0.12); font: inherit; font-size: 13px; font-weight: 500; color: #1F5FCC">目录</button>
+      <a href="ReaderBookmarks.dc.html" style="border-radius: 9px; font-size: 13px; font-weight: 400; color: #3B342A; text-decoration: none; display: flex; align-items: center; justify-content: center">书签 · 3</a>
+    </div>
+
+    <div style="padding: 18px 20px 6px; display: flex; justify-content: space-between; align-items: baseline">
+      <span style="font-size: 12px; font-weight: 400; letter-spacing: 1px; color: #6B604F">目录</span>
+      <span style="font-size: 12px; font-weight: 300; color: #6B604F">页码随排版变化</span>
+    </div>
+
+    <ol style="list-style: none; margin: 0; padding: 0 12px; display: flex; flex-direction: column">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="14">
+        <li style="{{r.style}}">
+          <span style="{{r.nameStyle}}">{{r.name}}</span>
+          <span style="display: flex; align-items: center; gap: 8px; flex: none">
+            <sc-if value="{{r.current}}" hint-placeholder-val="{{false}}"><span style="height: 20px; padding: 0 7px; border-radius: 10px; background: #1F5FCC; color: #FFFFFF; font-size: 11px; font-weight: 400; display: flex; align-items: center">剩 4 页</span></sc-if>
+            <span style="{{r.pageStyle}}">{{r.page}}</span>
+          </span>
+        </li>
+      </sc-for>
+    </ol>
+
+    <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 96px; background: linear-gradient(to bottom, rgba(251,248,242,0), #FBF8F2 70%); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 26px; box-sizing: border-box">
+      <button type="button" style="height: 36px; padding: 0 16px; border-radius: 18px; border: 0.5px solid #E2D9C8; background: #FFFFFF; box-shadow: 0 4px 12px rgba(43,38,32,0.1); font: inherit; font-size: 13px; font-weight: 400; color: #3B342A; display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>定位到当前章节</button>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const data = [
+      ['自序', 1, 'read'], ['狂人日记', 7, 'read'], ['孔乙己', 19, 'read'], ['药', 24, 'read'], ['明天', 34, 'read'],
+      ['一件小事', 42, 'read'], ['头发的故事', 45, 'read'], ['风波', 52, 'read'], ['故乡', 66, 'current'],
+      ['阿Q正传', 71, 'next'], ['第一章 序', 71, 'sub'], ['第二章 优胜记略', 76, 'sub'], ['第三章 续优胜记略', 80, 'sub'], ['第四章 恋爱的悲剧', 85, 'sub']
+    ];
+    const base = 'display: flex; align-items: center; justify-content: space-between; gap: 12px;';
+    const rows = data.map(([name, page, kind]) => {
+      if (kind === 'current') {
+        return { name, page, current: true,
+          style: base + ' height: 52px; padding: 0 12px; margin: 2px 0; border-radius: 12px; background: rgba(31,95,204,0.08);',
+          nameStyle: 'font-size: 15px; font-weight: 500; color: #1F5FCC;',
+          pageStyle: 'font-size: 12px; font-weight: 400; color: #1F5FCC; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;' };
+      }
+      if (kind === 'sub') {
+        return { name, page, current: false,
+          style: base + ' height: 42px; padding: 0 8px 0 24px;',
+          nameStyle: 'font-size: 14px; font-weight: 300; color: #5A5040;',
+          pageStyle: 'font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;' };
+      }
+      return { name, page, current: false,
+        style: base + ' height: 48px; padding: 0 8px;',
+        nameStyle: 'font-size: 15px; font-weight: 400; color: ' + (kind === 'read' ? '#6B604F' : '#2B2620') + ';',
+        pageStyle: 'font-size: 12px; font-weight: 300; color: #6B604F; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;' };
+    });
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

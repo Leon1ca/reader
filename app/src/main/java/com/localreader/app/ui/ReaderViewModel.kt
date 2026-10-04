@@ -28,6 +28,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private val cancelled = AtomicBoolean(false)
     private var saveJob: Job? = null
     @Volatile private var pending: PendingPosition? = null
+    @Volatile private var dirtySince = 0L
+    /** Serialises small preference writes off the main thread while preserving their order. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val dbWriter = Dispatchers.IO.limitedParallelism(1)
 
     init {
         viewModelScope.launch { try {
@@ -72,18 +76,24 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             finally { mutable.update { it.copy(busy = false, operation = "") } }
         }
     }
-    fun position(locator: Locator.Text) {
+    /** [advanceFurthest] is false for programmatic jumps/restores, which must not raise the furthest-read mark. */
+    fun position(locator: Locator.Text, advanceFurthest: Boolean = true) {
         val session = state.value.reader ?: return
         if (state.value.busy || locator.version != session.book.version) return
-        val furthest = maxOf(session.book.furthest, locator.sourceOffset)
+        val furthest = if (advanceFurthest) maxOf(session.book.furthest, locator.sourceOffset) else session.book.furthest
         pending = PendingPosition(session.book.id, locator, furthest)
         mutable.update { it.copy(reader = it.reader?.copy(book = session.book.copy(current = locator, furthest = furthest), jump = locator)) }
+        // Debounce 400 ms but never let continuous scrolling postpone a commit beyond ~1 s (POS-01).
+        val now = System.currentTimeMillis()
+        if (dirtySince == 0L) dirtySince = now
+        val wait = minOf(400L, maxOf(0L, 1000L - (now - dirtySince)))
         saveJob?.cancel()
-        saveJob = viewModelScope.launch { delay(400); withContext(Dispatchers.IO) { flushPosition() } }
+        saveJob = viewModelScope.launch { delay(wait); withContext(Dispatchers.IO) { flushPosition() } }
     }
     /** A small synchronous SQLite commit on lifecycle stop avoids losing the pending anchor in a queued coroutine. */
     @Synchronized fun flushPosition() {
         pending?.let { position ->
+            dirtySince = 0L
             try { repository.db.savePosition(position.id, position.locator, position.furthest) } catch (e: Exception) { mutable.update { it.copy(error = "进度保存失败：${e.message}") } }
         }
     }
@@ -99,27 +109,23 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun jump(locator: Locator.Text) {
         mutable.update { state -> state.copy(reader = state.reader?.let { it.copy(jump = locator, jumpSerial = it.jumpSerial + 1) }) }
     }
-    fun jumpToParagraph(paragraph: Int) {
-        val session = state.value.reader ?: return
-        if (state.value.busy || paragraph !in 0 until session.engine.index.paragraphs) return
-        viewModelScope.launch { try {
-            val block = withContext(Dispatchers.IO) { session.engine.block(paragraph) }
-            if (state.value.reader?.engine === session.engine) jump(Locator.Text(session.book.version, block.sourceOffset, paragraph))
-        } catch (e: Exception) { mutable.update { it.copy(error = "正文导航失败：${e.message}") } } }
-    }
     fun style(fontSize: Float, theme: String) {
         val session = state.value.reader ?: return
         val anchor = pending?.locator ?: session.jump
         mutable.update { it.copy(reader = session.copy(book = session.book.copy(fontSize = fontSize, theme = theme), jump = anchor, jumpSerial = session.jumpSerial + 1)) }
-        try { repository.db.setStyle(session.book.id, fontSize, theme) }
-        catch (e: Exception) { mutable.update { it.copy(error = "阅读设置保存失败：${e.message}") } }
+        viewModelScope.launch(dbWriter) {
+            try { repository.db.setStyle(session.book.id, fontSize, theme) }
+            catch (e: Exception) { mutable.update { it.copy(error = "阅读设置保存失败：${e.message}") } }
+        }
     }
     fun flow(flow: ReaderFlow) {
         val session = state.value.reader ?: return
         val anchor = pending?.locator ?: session.jump
         mutable.update { it.copy(reader = session.copy(book = session.book.copy(flow = flow.wire),jump = anchor,jumpSerial = session.jumpSerial + 1)) }
-        try { repository.db.setFlow(session.book.id,flow.wire) }
-        catch (e: Exception) { mutable.update { it.copy(error = "阅读模式保存失败：${e.message}") } }
+        viewModelScope.launch(dbWriter) {
+            try { repository.db.setFlow(session.book.id,flow.wire) }
+            catch (e: Exception) { mutable.update { it.copy(error = "阅读模式保存失败：${e.message}") } }
+        }
     }
     fun addBookmark() {
         val session = state.value.reader ?: return
@@ -129,9 +135,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     // A just-closed engine must not discard the user's captured bookmark.
                     val excerpt = try { session.engine.block(anchor.paragraph).text.drop(anchor.character).take(100) }
                         catch (_: Exception) { "文本位置 ${anchor.sourceOffset}" }
-                    repository.db.addBookmark(session.book.id, anchor, excerpt)
+                    val added = repository.db.addBookmark(session.book.id, anchor, excerpt)
                     val list = repository.db.bookmarks(session.book.id)
-                    mutable.update { state -> if (state.reader?.engine === session.engine) state.copy(reader = state.reader.copy(bookmarks = list, notice = "书签已保存")) else state }
+                    val notice = if (added) "书签已保存" else "该位置已有书签"
+                    mutable.update { state -> if (state.reader?.engine === session.engine) state.copy(reader = state.reader.copy(bookmarks = list, notice = notice)) else state }
                 }
             } catch (e: Exception) { mutable.update { state -> if (state.reader?.engine === session.engine) state.copy(error = "书签保存失败：${e.message}") else state } }
         }
@@ -159,10 +166,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             val engine = repository.engine(book)
             val document = try { TxtPublication(engine) { viewModelScope.coroutineContext.ensureActive() } }
                 catch (e: Exception) { engine.close(); throw e }
-            session.engine.close()
             pending = PendingPosition(book.id, book.current, book.furthest)
             mutable.update { it.copy(reader = TxtReadingSession(book, engine, repository.db.bookmarks(book.id), book.current,
                 notice = "编码已更改，已恢复至附近文本位置。旧索引、进度和书签备份仍保留。",document = document)) }
+            // Switch the UI to the new engine first so the old WebView is torn down before its source closes.
+            session.engine.close()
         }
     }
     private fun operation(label: String, work: () -> Unit) {
@@ -177,5 +185,5 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             finally { mutable.update { it.copy(busy = false, operation = "") } }
         }
     }
-    override fun onCleared() { flushPosition(); state.value.reader?.engine?.close(); super.onCleared() }
+    override fun onCleared() { flushPosition(); state.value.reader?.engine?.close() }
 }

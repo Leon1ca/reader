@@ -14,7 +14,6 @@ import java.util.UUID
 
 /** Android capability host; Foliate implementation details never escape this backend. */
 @SuppressLint("SetJavaScriptEnabled")
-@Suppress("DEPRECATION")
 class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) -> Unit) : RendererBackend {
     val view = WebView(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -37,42 +36,17 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         view.setBackgroundColor(Color.TRANSPARENT)
         view.settings.apply {
             javaScriptEnabled = true; allowFileAccess = false; allowContentAccess = false
-            allowFileAccessFromFileURLs = false
-            allowUniversalAccessFromFileURLs = false
+            // HTTPS-only documents; file/content access is disabled above. Deprecated
+            // file-origin cross-access switches already default to false for target >=16.
             blockNetworkLoads = true; blockNetworkImage = false; cacheMode = WebSettings.LOAD_NO_CACHE
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            domStorageEnabled = false; databaseEnabled = false; javaScriptCanOpenWindowsAutomatically = false
+            // WebSQL remains disabled by its platform default; the retired setter is unnecessary.
+            domStorageEnabled = false; javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false); setSupportZoom(false); builtInZoomControls = false; displayZoomControls = false
             // Preserve platform fontScale-derived textZoom, as in the Android shell baseline.
-            setGeolocationEnabled(false); safeBrowsingEnabled = true
+            setGeolocationEnabled(false); safeBrowsingEnabled = false // only bundled local content is loaded; no remote URL lookups
         }
-        view.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
-                val session = active ?: return true
-                return request.isForMainFrame || !request.url.toString().matches(Regex(Regex.escape(session.resources.base) + "sections/[0-9]+\\.html"))
-            }
-            @Deprecated("Legacy API") override fun shouldOverrideUrlLoading(view: WebView?, url: String?) = true
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse {
-                if (request.method != "GET") return denied()
-                val session = active ?: return denied()
-                return try {
-                    val resource = session.resources.resolve(request.url.toString(),request.isForMainFrame) ?: return denied()
-                    WebResourceResponse(resource.mime,if (resource.mime.startsWith("text/")) "UTF-8" else null,200,"OK",resource.headers,resource.open())
-                } catch (e: Exception) {
-                    view?.post { if (active === session) fail("正文资源读取失败：${e.message}") }; denied()
-                }
-            }
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame && request.url.toString() == active?.resources?.mainUrl) fail("正文组件加载失败：${error.description}")
-            }
-            override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                if (request.isForMainFrame && request.url.toString() == active?.resources?.mainUrl) fail("正文组件返回错误：${errorResponse.statusCode}")
-            }
-            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
-                fail("系统正文组件已停止，请返回书架重新打开。")
-                close(); return true
-            }
-        }
+        view.webViewClient = LocalWebViewClient(LocalWebViewPolicy())
         view.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?) = false
             override fun onPermissionRequest(request: PermissionRequest?) { request?.deny() }
@@ -83,6 +57,32 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
             if (raw.length <= 16384) receive(raw)
         }
         WebView.setWebContentsDebuggingEnabled(context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0)
+    }
+    private inner class LocalWebViewPolicy : LocalWebViewClient.Policy {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
+            val session = active ?: return true
+            return request.isForMainFrame || !request.url.toString().matches(Regex(Regex.escape(session.resources.base) + "sections/[0-9]+\\.html"))
+        }
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse {
+            if (request.method != "GET") return denied()
+            val session = active ?: return denied()
+            return try {
+                val resource = session.resources.resolve(request.url.toString(),request.isForMainFrame) ?: return denied()
+                WebResourceResponse(resource.mime,if (resource.mime.startsWith("text/")) "UTF-8" else null,200,"OK",resource.headers,resource.open())
+            } catch (e: Exception) {
+                view?.post { if (active === session) fail("正文资源读取失败：${e.message}") }; denied()
+            }
+        }
+        override fun onReceivedError(view: WebView?, request: WebResourceRequest, error: WebResourceError) {
+            if (request.isForMainFrame && request.url.toString() == active?.resources?.mainUrl) fail("正文组件加载失败：${error.description}")
+        }
+        override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+            if (request.isForMainFrame && request.url.toString() == active?.resources?.mainUrl) fail("正文组件返回错误：${errorResponse.statusCode}")
+        }
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail) {
+            if (!destroyed) { active?.gate?.fail(); watchdog?.cancel(); onEvent(RendererEvent.Crashed("系统正文组件已停止，正在恢复。")) }
+            close()
+        }
     }
     private fun receive(raw: String) {
         val session = active ?: return
@@ -108,6 +108,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                     val indexValue = (target.opt("section") as? Number)?.toDouble() ?: return
                     val charValue = (target.opt("character") as? Number)?.toDouble() ?: return
                     if (!indexValue.isFinite() || indexValue != indexValue.toInt().toDouble() || !charValue.isFinite() || charValue != charValue.toInt().toDouble()) return
+                    val reason = event.optString("reason", "scroll")
                     val block = target.optString("blockId")
                     if (block.length !in 1..128) return
                     val positionSerial = session.gate.beginPosition(identity) ?: return
@@ -116,7 +117,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                             val locator = withContext(Dispatchers.IO) { session.publication.locator(indexValue.toInt(),block,charValue.toInt()) }
                             if (active === session && session.gate.acceptsPosition(identity,positionSerial) && locator != null) {
                                 session.locator = locator
-                                onEvent(RendererEvent.Position(locator))
+                                onEvent(RendererEvent.Position(locator, reason))
                             }
                         } catch (_: Exception) { /* closed or malformed content capability */ }
                     }

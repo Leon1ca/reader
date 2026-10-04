@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>需在网站中登录或验证</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #FFFFFF; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 12px 0 8px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; border-bottom: 0.5px solid #ECECE8; background: #F7F7F5">
+    <a href="Later.dc.html" aria-label="关闭" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #1A1B1E"><span style="width: 30px; height: 30px; border-radius: 15px; background: rgba(20,22,26,0.06); display: flex; align-items: center; justify-content: center"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l8 8M10 2L2 10"></path></svg></span></a>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center">
+      <span style="font-size: 14px; font-weight: 500">在网站中完成登录或验证</span>
+      <span style="font-size: 11px; font-weight: 300; color: #63666C; display: flex; align-items: center; gap: 3px"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="10.5" width="14" height="9.5" rx="2"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path></svg>www.zhihu.com</span>
+    </div>
+    <button type="button" aria-label="在浏览器中打开" style="width: 44px; height: 44px; border: none; background: transparent; color: #1A1B1E; display: flex; align-items: center; justify-content: center; padding: 0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"></path></svg></button>
+  </div>
+
+  <div style="padding: 40px 32px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; color: #63666C">
+    <div style="width: 100%; height: 280px; border-radius: 12px; border: 1px dashed #D3D3CE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 300">[网站真实页面 · 由用户自行登录或完成验证]</div>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 20px 30px; background: #F7F7F5; border-top: 0.5px solid #ECECE8; display: flex; flex-direction: column; gap: 10px">
+    <div style="font-size: 12px; font-weight: 300; line-height: 1.6; color: #63666C">完成后，看到完整正文再点“保存当前正文”。应用不会读取或填写你的密码。</div>
+    <div style="display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px">
+      <a href="Later.dc.html" style="height: 48px; border-radius: 24px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1A1B1E; font-size: 14px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">仅保存链接</a>
+      <a href="Capture.dc.html" style="height: 48px; border-radius: 24px; background: #1F5FCC; color: #FFFFFF; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">保存当前正文</a>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

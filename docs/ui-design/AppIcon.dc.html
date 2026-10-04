@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>应用图标</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+</style>
+</helmet>
+<div style="width: 1200px; height: 560px; box-sizing: border-box; padding: 56px 64px; background: #F2F2EF; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E; display: flex; gap: 64px; align-items: center">
+
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 18px">
+    <div style="width: 300px; height: 300px; border-radius: 70px; background: {{bg}}; box-shadow: 0 18px 40px rgba(31,95,204,0.25), 0 2px 6px rgba(20,22,26,0.12); overflow: hidden">
+      <svg width="300" height="300" viewBox="0 0 108 108" aria-label="应用图标：打开的书">
+        <path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#FFFFFF"></path>
+        <path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#FFFFFF" fill-opacity="0.92"></path>
+        <path d="M65 39.6v13.2l2.8-2.2 2.8 2.2V38.9c-1.9.1-3.8.3-5.6.7z" fill="{{ribbon}}"></path>
+      </svg>
+    </div>
+    <div style="font-size: 13px; font-weight: 400; color: #55585E">主图标 · 108dp 自适应图标</div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 36px">
+    <div style="display: flex; gap: 36px; align-items: flex-end">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="width: 112px; height: 112px; border-radius: 56px; background: {{bg}}; overflow: hidden"><svg width="112" height="112" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#FFFFFF"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#FFFFFF" fill-opacity="0.92"></path><path d="M65 39.6v13.2l2.8-2.2 2.8 2.2V38.9c-1.9.1-3.8.3-5.6.7z" fill="{{ribbon}}"></path></svg></div>
+        <span style="font-size: 12px; font-weight: 300; color: #55585E">圆形遮罩</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="width: 112px; height: 112px; border-radius: 34px; background: {{bg}}; overflow: hidden"><svg width="112" height="112" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#FFFFFF"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#FFFFFF" fill-opacity="0.92"></path><path d="M65 39.6v13.2l2.8-2.2 2.8 2.2V38.9c-1.9.1-3.8.3-5.6.7z" fill="{{ribbon}}"></path></svg></div>
+        <span style="font-size: 12px; font-weight: 300; color: #55585E">方圆遮罩</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="width: 112px; height: 112px; border-radius: 56px; background: #DDE5F4; overflow: hidden"><svg width="112" height="112" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#22427A"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#22427A"></path></svg></div>
+        <span style="font-size: 12px; font-weight: 300; color: #55585E">主题图标（单色）</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="width: 112px; height: 112px; border-radius: 56px; background: #1C1D20; overflow: hidden"><svg width="112" height="112" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#E9EEF8"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#E9EEF8" fill-opacity="0.92"></path><path d="M65 39.6v13.2l2.8-2.2 2.8 2.2V38.9c-1.9.1-3.8.3-5.6.7z" fill="{{ribbon}}"></path></svg></div>
+        <span style="font-size: 12px; font-weight: 300; color: #55585E">深色主题</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div style="width: 112px; height: 112px; position: relative; border-radius: 12px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #E1E1DC">
+          <svg width="112" height="112" viewBox="0 0 108 108" fill="none"><circle cx="54" cy="54" r="33" stroke="#C9873F" stroke-width="0.8" stroke-dasharray="2 2"></circle><rect x="0.5" y="0.5" width="107" height="107" stroke="#D0D0CB" stroke-width="0.8"></rect><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#1F5FCC"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#1F5FCC" fill-opacity="0.85"></path></svg>
+        </div>
+        <span style="font-size: 12px; font-weight: 300; color: #55585E">66dp 安全区</span>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 28px; padding: 22px 28px; border-radius: 24px; background: linear-gradient(135deg, #CBD6E8, #E9DCCB)">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+        <div style="width: 56px; height: 56px; border-radius: 28px; background: #E9EAE6"></div>
+        <span style="font-size: 11px; color: #2A2C30">[应用]</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+        <div style="width: 56px; height: 56px; border-radius: 28px; background: {{bg}}; overflow: hidden; box-shadow: 0 3px 8px rgba(20,22,26,0.15)"><svg width="56" height="56" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#FFFFFF"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#FFFFFF" fill-opacity="0.92"></path><path d="M65 39.6v13.2l2.8-2.2 2.8 2.2V38.9c-1.9.1-3.8.3-5.6.7z" fill="{{ribbon}}"></path></svg></div>
+        <span style="font-size: 11px; color: #1A1B1E; font-weight: 500">本地阅读器</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+        <div style="width: 56px; height: 56px; border-radius: 28px; background: #E9EAE6"></div>
+        <span style="font-size: 11px; color: #2A2C30">[应用]</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+        <div style="width: 56px; height: 56px; border-radius: 28px; background: #E9EAE6"></div>
+        <span style="font-size: 11px; color: #2A2C30">[应用]</span>
+      </div>
+      <span style="margin-left: auto; font-size: 12px; font-weight: 300; color: #2A2C30">桌面实际尺寸预览（48dp）</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"bg":{"editor":"color","options":["#1F5FCC","#2E6E58","#B4583A","#24262A"],"default":"#1F5FCC"},"ribbon":{"editor":"color","options":["#F2A541","#E86A4E","#FFFFFF"],"default":"#F2A541"},"$preview":{"width":1200,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { bg: this.props.bg ?? '#1F5FCC', ribbon: this.props.ribbon ?? '#F2A541' };
+  }
+}
+</script>
+</body>
+</html>

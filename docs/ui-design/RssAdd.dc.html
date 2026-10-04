@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RSS · 添加订阅</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 16px 0; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between">
+    <a href="Rss.dc.html" style="font-size: 15px; font-weight: 400; color: #63666C; text-decoration: none; height: 44px; display: flex; align-items: center">取消</a>
+    <span style="font-size: 16px; font-weight: 500">添加订阅</span>
+    <button type="button" style="height: 44px; border: none; background: transparent; color: #1F5FCC; font: inherit; font-size: 15px; font-weight: 500; padding: 0">订阅</button>
+  </div>
+
+  <div style="padding: 4px 20px 0; display: flex; flex-direction: column; gap: 16px">
+    <label style="display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; border-radius: 14px; border: 1px solid #1F5FCC; background: #FFFFFF">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#63666C" stroke-width="1.7" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"></path><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"></path></svg>
+      <input type="url" value="[新闻机构官网地址]" aria-label="RSS 或网站地址" style="flex: 1; border: none; background: transparent; font: inherit; font-size: 15px; color: #1A1B1E; outline: none; min-width: 0">
+    </label>
+
+    <div style="font-size: 12px; font-weight: 300; color: #63666C; padding: 0 2px">在该网站发现 2 个订阅源，请选择：</div>
+
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 0 16px">
+      <label style="min-height: 64px; display: flex; align-items: center; gap: 12px; border-bottom: 0.5px solid #ECECE8">
+        <span style="width: 22px; height: 22px; border-radius: 11px; border: 6px solid #1F5FCC; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 400">[机构名] · 要闻</span><span style="font-size: 12px; font-weight: 300; color: #63666C">RSS · 最近更新 2 小时前</span></span>
+      </label>
+      <label style="min-height: 64px; display: flex; align-items: center; gap: 12px">
+        <span style="width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid #C6C7CB; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 400">[机构名] · 科技</span><span style="font-size: 12px; font-weight: 300; color: #63666C">Atom · 最近更新昨天</span></span>
+      </label>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; font-weight: 300; color: #63666C; padding: 0 2px">最近条目预览</div>
+      <div style="border-radius: 16px; background: #FFFFFF; padding: 4px 16px">
+        <div style="padding: 10px 0; border-bottom: 0.5px solid #ECECE8; display: flex; justify-content: space-between; gap: 10px"><span style="font-size: 14px; font-weight: 400">[示例标题一]</span><span style="font-size: 11px; font-weight: 400; color: #1E6B45; flex: none">全文</span></div>
+        <div style="padding: 10px 0; border-bottom: 0.5px solid #ECECE8; display: flex; justify-content: space-between; gap: 10px"><span style="font-size: 14px; font-weight: 400">[示例标题二]</span><span style="font-size: 11px; font-weight: 400; color: #63666C; flex: none">摘要</span></div>
+        <div style="padding: 10px 0; display: flex; justify-content: space-between; gap: 10px"><span style="font-size: 14px; font-weight: 400">[示例标题三]</span><span style="font-size: 11px; font-weight: 400; color: #63666C; flex: none">摘要</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; font-weight: 300; color: #63666C; padding: 0 2px">分组</div>
+      <div style="height: 40px; box-sizing: border-box; padding: 3px; border-radius: 12px; background: #ECECE8; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px">
+        <button type="button" style="border: none; border-radius: 9px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(20,22,26,0.1); font: inherit; font-size: 13px; font-weight: 500; color: #1F5FCC">国际</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">科技</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">财经</button>
+        <button type="button" style="border: none; border-radius: 9px; background: transparent; font: inherit; font-size: 13px; color: #44474D">+ 新建</button>
+      </div>
+    </div>
+
+    <button type="button" style="height: 44px; border: none; background: transparent; color: #1F5FCC; font: inherit; font-size: 14px; font-weight: 400">从 OPML 文件导入</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

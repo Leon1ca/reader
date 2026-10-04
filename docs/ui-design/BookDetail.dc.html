@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>图书详情</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <div style="height: 84px; padding: 28px 12px 0 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between">
+    <a href="Main.dc.html" aria-label="返回书架" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #1A1B1E"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></a>
+    <button type="button" aria-label="更多" style="width: 36px; height: 36px; border: none; background: rgba(20,22,26,0.05); border-radius: 18px; color: #2A2C30; display: flex; align-items: center; justify-content: center; padding: 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5.75" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="18.25" cy="12" r="1.5"></circle></svg></button>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; padding: 4px 24px 0">
+    <div style="width: 132px; height: 176px; border-radius: 3px 6px 6px 3px; background-color: #3E5C4E; background-image: linear-gradient(90deg, rgba(0,0,0,0.24) 0, rgba(0,0,0,0.08) 3px, rgba(255,255,255,0.18) 4px, rgba(255,255,255,0) 10px, rgba(0,0,0,0.05) 13px, rgba(0,0,0,0) 20px), linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 40%, rgba(0,0,0,0.1)); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 2px 3px rgba(30,40,35,0.12), 0 24px 36px -16px rgba(30,40,35,0.5); position: relative; display: flex; justify-content: center; padding-top: 20px; box-sizing: border-box"><span aria-hidden="true" style="position: absolute; inset: 9px 9px 9px 14px; border: 0.5px solid rgba(242,234,216,0.4); border-radius: 1px"></span>
+      <div style="writing-mode: vertical-rl; font-family: 'Noto Serif SC', serif; font-size: 22px; font-weight: 500; letter-spacing: 6px; color: #F2EAD8">呐喊</div>
+    </div>
+    <h1 style="margin: 22px 0 0; font-family: 'Noto Serif SC', serif; font-size: 22px; font-weight: 500; letter-spacing: 1px">呐喊</h1>
+    <div style="margin-top: 4px; font-size: 14px; font-weight: 300; color: #63666C">鲁迅</div>
+    <a href="Reader.dc.html" style="margin-top: 18px; height: 44px; padding: 0 36px; border-radius: 22px; background: #1F5FCC; color: #FFFFFF; font-size: 15px; font-weight: 400; letter-spacing: 0.5px; text-decoration: none; display: flex; align-items: center">继续阅读 · 23%</a>
+  </div>
+
+  <div style="margin: 24px 20px 0; padding: 4px 16px; border-radius: 16px; background: #FFFFFF; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr))">
+    <div style="padding: 12px 0; display: flex; flex-direction: column; gap: 3px; align-items: center"><span style="font-size: 15px; font-weight: 500">EPUB</span><span style="font-size: 11px; font-weight: 300; color: #63666C">格式</span></div>
+    <div style="padding: 12px 0; display: flex; flex-direction: column; gap: 3px; align-items: center; border-left: 0.5px solid #ECECE8; border-right: 0.5px solid #ECECE8"><span style="font-size: 15px; font-weight: 500">2.4 MB</span><span style="font-size: 11px; font-weight: 300; color: #63666C">大小</span></div>
+    <div style="padding: 12px 0; display: flex; flex-direction: column; gap: 3px; align-items: center"><span style="font-size: 15px; font-weight: 500">286 页</span><span style="font-size: 11px; font-weight: 300; color: #63666C">当前排版</span></div>
+  </div>
+
+  <div style="margin: 12px 20px 0; border-radius: 16px; background: #FFFFFF; display: flex; flex-direction: column">
+    <div style="min-height: 52px; padding: 10px 16px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid #ECECE8">
+      <span style="font-size: 15px; font-weight: 400; flex: none">分类</span>
+      <div style="flex: 1; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap">
+        <span style="height: 26px; padding: 0 10px; border-radius: 13px; background: #E9F0FC; color: #1F5FCC; font-size: 12px; display: flex; align-items: center">小说</span>
+        <span style="height: 26px; padding: 0 10px; border-radius: 13px; background: #E9F0FC; color: #1F5FCC; font-size: 12px; display: flex; align-items: center">现代文学</span>
+        <a href="CategoryPicker.dc.html" aria-label="添加分类" style="text-decoration: none; display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 26px; width: 26px; border-radius: 13px; border: 0.5px dashed #B9BBC0; background: transparent; color: #63666C; padding: 0; font-size: 14px">+</a>
+      </div>
+    </div>
+    <a href="ReaderBookmarks.dc.html" style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #ECECE8; text-decoration: none; color: #1A1B1E"><span style="font-size: 15px; font-weight: 400">书签</span><span style="font-size: 14px; font-weight: 300; color: #63666C">3 个 ›</span></a>
+    <a href="ReaderSettings.dc.html" style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #ECECE8; text-decoration: none; color: #1A1B1E"><span style="font-size: 15px; font-weight: 400">本书阅读设置</span><span style="font-size: 14px; font-weight: 300; color: #63666C">已单独设置 ›</span></a>
+    <div style="height: 50px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between"><span style="font-size: 15px; font-weight: 400">导入时间</span><span style="font-size: 14px; font-weight: 300; color: #63666C">2026-09-28 · 呐喊.epub</span></div>
+  </div>
+
+  <a href="DeleteConfirm.dc.html" style="margin: 12px 20px 0; height: 50px; border-radius: 16px; background: #FFFFFF; color: #C23B2E; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">从书架删除</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

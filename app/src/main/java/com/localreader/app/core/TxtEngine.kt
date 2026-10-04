@@ -9,15 +9,21 @@ object TxtParser {
     const val RECORD_SIZE = 28L
     const val MAX_BLOCK = 2048
     const val MAX_BYTES = 128L * 1024 * 1024
-    private val heading = Regex("^(第[零〇一二三四五六七八九十百千万0-9]+[章节卷部回].*|Chapter\\s+\\S+.*|序章|序言|前言|后记|尾声)$", RegexOption.IGNORE_CASE)
-    val encodings = listOf("UTF-8", "UTF-16LE", "UTF-16BE", "GB18030")
+    /** 4M records = ~112 MB of index; beyond this the file is pathological (e.g. millions of blank lines). */
+    const val MAX_PARAGRAPHS = 4_000_000
+    private const val SENTENCE_END = "。！？，；…"
+    private val heading = Regex("^(第[零〇一二三四五六七八九十百千万0-9]+[章节卷部回].*|Chapter\\s+([0-9]+|[IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen|Seventeen|Eighteen|Nineteen|Twenty|Thirty|Forty|Fifty|Hundred)\\b.*|序章|序言|前言|后记|尾声)$", RegexOption.IGNORE_CASE)
+    val encodings = listOf("UTF-8", "UTF-16LE", "UTF-16BE", "GB18030", "Big5", "Shift_JIS", "ISO-8859-1")
+    /** Strict single-byte-safe candidates tried in order after UTF-8; ISO-8859-1 maps every byte and never fails. */
+    private val fallbacks = listOf("GB18030", "Big5", "Shift_JIS", "ISO-8859-1")
 
     fun detect(file: File, checkpoint: () -> Unit = {}): String {
         val bom = file.inputStream().use { prefix(it) }
         if (bom.size >= 2 && bom[0] == 0xff.toByte() && bom[1] == 0xfe.toByte()) return "UTF-16LE"
         if (bom.size >= 2 && bom[0] == 0xfe.toByte() && bom[1] == 0xff.toByte()) return "UTF-16BE"
         if (bom.size == 3 && bom[0] == 0xef.toByte() && bom[1] == 0xbb.toByte() && bom[2] == 0xbf.toByte()) return "UTF-8"
-        return if (valid(file, "UTF-8", checkpoint)) "UTF-8" else "GB18030"
+        if (valid(file, "UTF-8", checkpoint)) return "UTF-8"
+        return fallbacks.firstOrNull { valid(file, it, checkpoint) } ?: "ISO-8859-1"
     }
 
     private fun valid(file: File, encoding: String, checkpoint: () -> Unit): Boolean = try {
@@ -70,13 +76,17 @@ object TxtParser {
         val sections = mutableListOf<Chapter>()
         var nextSection = 0L
         var continued = false
+        var visible = false
+        var pendingCR = false
         FileOutputStream(File(directory, "text.bin")).use { raw ->
             val out = BufferedOutputStream(raw)
             FileOutputStream(File(directory, "index.bin")).use { indexRaw ->
                 val records = DataOutputStream(BufferedOutputStream(indexRaw))
                 fun flush(text: String, consumed: Int, continues: Boolean = false) {
+                    require(count < MAX_PARAGRAPHS) { "段落数超过 400 万，文件不像正常文本" }
                     val cleaned = text.removeSuffix("\r")
-                    val isHeading = !continued && !continues && cleaned.length in 1..120 && heading.matches(cleaned.trim())
+                    val isHeading = !continued && !continues && cleaned.length in 1..80 && heading.matches(cleaned.trim()) &&
+                        cleaned.trim().last() !in SENTENCE_END
                     if (isHeading && chapters.size < 10000) chapters += Chapter(cleaned.trim(), count, offset)
                     if (offset >= nextSection && sections.size < 10000) {
                         sections += Chapter("分段 ${sections.size + 1}", count, offset); nextSection = offset + 40000
@@ -94,27 +104,36 @@ object TxtParser {
                     while (true) {
                         val char = input.read()
                         if (char < 0) break
+                        // A lone CR (classic Mac line ending) ends the line; CRLF still ends at the LF.
+                        if (pendingCR && char != 10) { flush(text.toString(), consumed); text.setLength(0); consumed = 0 }
+                        pendingCR = false
                         total++; consumed++
+                        if (!visible && !char.toChar().isWhitespace()) visible = true
                         if (total % 8192 == 0L) checkpoint()
                         require(char != 0) { "包含 NUL 字符，无法作为 TXT 导入；无 BOM 的 UTF-16 请先添加 BOM" }
-                        if ((char < 32 && char != 10 && char != 13 && char != 9) || char == 0x7f) controls++
+                        // C0 controls, DEL and C1 controls (U+0080..U+009F) never occur in real text; many of them mean binary data,
+                        // which matters for the ISO-8859-1 fallback because it can decode any byte sequence.
+                        if ((char < 32 && char != 10 && char != 13 && char != 9) || char == 0x7f || char in 0x80..0x9f) controls++
                         require(controls <= 16 || controls * 100 <= total) { "包含大量二进制控制字符，无法作为 TXT 导入" }
                         if (char == 10) { flush(text.toString(), consumed); text.setLength(0); consumed = 0 }
                         else {
                             text.append(char.toChar())
-                            if (text.length >= MAX_BLOCK && !Character.isHighSurrogate(text.last())) {
-                                flush(text.toString(), consumed, true); text.setLength(0); consumed = 0
+                            if (char == 13) pendingCR = true
+                            // Never split right after a CR: the CR ends the physical line, so the next character must start
+                            // a new paragraph (not a continuation). The next iteration flushes it (or pairs it with LF).
+                            if (text.length >= MAX_BLOCK && char != 13 && !Character.isHighSurrogate(text.last())) {
+                                flush(text.toString(), consumed, true); text.setLength(0); consumed = 0; pendingCR = false
                             }
                         }
                     }
                     if (consumed > 0) flush(text.toString(), consumed)
                 }
-                require(count > 0) { "文件没有可读正文" }
+                require(count > 0 && visible) { "文件没有可读正文" }
                 require(controls * 100 <= total) { "包含大量二进制控制字符，无法作为 TXT 导入" }
                 records.flush(); indexRaw.fd.sync(); out.flush(); raw.fd.sync()
             }
         }
-        val result = TextIndex(encoding, count, total, if (chapters.isEmpty()) sections else chapters)
+        val result = TextIndex(encoding, count, total, if (chapters.size < 2) sections else chapters)
         FileOutputStream(File(directory, "meta.bin")).use { raw ->
             val meta = DataOutputStream(raw)
             meta.writeInt(2); meta.writeUTF(encoding); meta.writeInt(count); meta.writeLong(total)
@@ -136,16 +155,22 @@ class TxtEngine(private val directory: File, override val version: String) : Txt
         TextIndex(encoding, count, total, chapters)
     }
     private val text = RandomAccessFile(File(directory, "text.bin"), "r")
-    private val records = RandomAccessFile(File(directory, "index.bin"), "r")
+    private val records = try { RandomAccessFile(File(directory, "index.bin"), "r") } catch (e: Exception) { text.close(); throw e }
     private val cache = object : LinkedHashMap<Int, TextBlock>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, TextBlock>?) = size > 64
+    }
+    private val recordBytes = ByteArray(TxtParser.RECORD_SIZE.toInt())
+    /** One positioned read per record (big-endian, matching DataOutputStream). Callers are @Synchronized. */
+    private fun record(paragraph: Int): java.nio.ByteBuffer {
+        records.seek(paragraph * TxtParser.RECORD_SIZE); records.readFully(recordBytes)
+        return java.nio.ByteBuffer.wrap(recordBytes)
     }
     @Synchronized override fun block(paragraph: Int): TextBlock {
         require(paragraph in 0 until index.paragraphs)
         cache[paragraph]?.let { return it }
-        records.seek(paragraph * TxtParser.RECORD_SIZE)
-        val start = records.readLong(); val length = records.readInt(); val sourceOffset = records.readLong()
-        val consumed = records.readInt(); val flags = records.readInt()
+        val r = record(paragraph)
+        val start = r.getLong(0); val length = r.getInt(8); val sourceOffset = r.getLong(12)
+        val consumed = r.getInt(20); val flags = r.getInt(24)
         require(length in 0..(TxtParser.MAX_BLOCK + 1) * 4) { "索引数据损坏" }
         val bytes = ByteArray(length); text.seek(start); text.readFully(bytes)
         val content = bytes.toString(Charsets.UTF_8)
@@ -154,9 +179,9 @@ class TxtEngine(private val directory: File, override val version: String) : Txt
         if (formatVersion == 1) {
             continues = content.length >= TxtParser.MAX_BLOCK && consumed == content.length
             if (paragraph > 0) {
-                records.seek((paragraph - 1) * TxtParser.RECORD_SIZE)
-                val previousStart = records.readLong(); val previousLength = records.readInt(); records.readLong()
-                val previousConsumed = records.readInt()
+                val p = record(paragraph - 1)
+                val previousStart = p.getLong(0); val previousLength = p.getInt(8)
+                val previousConsumed = p.getInt(20)
                 require(previousLength in 0..(TxtParser.MAX_BLOCK + 1) * 4) { "索引数据损坏" }
                 val previousBytes = ByteArray(previousLength); text.seek(previousStart); text.readFully(previousBytes)
                 val previousTextLength = previousBytes.toString(Charsets.UTF_8).length
@@ -168,14 +193,15 @@ class TxtEngine(private val directory: File, override val version: String) : Txt
     @Synchronized override fun resolve(locator: Locator): ResolvedText {
         require(locator is Locator.Text) { "TXT 引擎不能使用此格式的位置" }
         val last = (index.totalCharacters - 1).coerceAtLeast(0)
+        // An offset recorded against another index version may mean a different character after re-decoding.
+        val foreign = locator.version != version
         val outside = locator.sourceOffset !in 0..last
-        val target = if (outside && locator.fallbackFraction.isFinite() && locator.fallbackFraction in 0.0..1.0)
+        val target = if ((outside || foreign) && locator.fallbackFraction.isFinite() && locator.fallbackFraction in 0.0..1.0)
             (locator.fallbackFraction * last).toLong() else locator.sourceOffset.coerceIn(0, last)
         var low = 0; var high = index.paragraphs - 1
         while (low < high) {
             val mid = (low + high + 1) / 2
-            records.seek(mid * TxtParser.RECORD_SIZE + 12)
-            if (records.readLong() <= target) low = mid else high = mid - 1
+            if (record(mid).getLong(12) <= target) low = mid else high = mid - 1
         }
         val block = block(low)
         return ResolvedText(low, (target - block.sourceOffset).toInt().coerceIn(0, block.text.length), locator.version != version || outside)
@@ -183,8 +209,8 @@ class TxtEngine(private val directory: File, override val version: String) : Txt
     @Synchronized override fun metadata(paragraph: Int): TxtBlockMetadata {
         require(paragraph in 0 until index.paragraphs)
         if (formatVersion == 1) return super.metadata(paragraph)
-        records.seek(paragraph * TxtParser.RECORD_SIZE + 8)
-        val length = records.readInt(); records.readLong(); records.readInt(); val flags = records.readInt()
+        val r = record(paragraph)
+        val length = r.getInt(8); val flags = r.getInt(24)
         require(length in 0..(TxtParser.MAX_BLOCK + 1) * 4) { "索引数据损坏" }
         return TxtBlockMetadata(length,flags and 2 != 0)
     }

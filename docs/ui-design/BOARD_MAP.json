@@ -1,0 +1,306 @@
+{
+ "UiSpec": {
+  "group": "规范",
+  "tasks": "U1-1…U1-3、U6-4"
+ },
+ "AppIcon": {
+  "group": "规范",
+  "tasks": "U1-1…U1-3、U6-4"
+ },
+ "TabBar": {
+  "group": "A",
+  "tasks": "U2-2"
+ },
+ "Main": {
+  "group": "A",
+  "tasks": "U3-1、U3-2、U3-5"
+ },
+ "StatePhoneEmpty": {
+  "group": "A",
+  "tasks": "U3-1、U3-2、U3-5"
+ },
+ "StatePhoneNoRecent": {
+  "group": "A",
+  "tasks": "U3-1、U3-2、U3-5"
+ },
+ "StatePhoneOne": {
+  "group": "A",
+  "tasks": "U3-1、U3-2、U3-5"
+ },
+ "ShelfSearchEmpty": {
+  "group": "A",
+  "tasks": "U3-1、U3-2、U3-5"
+ },
+ "BookDetail": {
+  "group": "A",
+  "tasks": "U3-7"
+ },
+ "DeleteConfirm": {
+  "group": "A",
+  "tasks": "U3-7"
+ },
+ "ImportProgress": {
+  "group": "A",
+  "tasks": "U3-6"
+ },
+ "StorageFull": {
+  "group": "A",
+  "tasks": "U3-6"
+ },
+ "Reader": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderToolbar": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderDark": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderRelocated": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderError": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderBookmarked": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderToc": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderBookmarks": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "ReaderSettings": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "TxtEncoding": {
+  "group": "A",
+  "tasks": "U4-1…U4-3、U4-4、U4-7"
+ },
+ "Settings": {
+  "group": "A",
+  "tasks": "U6-1"
+ },
+ "ContinueList": {
+  "group": "B",
+  "tasks": "U3-3、U3-4"
+ },
+ "ShelfSelect": {
+  "group": "B",
+  "tasks": "U3-3、U3-4"
+ },
+ "BatchDeleteConfirm": {
+  "group": "B",
+  "tasks": "U3-3、U3-4"
+ },
+ "ReaderSearch": {
+  "group": "B",
+  "tasks": "U4-5、U4-4"
+ },
+ "ReaderPanel": {
+  "group": "B",
+  "tasks": "U4-5、U4-4"
+ },
+ "TocSidebar": {
+  "group": "B（组件）",
+  "tasks": "U4-3、U5-2"
+ },
+ "TabletShelf": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "StateTabletEmpty": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "StateTabletOne": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "StateTabletTwo": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "FoldShelf": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "StateFoldEmpty": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "StateFoldOne": {
+  "group": "B",
+  "tasks": "U5-1"
+ },
+ "TabletReader": {
+  "group": "B",
+  "tasks": "U5-2"
+ },
+ "TabletReaderToolbar": {
+  "group": "B",
+  "tasks": "U5-2"
+ },
+ "TabletReaderToc": {
+  "group": "B",
+  "tasks": "U5-2"
+ },
+ "FoldReaderToolbar": {
+  "group": "B",
+  "tasks": "U5-2"
+ },
+ "FoldReaderToc": {
+  "group": "B",
+  "tasks": "U5-2"
+ },
+ "ReaderFootnote": {
+  "group": "E",
+  "tasks": "U4-6"
+ },
+ "ImageViewer": {
+  "group": "E",
+  "tasks": "U4-6"
+ },
+ "ReaderFinish": {
+  "group": "E",
+  "tasks": "U4-6"
+ },
+ "Storage": {
+  "group": "C（只读实现）",
+  "tasks": "U6-2"
+ },
+ "Later": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "LaterEmpty": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "AddLink": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ShareChoose": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "Capture": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "CaptureTask": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "CaptureFailed": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "NeedsAction": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "Article": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ArticleSummary": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ArticleVersion": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ArticleUnverified": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ArticleUpdateFailed": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "ArticleMore": {
+  "group": "C",
+  "tasks": "U2-3（统一“开发中”页，不实现）"
+ },
+ "Rss": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "RssAdd": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "RssEmpty": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "RssNoUnread": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "RssRefreshing": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "RssOffline": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "FeedDetail": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "FeedManage": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "FeedDeleteConfirm": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "OpmlResult": {
+  "group": "C",
+  "tasks": "U2-3（同上）"
+ },
+ "CategoryPicker": {
+  "group": "C",
+  "tasks": "U3-4（入口“开发中”）"
+ },
+ "CategoryManage": {
+  "group": "C",
+  "tasks": "U3-4（入口“开发中”）"
+ },
+ "PdfReader": {
+  "group": "C",
+  "tasks": "U3-1（空书架里的“漫画文件夹”入口“开发中”）"
+ },
+ "ComicReader": {
+  "group": "C",
+  "tasks": "U3-1（空书架里的“漫画文件夹”入口“开发中”）"
+ },
+ "Backup": {
+  "group": "C",
+  "tasks": "U6-1（入口“开发中”）"
+ },
+ "RestorePreview": {
+  "group": "C",
+  "tasks": "U6-1（入口“开发中”）"
+ },
+ "SiteSessions": {
+  "group": "C",
+  "tasks": "U6-1（入口“开发中”）"
+ }
+}

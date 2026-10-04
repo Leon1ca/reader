@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RSS 订阅</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1A1B1E}a:hover{color:#1A1B1E}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+
+  <header style="padding: 30px 16px 0 20px; display: flex; align-items: center; justify-content: space-between">
+    <h1 style="margin: 0; font-size: 26px; font-weight: 500; letter-spacing: 1px">RSS</h1>
+    <div style="display: flex; gap: 8px">
+      <button type="button" aria-label="刷新全部" style="width: 36px; height: 36px; border: none; background: rgba(20,22,26,0.05); border-radius: 18px; color: #2A2C30; display: flex; align-items: center; justify-content: center; padding: 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"></path><path d="M19.5 4.5v4h-4"></path></svg></button>
+      <a href="FeedManage.dc.html" aria-label="订阅源管理" style="width: 36px; height: 36px; background: rgba(20,22,26,0.05); border-radius: 18px; color: #2A2C30; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 6.5h14M5 12h14M5 17.5h9"></path></svg></a>
+    </div>
+  </header>
+  <div style="padding: 2px 20px 0; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 300; color: #63666C">
+    <sc-if value="{{isRefreshing}}" hint-placeholder-val="{{false}}"><span aria-hidden="true" style="width: 12px; height: 12px; border-radius: 6px; border: 1.5px solid #D6DCEA; border-top-color: #1F5FCC; box-sizing: border-box"></span></sc-if>
+    <span>{{subtitle}}</span>
+  </div>
+
+  <div style="margin-top: 14px; padding: 0 20px; display: flex; gap: 8px; overflow: hidden; white-space: nowrap">
+    <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: none; background: #24262A; color: #FFFFFF; font: inherit; font-size: 13px; font-weight: 400">全部未读 42</button>
+    <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #44474D; font: inherit; font-size: 13px; font-weight: 300">科技 18</button>
+    <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #44474D; font: inherit; font-size: 13px; font-weight: 300">国际 15</button>
+    <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #44474D; font: inherit; font-size: 13px; font-weight: 300">财经 9</button>
+    <button type="button" style="height: 30px; padding: 0 14px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #44474D; font: inherit; font-size: 13px; font-weight: 300">收藏</button>
+  </div>
+
+  <sc-if value="{{isNormal}}" hint-placeholder-val="{{true}}">
+    <a href="FeedDetail.dc.html" style="margin: 14px 20px 0; padding: 0 12px; height: 40px; border-radius: 14px; background: #FBF1E4; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: #8A4600; text-decoration: none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+      <span style="flex: 1">[城市晚报] 暂时限制请求，稍后自动重试</span>
+      <span style="font-weight: 500">详情 ›</span>
+    </a>
+  </sc-if>
+  <sc-if value="{{isOffline}}" hint-placeholder-val="{{false}}">
+    <div role="status" style="margin: 14px 20px 0; padding: 0 6px 0 12px; height: 40px; border-radius: 14px; background: #EDEDEA; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: #44474D">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5a12 12 0 0 1 4.2-2.6M12 6.5a12 12 0 0 1 8 3"></path><path d="M7.5 13a7 7 0 0 1 9 0"></path><circle cx="12" cy="17" r="1" fill="currentColor"></circle><path d="M4 4l16 16"></path></svg>
+      <span style="flex: 1">网络不可用，显示的是上次更新的内容</span>
+      <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: none; background: #FFFFFF; font: inherit; font-size: 12px; font-weight: 500; color: #44474D">重试</button>
+    </div>
+  </sc-if>
+
+  <div style="padding: 18px 24px 8px; font-size: 12px; font-weight: 400; letter-spacing: 1px; color: #63666C">今天</div>
+
+  <div style="margin: 0 20px; border-radius: 18px; background: #FFFFFF; overflow: hidden; box-shadow: 0 0 0 0.5px rgba(20,22,26,0.05), 0 1px 2px rgba(20,22,26,0.04), 0 8px 24px -12px rgba(20,22,26,0.14)">
+    <article style="padding: 14px; display: flex; flex-direction: column; gap: 6px; border-bottom: 0.5px solid #ECECE8">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 300; color: #63666C">
+        <span style="width: 20px; height: 20px; border-radius: 6px; background: #2E4A6B; color: #FFFFFF; font-size: 10px; font-weight: 500; display: flex; align-items: center; justify-content: center">环</span>
+        <span style="font-weight: 400; color: #44474D">[环宇科技周刊]</span><span>· 08:15</span>      </div>
+      <div style="display: flex; gap: 6px; align-items: flex-start"><span style="width: 6px; height: 6px; border-radius: 3px; background: #1F5FCC; flex: none; margin-top: 8px"></span><h2 style="margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45">[示例标题] 新一代电子墨水屏的刷新率瓶颈在哪里</h2></div>
+      <p style="margin: 0 0 0 12px; font-size: 13px; font-weight: 300; line-height: 1.6; color: #44474D; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">[摘要占位] 订阅源提供的正文首段，在列表中最多显示两行。</p>
+      <div style="margin-left: 12px; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: #1E6B45"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 12.2l2.4 2.3 4.6-4.8"></path></svg>完整图文离线</div>
+    </article>
+
+    <article style="padding: 14px; display: flex; flex-direction: column; gap: 6px; border-bottom: 0.5px solid #ECECE8">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 300; color: #63666C">
+        <span style="width: 20px; height: 20px; border-radius: 6px; background: #8C2F2B; color: #FFFFFF; font-size: 10px; font-weight: 500; display: flex; align-items: center; justify-content: center">东</span>
+        <span style="font-weight: 400; color: #44474D">[东方观察]</span><span>· 07:40</span>      </div>
+      <div style="display: flex; gap: 6px; align-items: flex-start"><span style="width: 6px; height: 6px; border-radius: 3px; background: #1F5FCC; flex: none; margin-top: 8px"></span><h2 style="margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45">[示例标题] 港口自动化改造进入第二阶段</h2></div>
+      <p style="margin: 0 0 0 12px; font-size: 13px; font-weight: 300; line-height: 1.6; color: #44474D; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">[摘要占位] 订阅源只提供摘要；移动网络下不会自动抓取全文。</p>
+      <div style="margin-left: 12px; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: #63666C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 7h12M6 12h12M6 17h7"></path></svg>摘要已保存</div>
+      <div style="display: flex; gap: 8px; margin: 2px 0 0 12px">
+        <a href="ArticleSummary.dc.html" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; font-size: 12px; font-weight: 400; color: #1F5FCC; text-decoration: none; display: flex; align-items: center">下载全文</a>
+        <button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 0.5px solid #D9D9D4; background: #FFFFFF; font: inherit; font-size: 12px; font-weight: 400; color: #44474D">加入稍后阅读</button>
+      </div>
+    </article>
+
+    <article style="padding: 14px; display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 300; color: #63666C">
+        <span style="width: 20px; height: 20px; border-radius: 6px; background: #5B6E3E; color: #FFFFFF; font-size: 10px; font-weight: 500; display: flex; align-items: center; justify-content: center">数</span>
+        <span style="font-weight: 400; color: #44474D">[数据新闻实验室]</span><span>· 发布时间未知</span>      </div>
+      <h2 style="margin: 0 0 0 12px; font-size: 15px; font-weight: 400; line-height: 1.45; color: #63666C">[示例标题] 用三张图看懂城市通勤时间的变化</h2>
+      <div style="margin-left: 12px; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: #8A4600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>文字已离线，缺 2 张图片</div>
+    </article>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 140px; background: linear-gradient(to bottom, rgba(247,247,245,0), rgba(247,247,245,0.96) 55%)"></div>
+  <div style="position: absolute; left: 0; bottom: 0">
+    <dc-import name="TabBar" active="rss" hint-size="390px,112px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"state":{"editor":"enum","options":["normal","refreshing","offline"],"default":"normal"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.props.state ?? 'normal';
+    const subtitle = s === 'refreshing' ? '正在检查订阅源 5 / 12…' : s === 'offline' ? '上次成功更新 今天 09:42 · 当前离线' : '上次成功更新 今天 09:42 · 约每 6 小时检查';
+    return { subtitle, isRefreshing: s === 'refreshing', isNormal: s === 'normal', isOffline: s === 'offline' };
+  }
+}
+</script>
+</body>
+</html>

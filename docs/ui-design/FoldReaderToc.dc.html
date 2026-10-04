@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>折叠屏阅读器 · 目录侧栏</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;family=Noto+Serif+SC:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<div style="width: 720px; height: 830px; position: relative; overflow: hidden; background-color: #F3ECDF; font-family: 'Noto Sans SC', sans-serif; color: #2B2620; display: flex">
+  <div style="flex: none">
+    <dc-import name="TocSidebar" w="320" h="830" close-href="FoldReaderToolbar.dc.html" hint-size="320px,830px"></dc-import>
+  </div>
+  <div style="flex: 1; min-width: 0; position: relative">
+    <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; padding-top: 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 400; letter-spacing: 1px; color: #5A5040">本章剩余 4 页</div>
+    <a href="FoldShelf.dc.html" aria-label="关闭本书" style="position: absolute; top: 20px; right: 12px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; text-decoration: none"><span style="width: 30px; height: 30px; border-radius: 15px; background: rgba(90,80,64,0.1); display: flex; align-items: center; justify-content: center; color: #4A4236"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l8 8M10 2L2 10"></path></svg></span></a>
+    <div style="position: absolute; top: 76px; bottom: 96px; left: 36px; right: 36px; overflow: hidden; font-family: 'Noto Serif SC', serif">
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">阿！这不是我二十年来时时记得的故乡？</p>
+      <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">我所记得的故乡全不如此。我的故乡好得多了。但要我记起他的美丽，说出他的佳处来，却又没有影像，没有言辞了。仿佛也就如此。于是我自己解释说：故乡本也如此，——虽然没有进步，也未必有如我所感的悲凉，这只是我自己心情的改变罢了。</p>
+    </div>
+    <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 96px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 400; letter-spacing: 0.8px; color: #5A5040; font-variant-numeric: tabular-nums">66 / 286</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":720,"height":830}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

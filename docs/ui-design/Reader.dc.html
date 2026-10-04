@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>阅读器 · 沉浸状态</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:inherit}a:hover{color:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background-color: {{paper}}; background-image: radial-gradient(120% 90% at 50% 40%, rgba(255,255,255,0.28), rgba(255,255,255,0) 60%), radial-gradient(140% 120% at 50% 50%, rgba(0,0,0,0) 60%, rgba(90,70,40,0.06)); font-family: 'Noto Sans SC', sans-serif; color: #2B2620">
+
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 76px; padding: 26px 64px 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center">
+    <span style="font-size: 13px; font-weight: 400; letter-spacing: 1px; color: #5A5040; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">呐喊</span>
+  </div>
+
+  <a href="ReaderToolbar.dc.html" aria-label="轻点呼出工具栏" style="position: absolute; top: 76px; left: 26px; right: 26px; bottom: 96px; overflow: hidden; display: block; text-decoration: none; font-family: 'Noto Serif SC', serif; font-weight: 400">
+    <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+    <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+    <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">阿！这不是我二十年来时时记得的故乡？</p>
+    <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">我所记得的故乡全不如此。我的故乡好得多了。但要我记起他的美丽，说出他的佳处来，却又没有影像，没有言辞了。仿佛也就如此。于是我自己解释说：故乡本也如此，——虽然没有进步，也未必有如我所感的悲凉，这只是我自己心情的改变罢了，因为我这次回乡，本没有什么好心绪。</p>
+    <p style="margin: 0 0 10px; text-indent: 2em; font-size: 18px; line-height: 1.75; text-align: justify">我这次是专为了别他而来的。我们多年聚族而居的老屋，已经公同卖给别姓了，交屋的期限，只在本年，所以必须赶在正月初一以前，永别了熟识的老屋，而且远离了熟识的故乡，搬家到我在谋食的异地去。</p>
+  </a>
+
+  <sc-if value="{{bookmarked}}" hint-placeholder-val="{{false}}">
+    <svg aria-label="本页已加书签" width="16" height="26" viewBox="0 0 16 26" style="position: absolute; top: 0; right: 28px"><path d="M0 0h16v24l-8-5-8 5z" fill="#C23B2E"></path></svg>
+  </sc-if>
+  <sc-if value="{{hasToast}}" hint-placeholder-val="{{false}}">
+    <div role="status" style="position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%); height: 40px; padding: 0 16px; border-radius: 20px; background: rgba(43,38,32,0.88); color: #FBF8F2; font-size: 13px; font-weight: 400; white-space: nowrap; display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 20px rgba(43,38,32,0.2)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
+      {{toast}}
+    </div>
+  </sc-if>
+
+  <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 96px; display: flex; align-items: center; justify-content: center">
+    <span style="font-size: 12px; font-weight: 400; letter-spacing: 0.8px; color: #5A5040; font-variant-numeric: tabular-nums">66 / 286</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"paper":{"editor":"color","options":["#F3ECDF","#FFFFFF","#E1ECDC","#E9E9E6"],"default":"#F3ECDF"},"toast":{"editor":null,"default":""},"bookmarked":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const toast = this.props.toast ?? '';
+    const bm = this.props.bookmarked === true || this.props.bookmarked === 'true';
+    return { paper: this.props.paper ?? '#F3ECDF', toast, hasToast: !!toast, bookmarked: bm };
+  }
+}
+</script>
+</body>
+</html>

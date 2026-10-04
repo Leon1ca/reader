@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>删除订阅确认</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #F7F7F5; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+  <div style="position: absolute; top: 96px; left: 20px; right: 20px; display: flex; align-items: center; gap: 14px">
+    <span style="width: 52px; height: 52px; border-radius: 14px; background: #9C6B2F"></span>
+    <span style="font-size: 18px; font-weight: 500">[城市晚报]</span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(20,22,26,0.32)"></div>
+
+  <section role="dialog" aria-label="删除订阅" style="position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 20px 30px; border-radius: 24px 24px 0 0; background: #F7F7F5; display: flex; flex-direction: column; gap: 14px">
+    <div style="width: 36px; height: 4px; border-radius: 2px; background: #D6D6D1; align-self: center"></div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h2 style="margin: 0; font-size: 17px; font-weight: 500">删除订阅「[城市晚报]」？</h2>
+      <p style="margin: 0; font-size: 13px; font-weight: 300; line-height: 1.7; color: #63666C">将停止更新此订阅源。已收藏或加入稍后阅读的 3 篇文章会保留。</p>
+    </div>
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 0 16px">
+      <label style="min-height: 60px; display: flex; align-items: center; gap: 12px; border-bottom: 0.5px solid #ECECE8">
+        <span style="width: 22px; height: 22px; border-radius: 11px; border: 6px solid #1F5FCC; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 400">保留其余 46 篇文章</span><span style="font-size: 12px; font-weight: 300; color: #63666C">仍可在“全部文章”中阅读，按缓存规则清理</span></span>
+      </label>
+      <label style="min-height: 60px; display: flex; align-items: center; gap: 12px">
+        <span style="width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid #C6C7CB; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 400">一并清理这 46 篇</span><span style="font-size: 12px; font-weight: 300; color: #63666C">释放约 38 MB</span></span>
+      </label>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+      <a href="FeedDetail.dc.html" style="height: 48px; border-radius: 24px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1A1B1E; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">取消</a>
+      <a href="FeedManage.dc.html" style="height: 48px; border-radius: 24px; background: #C23B2E; color: #FFFFFF; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">删除订阅</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

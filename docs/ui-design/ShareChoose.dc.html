@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>系统分享 · 选择链接</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&amp;display=swap">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+a{color:#1F5FCC}a:hover{color:#174A9F}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #DCDCD8; font-family: 'Noto Sans SC', sans-serif; color: #1A1B1E">
+  <div style="position: absolute; top: 120px; left: 24px; right: 24px; display: flex; flex-direction: column; gap: 12px; opacity: 0.6">
+    <div style="height: 18px; width: 70%; border-radius: 4px; background: #BEBEB9"></div>
+    <div style="height: 12px; border-radius: 4px; background: #C8C8C3"></div>
+    <div style="height: 12px; width: 84%; border-radius: 4px; background: #C8C8C3"></div>
+    <div style="height: 160px; border-radius: 10px; background: #C8C8C3; margin-top: 8px"></div>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(20,22,26,0.3)"></div>
+
+  <section aria-label="选择要保存的链接" style="position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 20px 30px; border-radius: 24px 24px 0 0; background: #F7F7F5; display: flex; flex-direction: column; gap: 14px">
+    <div style="width: 36px; height: 4px; border-radius: 2px; background: #D6D6D1; align-self: center"></div>
+    <div style="display: flex; align-items: center; gap: 12px">
+      <span style="width: 40px; height: 40px; border-radius: 12px; background: #1F5FCC; overflow: hidden; flex: none"><svg width="40" height="40" viewBox="0 0 108 108"><path d="M30.5 41.5c8-3.2 15.6-2.6 22 1.8v29.4c-6.4-4.2-14-4.8-22-1.8z" fill="#FFFFFF"></path><path d="M77.5 41.5c-8-3.2-15.6-2.6-22 1.8v29.4c6.4-4.2 14-4.8 22-1.8z" fill="#FFFFFF" fill-opacity="0.92"></path></svg></span>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 500">分享内容包含 2 个链接</h2>
+        <span style="font-size: 12px; font-weight: 300; color: #63666C">选择要保存到稍后阅读的链接</span>
+      </div>
+    </div>
+
+    <div style="border-radius: 16px; background: #FFFFFF; padding: 0 16px">
+      <label style="min-height: 64px; display: flex; align-items: center; gap: 12px; border-bottom: 0.5px solid #ECECE8">
+        <span style="width: 22px; height: 22px; border-radius: 11px; background: #1F5FCC; display: flex; align-items: center; justify-content: center; flex: none"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 400">一份写给新手的家庭咖啡器具清单</span><span style="font-size: 12px; font-weight: 300; color: #63666C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">mp.weixin.qq.com/s/[文章标识]</span></span>
+      </label>
+      <label style="min-height: 64px; display: flex; align-items: center; gap: 12px">
+        <span style="width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid #C6C7CB; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 400; color: #63666C">链接 2</span><span style="font-size: 12px; font-weight: 300; color: #63666C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">mp.weixin.qq.com/s/[另一篇文章]</span></span>
+      </label>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+      <a href="Later.dc.html" style="height: 48px; border-radius: 24px; border: 0.5px solid #D9D9D4; background: #FFFFFF; color: #1A1B1E; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">取消</a>
+      <a href="Later.dc.html" style="height: 48px; border-radius: 24px; background: #1F5FCC; color: #FFFFFF; font-size: 15px; font-weight: 400; text-decoration: none; display: flex; align-items: center; justify-content: center">保存 1 个链接</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

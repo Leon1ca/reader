@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
+import androidx.core.content.edit
 import com.localreader.app.core.*
 import com.localreader.app.data.Book
 import kotlinx.coroutines.Dispatchers
@@ -104,7 +105,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
         if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy && !state.loading) { Text("导入 TXT") }
     }) }, bottomBar = {
         NavigationBar { listOf("书架", "稍后阅读", "RSS", "设置").forEachIndexed { index, label ->
-            NavigationBarItem(selected = tab == index, onClick = { tab = index; model.preferences.edit().putInt("tab", index).apply() },
+            NavigationBarItem(selected = tab == index, onClick = { tab = index; model.preferences.edit { putInt("tab", index) } },
                 icon = { Text(listOf("▤", "◷", "◎", "⚙")[index]) }, label = { Text(label) })
         } }
     }) { padding ->
@@ -125,7 +126,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                             TextButton(onClick = { sortMenu = true }) { Text("排序：$sort") }
                             DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                                 listOf("最近阅读", "导入时间", "标题").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    sort = label; sortMenu = false; model.preferences.edit().putString("sort", label).apply()
+                                    sort = label; sortMenu = false; model.preferences.edit { putString("sort", label) }
                                 }) }
                             }
                         }
@@ -195,19 +196,27 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
 private fun percent(offset: Long, total: Long) = if (total <= 1) 0 else ((offset.toDouble() / (total - 1)) * 100).roundToInt().coerceIn(0, 100)
 private fun formatBytes(bytes: Long) = if (bytes < 1048576) "${bytes / 1024} KB" else "${bytes / 1048576} MB"
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, busy: Boolean, operation: String) {
     var panel by remember { mutableStateOf<String?>(null) }
     var encoding by remember { mutableStateOf<String?>(null) }
     var localNotice by remember(session.engine) { mutableStateOf<String?>(session.notice) }
     var restored by remember(session.engine) { mutableStateOf(false) }
+    // A dead system renderer is rebuilt in place (at most twice in a row) from the last reported position.
+    var attempt by remember(session.engine) { mutableIntStateOf(0) }
+    var crashes by remember(session.engine) { mutableIntStateOf(0) }
+    var failed by remember(session.engine) { mutableStateOf(false) }
     val context = LocalContext.current
-    val adapter = remember(session.document) { WebReaderAdapter(context) { event -> when (event) {
+    val adapter = remember(session.document, attempt) { WebReaderAdapter(context) { event -> when (event) {
         RendererEvent.Loading -> restored = false
-        is RendererEvent.Ready -> { localNotice = if (event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
-        is RendererEvent.Position -> (event.locator as? Locator.Text)?.let { model.position(it); restored = true }
-        is RendererEvent.Error -> { restored = false; localNotice = event.message }
+        is RendererEvent.Ready -> { crashes = 0; failed = false; localNotice = if (event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
+        is RendererEvent.Position -> (event.locator as? Locator.Text)?.let { model.position(it, advanceFurthest = event.reason != "anchor"); restored = true }
+        is RendererEvent.Error -> { restored = false; failed = true; localNotice = event.message }
+        is RendererEvent.Crashed -> {
+            restored = false
+            if (crashes < 2) { crashes++; attempt++ } else { failed = true; localNotice = "自动恢复失败，请点击重试。" }
+        }
     } } }
     DisposableEffect(adapter) { onDispose { adapter.destroy() } }
     val background = when (session.book.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
@@ -230,8 +239,11 @@ private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, bus
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
             val notice = localNotice ?: session.notice
             if (notice != null) Text(notice, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
-            key(session.engine) { AndroidView(factory = { adapter.view }, modifier = Modifier.weight(1f).fillMaxWidth(), update = {
-                adapter.render(session.document,session.jump,session.jumpSerial,ReaderRules(fontSize = session.book.fontSize,theme = session.book.theme,
+            if (failed) TextButton(onClick = { failed = false; localNotice = null; attempt++ }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
+            key(session.engine, attempt) { AndroidView(factory = { adapter.view }, modifier = Modifier.weight(1f).fillMaxWidth(), update = {
+                // Stored values are validated by ReaderRules; clamp so a damaged row can never crash the reader.
+                adapter.render(session.document,session.jump,session.jumpSerial,ReaderRules(fontSize = session.book.fontSize.coerceIn(12f, 36f),
+                    theme = session.book.theme.takeIf { it in setOf("white", "paper", "dark") } ?: "white",
                     flow = if (session.book.flow == "scrolled") ReaderFlow.SCROLLED else ReaderFlow.PAGINATED))
             }) }
         } }
@@ -262,7 +274,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, bus
                     Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.style(session.book.fontSize, theme) }) { Text(label) } } }
                     Text("当前编码：${session.book.encoding}", Modifier.padding(top = 16.dp))
                     Text("显示乱码时可手动纠正。新索引成功后才切换；旧索引与原定位备份会保留。", Modifier.padding(vertical = 8.dp))
-                    Row(Modifier.fillMaxWidth()) { TxtParser.encodings.forEach { candidate -> TextButton(onClick = { encoding = candidate }) { Text(candidate, fontSize = 12.sp) } } }
+                    FlowRow(Modifier.fillMaxWidth()) { TxtParser.encodings.filter { it != session.book.encoding }.forEach { candidate -> TextButton(onClick = { encoding = candidate }) { Text(candidate, fontSize = 12.sp) } } }
                     Text("使用离线阅读内核与 Readest 基准排版参数，正文一致性仍待同设备验收。字体导入尚未实现。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
                 }
             }
@@ -286,6 +298,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, bus
         is RendererEvent.Ready -> { ready = true; error = null }
         is RendererEvent.Position -> anchor = event.locator
         is RendererEvent.Error -> { ready = false; error = event.message }
+        is RendererEvent.Crashed -> { ready = false; error = event.message }
     } } }
     DisposableEffect(adapter) { onDispose { adapter.close() } }
     BackHandler(onBack = onClose)
