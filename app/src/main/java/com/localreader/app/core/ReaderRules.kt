@@ -2,8 +2,8 @@ package com.localreader.app.core
 
 enum class ReaderFlow(val wire: String) { PAGINATED("paginated"), SCROLLED("scrolled") }
 data class ReaderRules(val schemaVersion: Int = 1, val fontSize: Float = 16f, val theme: String = "white", val flow: ReaderFlow = ReaderFlow.PAGINATED,
-    val epubStyleMode: String = "AUTHOR",val lineHeight: Double = 1.6,val fontFamily: String = "default",val margin: String = "M",val columns: String = "auto") {
-    init { require(schemaVersion == 1 && fontSize in 12f..36f && theme in setOf("white", "paper", "dark") && epubStyleMode in setOf("AUTHOR","CUSTOM") && lineHeight.isFinite() && lineHeight in 1.2..2.4) }
+    val epubStyleMode: String = "AUTHOR",val lineHeight: Double = 1.6,val fontFamily: String = "default",val margin: String = "M",val columns: String = "auto",val fxlZoom: String="fit-page",val spreadPreference: String="AUTO") {
+    init { require(fxlZoom in setOf("fit-page","fit-width") || fxlZoom.toDoubleOrNull()?.let { it.isFinite() && it in 1.0..5.0 }==true);require(spreadPreference in setOf("AUTO","SINGLE"));require(schemaVersion == 1 && fontSize in 12f..36f && theme in setOf("white", "paper", "dark") && epubStyleMode in setOf("AUTHOR","CUSTOM") && lineHeight.isFinite() && lineHeight in 1.2..2.4) }
 }
 data class RendererGeometry(val gap: String = "7%", val marginTop: String = "24px", val marginBottom: String = "24px",
                             val marginLeft: String = "16px", val marginRight: String = "16px", val maxColumns: Int = 1)
@@ -13,6 +13,7 @@ data class CompiledRules(val profileId: String, val beforeAuthor: String, val af
 object RuleCompiler {
     fun compile(kind: WebContentKind, rules: ReaderRules, fontUrl: String, bundledFontFaces: String = ""): CompiledRules {
         require(fontUrl.startsWith("https://appassets.androidplatform.net/"))
+        if(kind==WebContentKind.FIXED)return CompiledRules("fxl-author-v1","","",RendererGeometry())
         if(kind==WebContentKind.EPUB)return compileEpub(rules,fontUrl,bundledFontFaces)
         val profile = if (kind == WebContentKind.TXT) WebTypographyProfiles.readestTxtCjk else WebTypographyProfiles.readestArticleCjk
         val bg = when (rules.theme) { "dark" -> "#19201c"; "paper" -> "#f6f1e7"; else -> "#ffffff" }

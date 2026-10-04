@@ -13,9 +13,14 @@ import kotlinx.coroutines.flow.update
 class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPreferences {
     override val preferencesRevision = db.preferencesRevision.asStateFlow()
     override fun loadSnapshot(contentId: String): ReadingSnapshot = db.transaction { database ->
-        requireNotNull(db.content(contentId)) { "书籍不存在" }
+        val content=requireNotNull(db.content(contentId)) { "书籍不存在" }
         database.rawQuery("SELECT * FROM positions WHERE content_id=?",arrayOf(contentId)).use { c -> check(c.moveToFirst())
-            ReadingSnapshot(StoredLocatorCodec.decode(c.string("locator_json")),ReadingExtentCodec.decode(c.string("furthest_json")),effectiveRules(contentId).rules,bookmarks(contentId))
+            val current=StoredLocatorCodec.decode(c.string("locator_json"));val extent=ReadingExtentCodec.decode(c.string("furthest_json"))
+            // Old unread fixed books used reflow coordinates. Adapt the snapshot only;
+            // existing position JSON is replaced only after a validated page event.
+            val fixed=content.format==ContentFormat.EPUB && extent is EpubReadingExtent && database.rawQuery("SELECT layout FROM epub_meta WHERE content_id=?",arrayOf(contentId)).use { metadata -> metadata.moveToFirst() && metadata.getString(0)=="pre-paginated" }
+            ReadingSnapshot(current,
+                if(fixed)FixedReadingExtent(extent.revision,extent.spine,0.0,0.0) else extent,effectiveRules(contentId).rules,bookmarks(contentId))
         }
     }
     /** Candidate snapshot is prepared before the encoding version transaction commits. */
@@ -26,9 +31,14 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
         when(content.format) {
             ContentFormat.TXT -> { val meta = requireNotNull(db.txtMetadata(contentId));require(locator is Locator.Text && locator.sourceOffset in 0..meta.characters && locator.paragraph in 0 until meta.paragraphs && locator.character >= 0) { "无效TXT定位" } }
             ContentFormat.EPUB -> {
-                require(locator is Locator.Epub) { "无效EPUB定位" }
-                val section=db.epubCache(contentId).sections.getOrNull(locator.spine)
-                require(section!=null && locator.offset in 0..section.characters && (locator.elementId==null || section.elements[locator.elementId]==locator.offset)) { "无效EPUB正文坐标" }
+                val cache=db.epubCache(contentId)
+                if(cache.layout=="pre-paginated") {
+                    require(locator is Locator.Page && locator.page in cache.fixedPages.indices && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0) { "无效固定页面坐标" }
+                } else {
+                    require(locator is Locator.Epub) { "无效EPUB定位" }
+                    val section=cache.sections.getOrNull(locator.spine)
+                    require(section!=null && locator.offset in 0..section.characters && (locator.elementId==null || section.elements[locator.elementId]==locator.offset)) { "无效EPUB正文坐标" }
+                }
             }
         }
     }
@@ -51,6 +61,13 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
                         put("locator_json",LocatorCodec.encode(current));put("furthest_json",ReadingExtentCodec.encode(extent))
                         put("fraction",EpubCoordinates.fraction(sections,current.spine,current.offset));put("furthest_fraction",EpubCoordinates.fraction(sections,extent.spine,extent.offset))
                     }
+                }
+                is Locator.Page -> {
+                    require(furthest is FixedReadingExtent && previous is FixedReadingExtent && furthest.revision==revision && previous.revision==revision)
+                    val count=db.epubCache(contentId).fixedPages.size
+                    require(furthest.page in 0 until count && furthest.x.isFinite() && furthest.y.isFinite() && furthest.x in 0.0..1.0 && furthest.y in 0.0..1.0)
+                    val extent=if(previous.page>furthest.page || previous.page==furthest.page && previous.y>=furthest.y)previous else furthest
+                    ContentValues().apply { put("locator_json",LocatorCodec.encode(current));put("furthest_json",ReadingExtentCodec.encode(extent));put("fraction",FixedCoordinates.fraction(count,current.page,current.y));put("furthest_fraction",FixedCoordinates.fraction(count,extent.page,extent.y));put("updated_at",System.currentTimeMillis()) }
                 }
                 else -> error("此格式不可保存位置")
             }
@@ -84,7 +101,7 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
             FIELDS.forEach { field -> val index=c.getColumnIndexOrThrow(field);if(!c.isNull(index)) { values[field]=c.getString(index);origins[field]=RuleOrigin.BOOK } }
         }
         val rules=ReaderRules(fontSize=values.getValue("font_size").toString().toFloat(),theme=values.getValue("theme").toString(),flow=ReaderFlow.entries.first { it.wire==values.getValue("flow") },
-            epubStyleMode=values.getValue("epub_style_mode").toString(),lineHeight=values.getValue("line_height").toString().toDouble(),margin=values.getValue("margin").toString(),fontFamily=values.getValue("font_family").toString(),columns=values.getValue("columns").toString())
+            epubStyleMode=values.getValue("epub_style_mode").toString(),lineHeight=values.getValue("line_height").toString().toDouble(),margin=values.getValue("margin").toString(),fontFamily=values.getValue("font_family").toString(),columns=values.getValue("columns").toString(),fxlZoom=values["fxl_zoom"]?.toString() ?: "fit-page",spreadPreference=values["spread_pref"]?.toString() ?: "AUTO")
         return EffectiveRules(rules,origins,revision,rules.lineHeight,rules.margin,rules.fontFamily,rules.columns,rules.epubStyleMode,values["fxl_zoom"]?.toString() ?: "fit-page",values["spread_pref"]?.toString() ?: "AUTO")
     }
     override fun patchRules(contentId: String?,revision: String?,format: ContentFormat,scope: RulesScope,patch: RulesPatch): EffectiveRules {

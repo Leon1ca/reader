@@ -95,6 +95,15 @@ class EpubSanitizerTest {
         val use=reparsed.selectFirst("use")!!
         assertEquals("#tile",use.attr("xlink:href"));assertEquals("http://www.w3.org/1999/xlink",use.attr("xmlns:xlink"))
         assertFalse(serialized.contains("<s:"));assertFalse(serialized.contains(" l:href"))
+        val source="<s:svg xmlns:s='http://www.w3.org/2000/svg' xmlns:l='http://www.w3.org/1999/xlink' viewBox='0,0,600,900'><s:script src='evil'/><s:rect width='600' height='900' fill='#88bb66'/><s:image l:href='image.svg' width='600' height='900'/><s:text x='30' y='60'>SAFE SVG 正文</s:text></s:svg>"
+        val safe=EpubSanitizer(writer).sanitize(source.toByteArray(),PackagePath.entry("OPS/page.svg"),"image/svg+xml")
+        val html=Jsoup.parse(safe.authorHtml)
+        assertEquals("SAFE SVG 正文",safe.canonicalText)
+        assertEquals("0,0,600,900",html.selectFirst("svg")!!.attr("viewBox"))
+        assertEquals("http://www.w3.org/2000/svg",html.selectFirst("rect")!!.tag().namespace())
+        assertEquals("../resources/image",html.selectFirst("image")!!.attr("xlink:href"))
+        assertNotNull(html.selectFirst("svg[data-reader-element]"))
+        assertTrue(html.select("script").isEmpty());assertFalse(safe.authorHtml.contains("<s:"))
     }
 
 }

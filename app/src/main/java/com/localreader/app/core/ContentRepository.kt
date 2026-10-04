@@ -8,7 +8,7 @@ data class ContentRecord(val id: String, val format: ContentFormat, val revision
     val language: String? = null, val originalName: String? = null, val coverPath: String? = null, val finishedAt: Long? = null)
 data class ContentSummary(val id: String, val format: ContentFormat, val title: String, val author: String,
     val bytes: Long, val imported: Long, val lastRead: Long, val fraction: Double, val furthestFraction: Double,
-    val encoding: String? = null)
+    val encoding: String? = null, val epubLayout: String? = null)
 
 data class ImportResult(val name: String,val status: String,val bookId: String? = null)
 /** SAF is a platform boundary; the repository receives a cancellable stream capability. */

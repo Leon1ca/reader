@@ -27,9 +27,9 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
             uri.query != null || uri.fragment != null || uri.rawPath != uri.path || !url.startsWith(base)) return null
         val name = url.removePrefix(base)
         val common = mapOf("Cache-Control" to "no-store", "X-Content-Type-Options" to "nosniff")
-        if (name == "host.html" && mainFrame) return resource("text/html", common + ("Content-Security-Policy" to HOST_CSP)) { asset(if(publication.protocolVersion==2) "reader/host2.html" else "reader/host.html") }
+        if (name == "host.html" && mainFrame) return resource("text/html", common + ("Content-Security-Policy" to HOST_CSP)) { asset(if(publication.kind==WebContentKind.FIXED) "reader/host3.html" else if(publication.protocolVersion==2) "reader/host2.html" else "reader/host.html") }
         if (mainFrame) return null
-        if (name in setOf(if(publication.protocolVersion==2) "host2.js" else "host.js", "vendor/foliate/paginator.js")) return resource("text/javascript",common) { asset("reader/$name") }
+        if (name in setOf(if(publication.kind==WebContentKind.FIXED) "host3.js" else if(publication.protocolVersion==2) "host2.js" else "host.js", if(publication.kind==WebContentKind.FIXED)"vendor/foliate/fixed-layout.js" else "vendor/foliate/paginator.js")) return resource("text/javascript",common) { asset("reader/$name") }
         if (name.startsWith("fonts/") && name.removePrefix("fonts/") in BundledFonts.files)
             return resource(if (name.endsWith(".css")) "text/css" else "font/ttf",common) { asset("$name") }
         publication.resourceManifest[name]?.let { content ->
@@ -44,9 +44,9 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
         val section = Regex("sections/(0|[1-9][0-9]{0,7})\\.html").matchEntire(name)?.groupValues?.get(1)?.toIntOrNull() ?: return null
         if (section !in 0 until publication.sectionCount) return null
         val bytes = cache[section] ?: publication.section(section).let {
-            require(it.utf16Characters <= if(publication.protocolVersion==2)1024*1024 else MAX_SECTION_CHARACTERS) { "Content section exceeds renderer budget" }
+            require(it.utf16Characters <= if(publication.kind==WebContentKind.FIXED)4*1024*1024 else if(publication.protocolVersion==2)1024*1024 else MAX_SECTION_CHARACTERS) { "Content section exceeds renderer budget" }
             val bytes = it.html.toByteArray(Charsets.UTF_8)
-            require(bytes.size <= MAX_SECTION_BYTES) { "Content resource exceeds renderer budget" }
+            require(bytes.size <= if(publication.kind==WebContentKind.FIXED)4*1024*1024 else MAX_SECTION_BYTES) { "Content resource exceeds renderer budget" }
             loads++; cache[section] = bytes; bytes
         }
         resource("text/html",common + ("Content-Security-Policy" to CONTENT_CSP)) { ByteArrayInputStream(bytes) }

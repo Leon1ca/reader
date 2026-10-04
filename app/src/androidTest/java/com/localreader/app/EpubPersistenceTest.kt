@@ -143,7 +143,8 @@ class EpubPersistenceTest {
             try {
                 scenario.onActivity { activity -> adapter=WebReaderAdapter(activity) { event -> when(event) {
                     is RendererEvent.Position -> { position.set(event);positionCount.incrementAndGet() }
-                    is RendererEvent.Notice -> notice.set(event.message)
+                    is RendererEvent.Zoom -> Unit
+                        is RendererEvent.Notice -> notice.set(event.message)
                     is RendererEvent.Error -> error.set(event.message)
                     is RendererEvent.Crashed -> error.set(event.message)
                     else -> Unit
@@ -292,6 +293,155 @@ class EpubPersistenceTest {
                 waitUntil { controller.state.value.phase==ReaderPhase.READY || controller.state.value.phase==ReaderPhase.FAILED };assertEquals(ReaderPhase.READY,controller.state.value.phase)
                 scenario.onActivity { assertSame(stable,surface);assertNotSame(old,surface.getChildAt(0));assertNull(old.parent) }
                 assertTrue(book.accepts(controller.state.value.position!!));owner.flush()
+            } finally { scenario.onActivity { surface.close();owner.revokeRenderers();owner.closeSource() } }
+        }
+    }
+    private fun fixedEpub(rtl: Boolean=false,svgPage: Boolean=false,standaloneSvg: Boolean=false,boundarySide: String?=null): ByteArray {
+        require(boundarySide==null || boundarySide in listOf("left","right"))
+        val pageCount=if(boundarySide==null)30 else 1
+        val output=ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            fun entry(name: String,bytes: ByteArray,stored: Boolean=false) {
+                zip.putNextEntry(ZipEntry(name).apply { time=315532800000L;if(stored) { method=ZipEntry.STORED;size=bytes.size.toLong();compressedSize=size;crc=CRC32().apply { update(bytes) }.value } })
+                zip.write(bytes);zip.closeEntry()
+            }
+            fun text(name: String,value: String)=entry(name,value.toByteArray())
+            entry("mimetype","application/epub+zip".toByteArray(),true)
+            text("META-INF/container.xml","<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container' version='1.0'><rootfiles><rootfile full-path='OPS/book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>")
+            val items=(0 until pageCount).joinToString("") { "<item id='p$it' href='$it.xhtml' media-type='${if(standaloneSvg && it==0)"image/svg+xml" else "application/xhtml+xml"}'/>" }
+            val spine=(0 until pageCount).joinToString("") { "<itemref idref='p$it'${boundarySide?.let { side -> " properties='page-spread-$side'" } ?: ""}/>" }
+            text("OPS/book.opf","<package xmlns='http://www.idpf.org/2007/opf' unique-identifier='uid' version='3.0'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:identifier id='uid'>fixed-${if(rtl)"rtl" else "ltr"}</dc:identifier><dc:title>原创固定页面</dc:title><meta property='rendition:layout'>pre-paginated</meta><meta property='rendition:spread'>${if(boundarySide==null)"none" else "auto"}</meta></metadata><manifest>$items<item id='css' href='page.css' media-type='text/css'/><item id='font' href='font.ttf' media-type='font/ttf'/><item id='image' href='image.svg' media-type='image/svg+xml'/><item id='cover' href='image.png' media-type='image/png'/></manifest><spine page-progression-direction='${if(rtl)"rtl" else "ltr"}'>$spine</spine></package>")
+            text("OPS/page.css","@font-face{font-family:LocalBook;src:url('font.ttf')}html,body{margin:0;width:100%;height:100%}body{background:#dceaf5;font-family:LocalBook}p{position:absolute;left:40px;top:60px;font-size:31px;color:#143a53}img{position:absolute;left:20px;top:150px;width:300px;height:300px}")
+            entry("OPS/font.ttf",context.assets.open("fonts/Bitter-Regular-VF.ttf").use { it.readBytes() })
+            text("OPS/image.svg","<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0,0,300,300'><rect width='300' height='300' fill='#8b6'/></svg>")
+            val bitmap=android.graphics.Bitmap.createBitmap(48,72,android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(70,110,170)) }
+            val png=ByteArrayOutputStream();try { assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,png)) } finally { bitmap.recycle() }
+            entry("OPS/image.png",png.toByteArray())
+            repeat(pageCount) { i -> text("OPS/$i.xhtml",if(standaloneSvg && i==0) "<s:svg xmlns:s='http://www.w3.org/2000/svg' xmlns:l='http://www.w3.org/1999/xlink' viewBox='0,0,700,1100'><s:rect width='700' height='1100' fill='#88bb66'/><s:image l:href='image.png' width='700' height='1100'/><s:text x='30' y='60'>原创整页 SVG</s:text></s:svg>" else if(svgPage && i==0) "<html xmlns='http://www.w3.org/1999/xhtml'><head><link rel='stylesheet' href='page.css'/></head><body><svg xmlns='http://www.w3.org/2000/svg' viewBox='0,0,700,1100'><image href='image.png' width='700' height='1100'/><text x='30' y='60'>原创整页 SVG</text></svg></body></html>" else "<html xmlns='http://www.w3.org/1999/xhtml'><head><meta name='viewport' content='width=${600+i*2},height=${900+i*4}'/><link rel='stylesheet' href='page.css'/></head><body><p id='label'>原创第${i+1}页 English 123</p><img src='image.png'/><img src='image.svg' style='left:340px'/><a href='${(i+1).coerceAtMost(29)}.xhtml' style='position:absolute;top:500px'>下一页链接</a></body></html>") }
+        }
+        return output.toByteArray().also { bytes -> assertEquals(0,(bytes[28].toInt() and 255) or ((bytes[29].toInt() and 255) shl 8)) }
+    }
+
+    @Test fun fixedPagesSafMetadataStoreAndDerivedLegacyCacheHaveRealConsumers() {
+        val id=import(fixedEpub());val store=SqliteReadingStore(repository.db)
+        val content=requireNotNull(repository.db.content(id));val directory=repository.directory(content)
+        val cache=repository.db.epubCache(id);assertEquals(30,cache.fixedPages.size);assertEquals(30,cache.parts.size);assertEquals("pre-paginated",cache.layout);assertEquals("pre-paginated",repository.db.contents().single().epubLayout);assertEquals("assets/cover-preview",cache.coverFile);assertNotNull(content.coverPath)
+        assertEquals(658.0,cache.fixedPages.last().width,0.0);assertEquals(1016.0,cache.fixedPages.last().height,0.0)
+        val target=Locator.Page(content.revision,18,.25,.66)
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { book ->
+            assertTrue(book is FixedOpenedBook);assertTrue(book.accepts(target));assertEquals(target,book.publication.locator(book.publication.target(target).anchor))
+            store.patchRules(id,book.revision,RulesPatch(fxlZoom=FieldUpdate.Set("2"),spreadPreference=FieldUpdate.Set("SINGLE")))
+            store.savePosition(id,book.revision,target,FixedReadingExtent(book.revision,22,.1,.4))
+            assertTrue(store.addBookmark(id,book.revision,target,"第19页"));assertFalse(store.addBookmark(id,book.revision,target.copy(x=.9,y=.1),"同一页"))
+        }
+        assertEquals(target,store.loadSnapshot(id).current);assertEquals("2",store.loadSnapshot(id).rules.fxlZoom);assertEquals("SINGLE",store.loadSnapshot(id).rules.spreadPreference)
+        val legacy=Locator.Epub(content.revision,18,50)
+        repository.db.transaction { db ->
+            db.execSQL("UPDATE positions SET locator_json=?,furthest_json=? WHERE content_id=?",arrayOf(LocatorCodec.encode(legacy),ReadingExtentCodec.encode(EpubReadingExtent(content.revision,22,0)),id))
+            repository.db.addBookmark(id,legacy,"旧格式位置")
+        }
+        val json=JSONObject(File(directory,"package.json").readText());json.remove("fixedPages");json.put("renderRevision",content.revision);json.put("schema",1)
+        File(directory,"package.json").writeText(json.toString());repository.db.close()
+        val untouched=File(directory,"package.json").readBytes().toList()
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { book ->
+            assertTrue(book is FixedOpenedBook);assertEquals(content.revision,book.revision);assertTrue(book.publication.target(legacy).nearby)
+            assertEquals(18,book.publication.target(legacy).section)
+            assertTrue(EpubCache.activeDirectory(directory).name=="derived-fxl1")
+            val snapshot=store.loadSnapshot(id);assertEquals(legacy,snapshot.current);assertEquals(FixedReadingExtent(content.revision,22,0.0,0.0),snapshot.furthest)
+            assertEquals(1,store.bookmarks(id).count { it.locator==legacy })
+            store.savePosition(id,book.revision,target,snapshot.furthest)
+        }
+        assertEquals(untouched,File(directory,"package.json").readBytes().toList());assertEquals(target,store.loadSnapshot(id).current)
+        assertEquals(1,store.bookmarks(id).count { it.locator==legacy })
+    }
+
+    @Test fun fixedRendererThirtyPagesTwoAxesRtlZoomFlowAndRestartStayBounded() {
+        val id=import(fixedEpub(true));val store=SqliteReadingStore(repository.db)
+        val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) }
+        val current=AtomicReference<RendererEvent.Position?>();val error=AtomicReference<String?>();lateinit var adapter: WebReaderAdapter
+        val listener: (RendererEvent)->Unit={ event -> when(event) { is RendererEvent.Position -> current.set(event);is RendererEvent.Error -> error.set(event.message);is RendererEvent.Crashed -> error.set(event.message);else -> Unit } }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun diagnostics(): JSONObject {
+                val result=AtomicReference<String?>();scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify((()=>{const d=readerHost.diagnostics(),r=document.querySelector('foliate-fxl'),v=r.getBoundingClientRect();return {...d,viewport:{width:innerWidth,height:innerHeight,left:v.left,top:v.top,right:v.right,bottom:v.bottom},scroll:{x:r.scrollLeft,y:r.scrollTop,width:r.scrollWidth,height:r.scrollHeight,clientWidth:r.clientWidth,clientHeight:r.clientHeight},frames:r.getContents().map(c=>{const f=c.doc.defaultView.frameElement,b=f.getBoundingClientRect();return {page:c.index,width:f.clientWidth,height:f.clientHeight,left:b.left,top:b.top,right:b.right,bottom:b.bottom}})}})())") { result.set(it) } };waitUntil { result.get()!=null }
+                return JSONObject(org.json.JSONTokener(result.get()).nextValue() as String)
+            }
+            fun located(page: Int) { waitUntil { (current.get()?.locator as? Locator.Page)?.page==page || error.get()!=null };val d=diagnostics();assertNull(d.toString(),error.get());assertTrue(d.toString(),d.getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(d.toString(),d.getInt("allocatedFrames")<=4);assertTrue(d.getJSONArray("contents").length()<=4) }
+            try {
+                val rules=ReaderRules(flow=ReaderFlow.PAGINATED,spreadPreference="AUTO")
+                scenario.onActivity { activity -> adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(book.publication,Locator.Page(book.revision,17,0.0,0.0),rules) }
+                located(17)
+                for(page in 0 until 30) { current.set(null);scenario.onActivity { adapter.goTo(Locator.Page(book.revision,page,0.0,0.0)) };located(page) }
+                assertEquals(29,(current.get()!!.locator as Locator.Page).page)
+                current.set(null);scenario.onActivity { adapter.prev() };located(28)
+                val target=Locator.Page(book.revision,12,.25,.5)
+                current.set(null);scenario.onActivity { adapter.setRules(rules.copy(flow=ReaderFlow.SCROLLED,fxlZoom="2"),target) };located(12)
+                var position=current.get()!!.locator as Locator.Page;assertEquals(.25,position.x,.02);assertEquals(.5,position.y,.02)
+                val diag=diagnostics();assertEquals(1248.0,diag.getJSONObject("anchorGeometry").getDouble("width"),2.0)
+                assertTrue(diag.getJSONArray("contents").let { docs -> (0 until docs.length()).any { i -> val faces=docs.getJSONObject(i).getJSONArray("fontFaces");(0 until faces.length()).any { faces.getJSONObject(it).getString("status")=="loaded" } } })
+                current.set(null);scenario.onActivity { adapter.setRules(rules.copy(fxlZoom="2"),target) };located(12)
+                position=current.get()!!.locator as Locator.Page;assertEquals(.25,position.x,.02);assertEquals(.5,position.y,.02)
+                store.patchRules(id,book.revision,RulesPatch(fxlZoom=FieldUpdate.Set("2")))
+                store.savePosition(id,book.revision,position,FixedReadingExtent(book.revision,29,0.0,.9));assertTrue(store.addBookmark(id,book.revision,position,"第13页"))
+                assertTrue(adapter.cachedResourceBytes<=8*1024*1024)
+                // An XHTML whole-page SVG wrapper gets its actual viewBox, rather
+                // than an arbitrary default or the dimensions of its raster child.
+                for(standalone in listOf(false,true)) {
+                val svgId=import(fixedEpub(svgPage=true,standaloneSvg=standalone))
+                runBlocking { LibraryOpenedBookFactory(repository).open(svgId) }.use { svgBook ->
+                    val specification=requireNotNull(svgBook.publication.fixedLayout).pages.first()
+                    assertEquals(700.0,specification.width,0.0);assertEquals(1100.0,specification.height,0.0)
+                    current.set(null);scenario.onActivity { activity -> adapter.close();adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(svgBook.publication,Locator.Page(svgBook.revision,0,0.0,0.0),rules) };located(0)
+                    val result=AtomicReference<String?>()
+                    scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify((()=>{const d=document.querySelector('foliate-fxl').getContents()[0].doc,s=d.querySelector('svg'),r=s.getBoundingClientRect();return {kind:s.constructor.name,x:r.x,y:r.y,width:r.width,height:r.height,image:d.querySelector('svg image').getBBox().width,rect:d.querySelector('svg rect')?{kind:d.querySelector('svg rect').constructor.name,width:d.querySelector('svg rect').getBBox().width,height:d.querySelector('svg rect').getBBox().height,fill:d.defaultView.getComputedStyle(d.querySelector('svg rect')).fill}:null,text:s.textContent}})())") { result.set(it) } }
+                    waitUntil { result.get()!=null };val svg=JSONObject(org.json.JSONTokener(result.get()).nextValue() as String)
+                    assertEquals("SVGSVGElement",svg.getString("kind"));assertEquals(0.0,svg.getDouble("x"),.01);assertEquals(0.0,svg.getDouble("y"),.01);assertEquals(700.0,svg.getDouble("width"),1.0);assertEquals(1100.0,svg.getDouble("height"),1.0);assertEquals(700.0,svg.getDouble("image"),1.0)
+                    assertEquals("原创整页 SVG",svg.getString("text"))
+                    if(standalone) { val rect=svg.getJSONObject("rect");assertEquals("SVGRectElement",rect.getString("kind"));assertEquals(700.0,rect.getDouble("width"),.01);assertEquals(1100.0,rect.getDouble("height"),.01);assertEquals("rgb(136, 187, 102)",rect.getString("fill")) }
+                    scenario.onActivity { adapter.close() }
+                }
+                }
+                for(side in listOf("left","right")) {
+                    val boundaryId=import(fixedEpub(boundarySide=side))
+                    runBlocking { LibraryOpenedBookFactory(repository).open(boundaryId) }.use { single ->
+                        assertEquals(1,requireNotNull(single.publication.fixedLayout).pages.size)
+                        current.set(null)
+                        scenario.onActivity { activity -> adapter.close();adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(single.publication,Locator.Page(single.revision,0,0.0,0.0),rules.copy(spreadPreference="AUTO")) }
+                        located(0)
+                        val boundary=diagnostics()
+                        assertEquals(boundary.toString(),2,boundary.getInt("allocatedFrames"))
+                        assertEquals(boundary.toString(),1,boundary.getJSONArray("contents").length())
+                        assertTrue(boundary.getJSONArray("contents").getJSONObject(0).getBoolean("validated"))
+                        scenario.onActivity { adapter.close() }
+                    }
+                }
+            } finally { scenario.onActivity { adapter.close() };book.close() }
+        }
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { reopened -> val snapshot=store.loadSnapshot(id);assertTrue(reopened.accepts(snapshot.current));assertEquals(snapshot.current,store.bookmarks(id).single().locator);assertEquals(29,(snapshot.furthest as FixedReadingExtent).page);assertEquals("2",snapshot.rules.fxlZoom) }
+    }
+
+    @Test fun fixedControllerCrashReplacesOnlyBackendAndRestoresRealPagePoint() {
+        val id=import(fixedEpub());val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) };val store=SqliteReadingStore(repository.db)
+        val target=Locator.Page(book.revision,12,.25,.5)
+        val owner=ReadingSessionOwner(book,1,store,store.loadSnapshot(id).copy(current=target,rules=ReaderRules(fxlZoom="2",spreadPreference="SINGLE")))
+        val events=java.util.concurrent.CopyOnWriteArrayList<RendererEvent>();lateinit var surface: ReaderSurface
+        val controller=ReaderController(1,{ owner.bind(it) },{ event -> events.add(event);if(event is RendererEvent.Position)owner.position(event.locator,event.intent==IntentCause.UserNavigation,System.currentTimeMillis()) else true })
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun failureEvidence(): String {
+                val result=AtomicReference<String?>()
+                scenario.onActivity { (surface.getChildAt(0) as? WebView)?.evaluateJavascript("JSON.stringify(window.readerHost?readerHost.diagnostics():{ready:document.readyState,url:location.href})") { result.set(it) } ?: result.set("no WebView") }
+                waitUntil { result.get()!=null }
+                return "${controller.state.value}; events=$events; renderer=${result.get()}"
+            }
+            try {
+                scenario.onActivity { activity -> surface=ReaderSurface(activity);surface.bind(controller);activity.setContentView(surface);surface.present(owner.state()) }
+                waitUntil { controller.state.value.phase==ReaderPhase.READY || controller.state.value.phase==ReaderPhase.FAILED };assertEquals(if(controller.state.value.phase==ReaderPhase.READY)"Ready" else failureEvidence(),ReaderPhase.READY,controller.state.value.phase)
+                lateinit var old: WebView
+                scenario.onActivity { old=surface.getChildAt(0) as WebView;assertNotNull(old.webViewRenderProcess);assertTrue(old.webViewRenderProcess!!.terminate()) }
+                waitUntil { events.any { it is RendererEvent.Crashed } };val stableSurface=surface;scenario.onActivity { surface.present(owner.state(),1) }
+                waitUntil { controller.state.value.phase==ReaderPhase.READY || controller.state.value.phase==ReaderPhase.FAILED };assertEquals(if(controller.state.value.phase==ReaderPhase.READY)"Ready" else failureEvidence(),ReaderPhase.READY,controller.state.value.phase)
+                scenario.onActivity { assertSame(stableSurface,surface);assertNotSame(old,surface.getChildAt(0));assertNull(old.parent) }
+                val position=controller.state.value.position as Locator.Page;assertEquals(12,position.page);assertEquals(.25,position.x,.02);assertEquals(.5,position.y,.02)
+                owner.flush();assertEquals(position,store.loadSnapshot(id).current)
             } finally { scenario.onActivity { surface.close();owner.revokeRenderers();owner.closeSource() } }
         }
     }

@@ -144,7 +144,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                                 Text(book.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                 Text(book.author, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium)
                                 val percentage = fractionPercent(book.fraction)
-                                Text("${book.format.name} · ${book.encoding ?: "可重排"} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
+                                Text("${book.format.name} · ${book.encoding ?: if(book.epubLayout=="pre-paginated")"固定版式" else "可重排"} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
                                 Text("当前位置 $percentage% · 最远 ${fractionPercent(book.furthestFraction)}%", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = { edit = book }, enabled = !state.busy) { Text("信息") }
@@ -159,13 +159,13 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                     Spacer(Modifier.height(48.dp))
                     Text("开发中", style = MaterialTheme.typography.headlineMedium)
                     Text(if (tab == 1) "链接保存、网页正文和图片离线尚未实现。" else "RSS / Atom 订阅和更新尚未实现。", Modifier.padding(top = 16.dp))
-                    Text("当前可用：TXT 与可重排 EPUB 本地书架与阅读。", Modifier.padding(top = 16.dp))
+                    Text("当前可用：TXT、可重排 EPUB 与固定版式 EPUB 本地阅读。", Modifier.padding(top = 16.dp))
                 }
                 3 -> {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 24.dp)) {
                         item { Text("本地优先", style = MaterialTheme.typography.headlineSmall); Text("没有网络权限、账号或远程分析。文件仅通过系统选择器读取；不会请求全盘存储权限。", Modifier.padding(top = 8.dp)) }
                         item { Text("当前版本 ${com.localreader.app.BuildConfig.VERSION_NAME} · 阅读内核增量", style = MaterialTheme.typography.titleMedium); Text("UTF-8、带 BOM 的 UTF-16、GB18030；分页与连续滚动、章节、字号、主题、书签与位置恢复。", Modifier.padding(top = 8.dp)) }
-                        item { Text("兼容范围", style = MaterialTheme.typography.titleMedium); Text("固定版式 EPUB、MOBI、PDF、漫画、网页剪藏与 RSS 尚未实现。分类、字体导入和手动备份仍待开发。", Modifier.padding(top = 8.dp)) }
+                        item { Text("兼容范围", style = MaterialTheme.typography.titleMedium); Text("MOBI、PDF、漫画、网页剪藏与 RSS 尚未实现。混合版式 EPUB 按全局声明有限兼容。分类、字体导入和手动备份仍待开发。", Modifier.padding(top = 8.dp)) }
                         if (com.localreader.app.BuildConfig.DEBUG) item { TextButton(onClick = onArticlePreview) { Text("开发预览：结构化文章样本") }; Text("本地自建样本，不是网页导入或 RSS 管线。") }
                         item { Text("数据保留", style = MaterialTheme.typography.titleMedium); Text("书库不参加自动云备份或设备迁移。本增量尚无手动备份；卸载或清除应用数据会删除书库、进度与书签。", Modifier.padding(top = 8.dp)) }
                         item { Text("全局阅读默认", style = MaterialTheme.typography.titleMedium)
@@ -218,6 +218,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     val rendererState by controller.state.collectAsStateWithLifecycle()
     DisposableEffect(controller) {
         val stop=controller.observe { event -> when(event) {
+            is RendererEvent.Zoom -> Unit
             is RendererEvent.Notice -> localNotice=event.message
             RendererEvent.Loading -> restored=false
             is RendererEvent.Ready -> { crashes=0;failed=false;localNotice=if(event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
@@ -244,6 +245,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                 TextButton(onClick = controller::prev, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("上一页") }
                 TextButton(onClick = controller::next, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("下一页") }
             }
+            (session.snapshot.current as? Locator.Page)?.let { page -> Text("第 ${page.page+1} 页 / ${session.document.sectionCount} 页",style=MaterialTheme.typography.labelMedium) }
             Text("当前位置 ${(session.currentFraction * 100).roundToInt()}% · 最远 ${(session.furthestFraction * 100).roundToInt()}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
         } } }) { padding -> Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
@@ -276,8 +278,15 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                     Text("阅读模式和背景：全局，应用到所有书")
                     TextButton(onClick = model::resetBookRules) { Text("恢复单本默认") }
                     Row { TextButton(onClick = { model.flow(ReaderFlow.PAGINATED) }) { Text("横向分页") }; TextButton(onClick = { model.flow(ReaderFlow.SCROLLED) }) { Text("连续滚动") } }
-                    Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
-                    Row { TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)) }) { Text("减小") }; TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)) }) { Text("增大") } }
+                    if(session.document.kind==WebContentKind.FIXED) {
+                        Text("固定页面缩放：${session.snapshot.rules.fxlZoom}")
+                        FlowRow { listOf("fit-page" to "适合整页","fit-width" to "适合宽度","1" to "1×","2" to "2×","3" to "3×","4" to "4×","5" to "5×").forEach { (zoom,label) -> TextButton(onClick={model.fxlZoom(zoom)}) { Text(label) } } }
+                        Row { TextButton(onClick={model.spreadPreference("AUTO")}) { Text("自动双页") };TextButton(onClick={model.spreadPreference("SINGLE")}) { Text("单页") } }
+                        Text("双指缩放，拖动平移；双击切换整页与 2×。固定页面保留作者版式。")
+                    } else {
+                        Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
+                        Row { TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)) }) { Text("减小") }; TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)) }) { Text("增大") } }
+                    }
                     Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.theme(theme) }) { Text(label) } } }
                     if(session.document.kind==WebContentKind.EPUB) {
                         Text("EPUB 样式：${session.snapshot.rules.epubStyleMode}")
@@ -308,6 +317,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val adapter = remember(document) { WebReaderAdapter(context) { event -> when(event) {
+        is RendererEvent.Zoom -> Unit
         is RendererEvent.Notice -> error = event.message
         RendererEvent.Loading -> ready = false
         is RendererEvent.Ready -> { ready = true; error = null }

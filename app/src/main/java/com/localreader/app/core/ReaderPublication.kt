@@ -8,6 +8,8 @@ interface ReaderPublication {
     val sectionCount: Int
     val protocolVersion: Int get() = 1
     val direction: String get() = "ltr"
+    val fixedLayout: FixedLayoutInfo? get() = null
+    val compatibilityNotices: List<String> get() = emptyList()
     fun linkTarget(identity: String): Locator? = null
     fun configure(rules: ReaderRules) { }
     val resourceManifest: Map<String,PackagedContentResource> get() = emptyMap()
@@ -26,13 +28,15 @@ class ResourceDescriptor private constructor(val mime: String,val length: Long?,
     fun open(asset: (String) -> java.io.InputStream): java.io.InputStream = source?.invoke() ?: asset(requireNotNull(assetPath))
 }
 typealias PackagedContentResource = ResourceDescriptor
+data class FixedPageSpec(val index: Int,val width: Double,val height: Double,val pageSpread: String?,val spread: String)
+data class FixedLayoutInfo(val pages: List<FixedPageSpec>,val mixed: Boolean)
 data class ContentSection(val index: Int, val html: String, val utf16Characters: Int)
 sealed interface RendererAnchor {
     val section: Int
     data class Block(override val section: Int,val blockId: String,val character: Int): RendererAnchor
     data class Text(override val section: Int,val offset: Int): RendererAnchor
     data class Element(override val section: Int,val elementId: String): RendererAnchor
-    data class Page(override val section: Int,val progression: Double): RendererAnchor
+    data class Page(override val section: Int,val x: Double,val y: Double): RendererAnchor
 }
 data class ContentTarget(val anchor: RendererAnchor,val nearby: Boolean = false) {
     constructor(section: Int,blockId: String,character: Int,nearby: Boolean = false): this(RendererAnchor.Block(section,blockId,character),nearby)

@@ -117,6 +117,14 @@ class LibraryPersistenceTest {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val actual = LibraryRepository(target)
         var importedId: String? = null
+        var stopObserving: (() -> Unit)? = null
+        val positionEvents=java.util.concurrent.atomic.AtomicInteger()
+        val loadingEvents=java.util.concurrent.atomic.AtomicInteger()
+        fun findWebView(view: android.view.View): android.webkit.WebView? {
+            if(view is android.webkit.WebView)return view
+            if(view is android.view.ViewGroup)for(i in 0 until view.childCount)findWebView(view.getChildAt(i))?.let { return it }
+            return null
+        }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
                 waitUntil { var loaded = false; scenario.onActivity { loaded = !ViewModelProvider(it)[ReaderViewModel::class.java].state.value.loading }; loaded }
@@ -125,25 +133,56 @@ class LibraryPersistenceTest {
                 val book = requireNotNull(actual.db.txt(requireNotNull(importedId)))
                 scenario.onActivity { ViewModelProvider(it)[ReaderViewModel::class.java].open(book.id) }
                 waitUntil { var active = false; scenario.onActivity { active = ViewModelProvider(it)[ReaderViewModel::class.java].state.value.reader?.contentId == book.id }; active }
-                Thread.sleep(500)
-                val anchor = actual.engine(book).use { engine -> engine.block(80).let { Locator.Text(book.version, it.sourceOffset, 80) } }
+                fun readyPosition(): Locator.Text? {
+                    var position: Locator.Text? = null
+                    scenario.onActivity { activity ->
+                        val model=ViewModelProvider(activity)[ReaderViewModel::class.java]
+                        val session=model.state.value.reader
+                        if(session?.contentId==book.id && !model.state.value.busy) {
+                            val rendered=model.readerController(session.generation).state.value
+                            if(rendered.phase==ReaderPhase.READY)position=rendered.position as? Locator.Text
+                        }
+                    }
+                    return position
+                }
+                // Exercise an actual page/scroll position callback after renderer Ready.
+                // Installing the book handle alone does not mean its opening anchor settled.
+                waitUntil { readyPosition()!=null }
+                scenario.onActivity { activity ->
+                    val model=ViewModelProvider(activity)[ReaderViewModel::class.java]
+                    val controller=model.readerController(requireNotNull(model.state.value.reader).generation)
+                    stopObserving=controller.observe { event -> when(event) {
+                        RendererEvent.Loading -> loadingEvents.incrementAndGet()
+                        is RendererEvent.Position -> positionEvents.incrementAndGet()
+                        else -> Unit
+                    } }
+                    controller.next()
+                }
+                waitUntil { (readyPosition()?.sourceOffset ?: 0L)>0L }
+                val anchor=requireNotNull(readyPosition())
                 scenario.onActivity {
-                    val model = ViewModelProvider(it)[ReaderViewModel::class.java]
-                    model.position(anchor) // normal scroll callback, NOT an explicit directory/bookmark jump
+                    val model=ViewModelProvider(it)[ReaderViewModel::class.java]
                     assertEquals(0, model.state.value.reader?.jumpSerial)
                     assertEquals(anchor, model.state.value.reader?.jump)
                     model.flushPosition()
                 }
                 val before = requireNotNull(actual.db.txt(book.id)).current
                 assertTrue(before.sourceOffset > 0)
+                var oldWebView: android.webkit.WebView? = null
+                scenario.onActivity { oldWebView=requireNotNull(findWebView(it.window.decorView)) }
+                val beforePositionEvents=positionEvents.get();val beforeLoadingEvents=loadingEvents.get()
                 scenario.recreate()
-                Thread.sleep(1000)
+                waitUntil {
+                    var replacement=false
+                    scenario.onActivity { replacement=findWebView(it.window.decorView)?.let { current -> current!==oldWebView }==true }
+                    replacement && loadingEvents.get()>beforeLoadingEvents && positionEvents.get()>beforePositionEvents && readyPosition()==anchor
+                }
                 scenario.onActivity { ViewModelProvider(it)[ReaderViewModel::class.java].flushPosition() }
                 val after = requireNotNull(actual.db.txt(book.id)).current
                 assertEquals(before.sourceOffset, after.sourceOffset)
                 assertEquals(before.paragraph, after.paragraph)
             } finally {
-                scenario.onActivity { ViewModelProvider(it)[ReaderViewModel::class.java].closeReader() }
+                scenario.onActivity { stopObserving?.invoke();ViewModelProvider(it)[ReaderViewModel::class.java].closeReader() }
                 importedId?.let { id -> actual.db.txt(id)?.let(actual::delete) }
                 actual.db.close()
             }
@@ -392,6 +431,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
                     } }
@@ -488,6 +528,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
                     } }

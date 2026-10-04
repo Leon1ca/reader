@@ -24,6 +24,7 @@ class ReaderController(private val generation: Long,private val register: (Rende
             RendererEvent.Loading -> mutable.value.copy(phase=ReaderPhase.LOADING,message=null)
             is RendererEvent.Ready -> mutable.value.copy(profile=event.profileId,activeViews=event.activeViews)
             is RendererEvent.Position -> mutable.value.copy(phase=ReaderPhase.READY,position=event.locator)
+            is RendererEvent.Zoom -> mutable.value
             is RendererEvent.Notice -> mutable.value.copy(message=event.message)
             is RendererEvent.Error -> mutable.value.copy(phase=ReaderPhase.FAILED,message=event.message)
             is RendererEvent.Crashed -> mutable.value.copy(phase=ReaderPhase.CRASHED,message=event.message)

@@ -71,6 +71,7 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     override val revision=record.renderRevision
     override val sourceRevision=record.revision
     override val kind=WebContentKind.EPUB
+    override val compatibilityNotices=record.warnings
     override val protocolVersion=2
     override val direction=record.direction
     override fun linkTarget(identity: String): Locator? = try {

@@ -139,7 +139,11 @@ class ReaderViewModel internal constructor(application: Application, private val
     }
     fun rendererEvent(sessionGeneration: Long, event: RendererEvent): Boolean {
         if (owner?.generation != sessionGeneration) return false
-        return if (event is RendererEvent.Position) position(event.locator,event.intent==IntentCause.UserNavigation) else true
+        return when(event) {
+            is RendererEvent.Position -> position(event.locator,event.intent==IntentCause.UserNavigation)
+            is RendererEvent.Zoom -> if(position(event.locator,false)) { fxlZoom(event.zoom);true } else false
+            else -> true
+        }
     }
     /** Anchor restores update current without raising the accumulated furthest-read position. */
     fun position(locator: Locator, advanceFurthest: Boolean = true): Boolean {
@@ -189,6 +193,8 @@ class ReaderViewModel internal constructor(application: Application, private val
             theme = if(theme != old.theme) FieldUpdate.Set(theme) else FieldUpdate.Keep)
         patchBook(patch)
     }
+    fun fxlZoom(zoom: String) = patchBook(RulesPatch(fxlZoom=FieldUpdate.Set(zoom)))
+    fun spreadPreference(spread: String) = patchBook(RulesPatch(spreadPreference=FieldUpdate.Set(spread)))
     fun epubStyleMode(mode: String) = patchBook(RulesPatch(epubStyleMode=FieldUpdate.Set(mode)))
     fun lineHeight(height: Double) = patchBook(RulesPatch(lineHeight=FieldUpdate.Set(height)))
     fun fontSize(font: Float) = patchBook(RulesPatch(fontSize = FieldUpdate.Set(font)))

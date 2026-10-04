@@ -104,9 +104,10 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
             when (event.optString("type")) {
                 "ready" -> {
                     val count = integer("activeViews") ?: return
-                    if (count !in 1..8 || !session.gate.ready(identity)) return
+                    if (count !in 1..(if(session.publication.kind==WebContentKind.FIXED)4 else 8) || !session.gate.ready(identity)) return
                     session.opened = true
                     onEvent(RendererEvent.Ready(event.optString("profileId"),count,event.optBoolean("nearby")))
+                    session.publication.compatibilityNotices.take(3).takeIf { it.isNotEmpty() }?.let { messages -> onEvent(RendererEvent.Notice(messages.joinToString("\n") { LocatorCodec.safePrefix(it,180) })) }
                 }
                 "relocated" -> {
                     if (!session.gate.ready) return
@@ -119,6 +120,11 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                         RendererAnchor.Block(section,block,targetInteger("character") ?: return)
                     } else when(target.optString("kind")) {
                         "TEXT" -> RendererAnchor.Text(section,targetInteger("offset") ?: return)
+                        "PAGE" -> {
+                            val x=(target.opt("x") as? Number)?.toDouble() ?: return;val y=(target.opt("y") as? Number)?.toDouble() ?: return
+                            if(!x.isFinite() || !y.isFinite() || x !in 0.0..1.0 || y !in 0.0..1.0 || session.publication.kind!=WebContentKind.FIXED)return
+                            RendererAnchor.Page(section,x,y)
+                        }
                         "ELEMENT" -> RendererAnchor.Element(section,target.optString("elementId").takeIf { it.length in 1..128 } ?: return)
                         else -> return
                     }
@@ -141,6 +147,27 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                                 if(session.pageQueue.isNotEmpty())command(session,session.pageQueue.removeFirst(),null,null)
                             } else if(active===session && session.gate.acceptsPosition(identity,positionSerial) && locator==null)fail("正文返回了无效定位，请重新打开")
                         } catch(e: Exception) { if(active===session && session.gate.acceptsPosition(identity,positionSerial))fail("正文定位读取失败：${e.message}") }
+                    }
+                }
+                "pageRequested" -> {
+                    if(session.gate.ready && session.publication.kind==WebContentKind.FIXED && session.userIntentToken.isNotEmpty() && event.optString("userIntentToken")==session.userIntentToken) {
+                        event.optString("direction").takeIf { it in setOf("next","prev") }?.let(::page)
+                    }
+                }
+                "zoomRequested" -> {
+                    if(!session.gate.ready || session.publication.kind!=WebContentKind.FIXED || session.userIntentToken.isEmpty() || event.optString("userIntentToken")!=session.userIntentToken)return
+                    val zoom=event.opt("zoom")?.toString()?.takeIf { it=="fit-page" || it.toDoubleOrNull()?.let { n -> n.isFinite() && n in 1.0..5.0 }==true } ?: return
+                    val target=event.optJSONObject("target") ?: return
+                    val section=(target.opt("section") as? Number)?.toDouble()?.takeIf { it.isFinite() && it==it.toInt().toDouble() && it.toInt() in 0 until session.publication.sectionCount }?.toInt() ?: return
+                    val x=(target.opt("x") as? Number)?.toDouble()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return
+                    val y=(target.opt("y") as? Number)?.toDouble()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return
+                    val serial=session.gate.beginPosition(identity) ?: return
+                    scope.launch {
+                        val locator=withContext(Dispatchers.IO) { session.publication.locator(RendererAnchor.Page(section,x,y)) as? Locator.Page }
+                        if(active===session && session.gate.acceptsPosition(identity,serial) && locator!=null) {
+                            session.locator=locator
+                            onEvent(RendererEvent.Zoom(locator,zoom))
+                        }
                     }
                 }
                 "userIntent" -> {
@@ -227,19 +254,23 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                         is RendererAnchor.Block -> value.put("blockId",anchor.blockId).put("character",anchor.character)
                         is RendererAnchor.Text -> value.put("kind","TEXT").put("offset",anchor.offset)
                         is RendererAnchor.Element -> value.put("kind","ELEMENT").put("elementId",anchor.elementId)
-                        is RendererAnchor.Page -> value.put("kind","PAGE").put("progression",anchor.progression)
+                        is RendererAnchor.Page -> value.put("kind","PAGE").put("x",anchor.x).put("y",anchor.y)
                     }
                     payload.put("target",value)
                 }
                 if (targetRules != null) {
                     val faces = withContext(Dispatchers.IO) { view.context.assets.open("fonts/readest.css").bufferedReader().use { it.readText() } }
                     val compiled = RuleCompiler.compile(session.publication.kind,targetRules,"${session.resources.base}fonts/readest.css",faces)
+                    payload.put("zoom",targetRules.fxlZoom).put("spread",targetRules.spreadPreference).put("theme",targetRules.theme)
                     payload.put("flow",targetRules.flow.wire).put("profileId",compiled.profileId).put("beforeAuthor",compiled.beforeAuthor).put("afterAuthor",compiled.afterAuthor)
                     val g = compiled.geometry
                     payload.put("geometry",JSONObject().put("gap",g.gap).put("margin-top",g.marginTop).put("margin-bottom",g.marginBottom)
                         .put("margin-left",g.marginLeft).put("margin-right",g.marginRight).put("max-column-count",g.maxColumns))
                 }
-                if (effectiveType == "open") payload.put("sectionCount",session.publication.sectionCount).put("direction",session.publication.direction)
+                if (effectiveType == "open") {
+                    payload.put("sectionCount",session.publication.sectionCount).put("direction",session.publication.direction)
+                    session.publication.fixedLayout?.let { fixed -> payload.put("fixedMixed",fixed.mixed).put("fixedPages",org.json.JSONArray(fixed.pages.map { page -> JSONObject().put("index",page.index).put("width",page.width).put("height",page.height).put("pageSpread",page.pageSpread ?: "").put("spread",page.spread) })) }
+                }
                 val value = JSONObject().put("protocol",session.publication.protocolVersion).put("sessionId",identity.sessionId).put("revision",identity.revision)
                     .put("layoutEpoch",identity.layoutEpoch).put("commandId",identity.commandId).put("type",effectiveType).put("payload",payload)
                     .also { if(session.publication.protocolVersion==2)it.put("intentCause",session.intent.name).put("intentToken",session.intentToken) }

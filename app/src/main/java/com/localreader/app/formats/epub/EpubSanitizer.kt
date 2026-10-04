@@ -24,10 +24,11 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
         require(elementPrefix.isEmpty() || elementPrefix.matches(Regex("batch-[0-9]{1,5}-")))
         require(inputLimit in EpubLimits.SMALL_SPINE_BYTES..8L*1024*1024 && bytes.size<=inputLimit) { "EPUB 单个解析批次超过 8 MB 或常规章节预算" }
         val inputWarnings=linkedSetOf<String>()
-        val input=if(mime=="application/xhtml+xml") {
+        val input=if(mime in setOf("application/xhtml+xml","image/svg+xml")) {
             val xml=Jsoup.parse(bytes.inputStream(),null,"https://epub.invalid/",org.jsoup.parser.Parser.xmlParser().setMaxDepth(128))
             // XML self-closing active elements must be removed before HTML parsing.
-            // Otherwise HTML raw-text rules consume the following legal XHTML body.
+            // Otherwise HTML raw-text rules consume the following legal XML body.
+            // Standalone SVG uses the same namespace-aware projection as XHTML.
             xml.allElements.toList().forEach { element ->
                 val local=element.tagName().substringAfter(':').lowercase(java.util.Locale.ROOT)
                 if(local in ACTIVE || local.startsWith("animate")) { element.remove();return@forEach }
