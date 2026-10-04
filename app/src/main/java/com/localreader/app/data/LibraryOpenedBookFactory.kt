@@ -17,8 +17,9 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
     override suspend fun open(contentId: String): OpenedBook = create {
         val book = requireNotNull(repository.db.content(contentId)) { "书籍不存在" }
         if(book.format==ContentFormat.EPUB) {
-            val cache=repository.db.epubCache(book.id)
-            val source=EpubSource(repository.directory(book),cache)
+            val coroutine=currentCoroutineContext()
+            val (directory,cache)=repository.currentEpubCache(book) { coroutine.ensureActive() }
+            val source=EpubSource(directory,cache)
             try { return@create EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source) }
             catch(error: Throwable) { source.close();throw error }
         }

@@ -169,6 +169,113 @@ class EpubPersistenceTest {
             } finally { scenario.onActivity { adapter.close() };badFontBook?.close();book.close() }
         }
     }
+    @Test fun physicalTwentyMiBImportStreamsCanonicalPartsAndRestoresLogicalPositionAfterReflow() {
+        data class Expected(val file: File,val characters: Int,val sha: String,val target: Int)
+        fun chapter(name: String,minimum: Int,giant: Boolean): Expected {
+            val file=File(root,name);var characters=0;var bytes=0;var selected=-1;var random=17L
+            val digest=java.security.MessageDigest.getInstance("SHA-256")
+            file.outputStream().buffered().use { output ->
+                fun write(value: String) { val encoded=value.toByteArray();output.write(encoded);bytes+=encoded.size }
+                fun text(value: String) { write(value);characters+=value.length;digest.update(value.toByteArray(Charsets.UTF_16LE)) }
+                write("<html xmlns='http://www.w3.org/1999/xhtml'><head><title>原创长章</title></head><body>")
+                if(giant)write("<p id='start'>")
+                var paragraph=0
+                while(bytes<minimum) {
+                    if(!giant)write("<p${if(paragraph%100==0)" id='p$paragraph'" else ""}>")
+                    if(selected<0 && bytes>minimum*3/4)selected=characters
+                    val value=buildString { repeat(512) { random=(random*1664525+1013904223) and 0xffffffffL;append((0x4e00+(random%20000).toInt()).toChar());if(it%127==126)append("😀") } }
+                    text(value)
+                    if(!giant)write("</p>")
+                    paragraph++
+                }
+                if(giant)write("</p>")
+                write("<p id='tail'>");text("真实章节末尾 END");write("</p></body></html>")
+            }
+            return Expected(file,characters,digest.digest().joinToString("") { "%02x".format(it) },selected)
+        }
+        val first=chapter("giant.xhtml",5*1024*1024,true);val second=chapter("many.xhtml",15*1024*1024,false)
+        val uri=Uri.parse("content://com.localreader.app.test.fixtures/stream-${UUID.randomUUID()}.epub");uris.add(uri)
+        context.contentResolver.openOutputStream(uri,"wt")!!.use { stream -> ZipOutputStream(stream).use { zip ->
+            fun entry(name: String,file: File) {
+                val crc=CRC32();file.inputStream().use { input -> val buffer=ByteArray(65536);while(true) { val n=input.read(buffer);if(n<0)break;crc.update(buffer,0,n) } }
+                val item=ZipEntry(name).apply { time=315532800000L;method=ZipEntry.STORED;size=file.length();compressedSize=size;this.crc=crc.value }
+                zip.putNextEntry(item);file.inputStream().use { it.copyTo(zip,65536) };zip.closeEntry()
+            }
+            fun text(name: String,value: String) { val file=File(root,"entry-${UUID.randomUUID()}");file.writeText(value);entry(name,file);file.delete() }
+            text("mimetype","application/epub+zip")
+            text("META-INF/container.xml","<container><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>")
+            text("book.opf","<package version='3.0' unique-identifier='uid'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:identifier id='uid'>own-long-20mib</dc:identifier><dc:title>真实20MiB EPUB</dc:title></metadata><manifest><item id='one' href='giant.xhtml' media-type='application/xhtml+xml'/><item id='two' href='many.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='one'/><itemref idref='two'/></spine></package>")
+            entry("giant.xhtml",first.file);entry("many.xhtml",second.file)
+        } }
+        val imported=repository.import(uri);assertNotNull(imported.status,imported.bookId);val id=requireNotNull(imported.bookId)
+        val record=requireNotNull(repository.db.content(id));assertTrue(record.bytes>20L*1024*1024)
+        val cache=repository.db.epubCache(id);assertEquals(2,cache.sections.size);assertTrue(cache.parts.size>40);assertTrue(cache.parts.all { it.characters<512*1024 })
+        val directory=repository.directory(record)
+        listOf(first,second).forEachIndexed { spine,expected ->
+            assertEquals(expected.characters,cache.sections[spine].characters)
+            val hash=java.security.MessageDigest.getInstance("SHA-256");File(directory,cache.sections[spine].canonicalFile).inputStream().use { input -> val buffer=ByteArray(65536);while(true) { val n=input.read(buffer);if(n<0)break;hash.update(buffer,0,n) } }
+            assertEquals(expected.sha,hash.digest().joinToString("") { "%02x".format(it) })
+        }
+        val store=SqliteReadingStore(repository.db);val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) }
+        val target=Locator.Epub(book.revision,1,second.target);assertTrue(book.accepts(target));assertTrue(book.publication.target(target).section>1)
+        val current=AtomicReference<RendererEvent.Position?>();val error=AtomicReference<String?>();lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun diagnostics(): JSONObject {
+                val result=AtomicReference<String?>();scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify(readerHost.diagnostics())") { result.set(it) } };waitUntil { result.get()!=null }
+                return JSONObject(org.json.JSONTokener(result.get()).nextValue() as String)
+            }
+            try {
+                scenario.onActivity { activity -> adapter=WebReaderAdapter(activity) { event -> when(event) { is RendererEvent.Position -> current.set(event);is RendererEvent.Error -> error.set(event.message);is RendererEvent.Crashed -> error.set(event.message);else -> Unit } };activity.setContentView(adapter.view);adapter.open(book.publication,target,ReaderRules(flow=ReaderFlow.SCROLLED)) }
+                waitUntil { current.get()?.locator==target || (current.get()?.locator as? Locator.Epub)?.let { it.spine==target.spine && it.offset==target.offset }==true || error.get()!=null };assertNull(error.get())
+                var diag=diagnostics();assertTrue(diag.getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(diag.getJSONArray("contents").length()<=8);val loaded=diag.getJSONArray("contents");assertTrue((0 until loaded.length()).sumOf { loaded.getJSONObject(it).optString("canonicalLength").toLongOrNull() ?: 0L }<first.characters.toLong()+second.characters);assertTrue(adapter.cachedResourceBytes<=4*1024*1024)
+                current.set(null);scenario.onActivity { adapter.setRules(ReaderRules(fontSize=26f,flow=ReaderFlow.PAGINATED),target) }
+                waitUntil { (current.get()?.locator as? Locator.Epub)?.let { it.spine==target.spine && it.offset==target.offset }==true || error.get()!=null };assertNull(error.get())
+                diag=diagnostics();assertTrue(diag.getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(diag.getJSONArray("contents").length()<=8)
+                val saved=current.get()!!.locator;store.savePosition(id,book.revision,saved,EpubReadingExtent(book.revision,1,second.target));assertTrue(store.addBookmark(id,book.revision,saved,book.excerpt(saved,100)))
+            } finally { scenario.onActivity { adapter.close() };book.close() }
+        }
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { reopened -> val snapshot=store.loadSnapshot(id);val locator=snapshot.current as Locator.Epub;assertEquals(1,locator.spine);assertEquals(second.target,locator.offset);assertEquals(locator,store.bookmarks(id).single().locator);assertTrue(reopened.accepts(locator)) }
+    }
+
+    @Test fun factoryAtomicallyRefreshesSchemaTwoDerivedStylesWithoutChangingStoredSourceOrLocators() {
+        val imported=repository.import(fixture(epub()));val id=requireNotNull(imported.bookId)
+        val content=requireNotNull(repository.db.content(id));val directory=repository.directory(content)
+        val metadata=File(directory,"package.json");val json=JSONObject(metadata.readText())
+        json.put("renderRevision",content.revision+"-parts2-style3");metadata.writeText(json.toString())
+        val original=File(directory.parentFile!!.parentFile,"original.epub")
+        val old=EpubCache.read(directory);val originalHash=original.inputStream().use { input ->
+            val digest=java.security.MessageDigest.getInstance("SHA-256");val buffer=ByteArray(65536)
+            while(true) { val n=input.read(buffer);if(n<0)break;digest.update(buffer,0,n) };digest.digest().toList()
+        }
+        val canonical=old.sections.associate { it.canonicalFile to File(directory,it.canonicalFile).readBytes().toList() }
+        val store=SqliteReadingStore(repository.db);val position=Locator.Epub(content.revision,1,3)
+        store.savePosition(id,content.revision,position,EpubReadingExtent(content.revision,1,3));assertTrue(store.addBookmark(id,content.revision,position,"source"))
+        val before=store.loadSnapshot(id)
+        // An interrupted rebuild must leave the complete old cache and reading metadata usable.
+        var preparedFailure=false
+        val fallback=EpubCache.refresh(original,directory,content.hash) {
+            if(directory.listFiles()?.any { it.name.startsWith(".derived-staging-") && File(it,"package.json").isFile }==true) {
+                preparedFailure=true;error("injected refresh failure before publish")
+            }
+        }
+        assertTrue(preparedFailure);assertFalse(directory.listFiles()!!.any { it.name.startsWith(".derived-staging-") })
+        assertEquals(directory,fallback.first);assertEquals(old.renderRevision,fallback.second.renderRevision)
+        assertTrue(fallback.second.warnings.any { it.contains("刷新失败") });assertEquals(directory,EpubCache.activeDirectory(directory))
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { opened ->
+            assertEquals(content.revision,opened.revision);assertTrue(opened.accepts(position))
+            assertEquals(content.revision+"-"+EpubCache.RENDER_ALGORITHM,opened.publication.revision)
+            assertNotEquals(directory,EpubCache.activeDirectory(directory))
+        }
+        assertEquals(before,store.loadSnapshot(id));assertEquals(position,store.bookmarks(id).single().locator)
+        assertEquals(old.renderRevision,JSONObject(metadata.readText()).getString("renderRevision"))
+        canonical.forEach { (name,bytes) -> assertEquals(bytes,File(directory,name).readBytes().toList());assertEquals(bytes,File(EpubCache.activeDirectory(directory),name).readBytes().toList()) }
+        val afterHash=original.inputStream().use { input ->
+            val digest=java.security.MessageDigest.getInstance("SHA-256");val buffer=ByteArray(65536)
+            while(true) { val n=input.read(buffer);if(n<0)break;digest.update(buffer,0,n) };digest.digest().toList()
+        }
+        assertEquals(originalHash,afterHash)
+    }
+
     @Test fun controllerKeepsSurfaceAcrossRealRendererTerminationAndSourceGlyphRestore() {
         val id=import(epub());val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) };val store=SqliteReadingStore(repository.db)
         val owner=ReadingSessionOwner(book,1,store,store.loadSnapshot(id));val events=java.util.concurrent.CopyOnWriteArrayList<RendererEvent>();lateinit var surface: ReaderSurface

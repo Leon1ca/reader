@@ -3,6 +3,7 @@ package com.localreader.app.core
 /** Content capabilities contain no Android, SQLite, file URI or renderer implementation. */
 interface ReaderPublication {
     val revision: String
+    val sourceRevision: String get()=revision
     val kind: WebContentKind
     val sectionCount: Int
     val protocolVersion: Int get() = 1

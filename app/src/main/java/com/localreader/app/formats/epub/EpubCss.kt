@@ -4,7 +4,7 @@ enum class EpubStyleMode { AUTHOR, CUSTOM }
 data class FilteredCss(val text: String,val warnings: List<String>)
 
 /** Original bounded token scanner. Strings/comments/escapes are parsed before URL classification. */
-class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val imported: (String) -> String? = { null }) {
+class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val imported: (String) -> String? = { null },private val selector: (String) -> String = { it }) {
     private var rules=0
     private val warnings=linkedSetOf<String>()
     val notices: List<String> get()=warnings.toList()
@@ -54,7 +54,7 @@ class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val i
                     }
                 } else if(prelude.isNotBlank()) {
                     val decl=declarations(body,mode,false)
-                    if(decl.isNotBlank())append("$prelude{$decl}")
+                    if(decl.isNotBlank())append("${selector(prelude)}{$decl}")
                 }
             }
         }

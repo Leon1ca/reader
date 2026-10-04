@@ -30,18 +30,22 @@ function userIntent(event) {
 for (const type of ['wheel','touchmove','pointerdown','keydown']) addEventListener(type,userIntent,{capture:true,passive:true})
 let stabilizedSequence = 0, relocationDraft, latestRequestedId = 0
 const superseded = Symbol('superseded')
-let operationDeadline = 0, relocationRange
+let operationDeadline = 0, relocationRange, operationPhase = 'idle'
 const fontWarnings = new WeakSet()
 let failedFontDocuments = new Set()
-function bounded(promise) {
+function bounded(promise,phase) {
     const id = commandId
+    operationPhase = phase
     return new Promise((resolve,reject) => {
         const timer = setInterval(() => {
             if (closed || id !== latestRequestedId) { clearInterval(timer); reject(superseded) }
-            else if (performance.now() >= operationDeadline) { clearInterval(timer); reject(new Error('Reader operation timed out')) }
+            else if (performance.now() >= operationDeadline) { clearInterval(timer); reject(new Error(`Reader operation timed out: phase=${phase},command=${commandId},${contentState()}`)) }
         }, 40)
         Promise.resolve(promise).then(value => {clearInterval(timer);resolve(value)},error => {clearInterval(timer);reject(error)})
     })
+}
+function contentState() {
+    return paginator.getContents().map(({index,doc}) => `${index}:${doc.readyState}:${doc.body?.dataset.readerCanonicalLength ?? '-'}:${canonical.get(doc)?.length ?? '-'}`).join(';')
 }
 const events = []
 function emit(type, payload = {}) {
@@ -64,7 +68,10 @@ function textIndex(doc) {
         starts.set(node,length); runs.push({node,start:length,end:length+node.length})
         strings.push(node.data);length += node.length
     }
-    value = {runs,starts,length,text:strings.join('')};canonical.set(doc,value)
+    value = {runs,starts,length,text:strings.join('')};
+    // The preloader can expose this same Document while its parser is still writing.
+    // Never make an early relocation/diagnostic snapshot the permanent canonical index.
+    if(doc.readyState==='complete' && doc.body.hasAttribute('data-reader-canonical-sha'))canonical.set(doc,value)
     return value
 }
 function rawRange(doc,offset) {
@@ -153,12 +160,12 @@ function targetFor(range,index) {
 }
 async function validateCanonical(doc) {
     const value=textIndex(doc),expected=Number(doc.body.dataset.readerCanonicalLength)
-    if(value.length!==expected)throw new Error('Canonical DOM length mismatch')
+    if(value.length!==expected)throw new Error(`Canonical DOM length mismatch: expected=${expected},actual=${value.length},url=${doc.URL},state=${doc.readyState},runs=${value.runs.length}`)
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value.text))
     const hex=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('')
     if(hex!==doc.body.dataset.readerCanonicalSha)throw new Error('Canonical DOM hash mismatch')
 }
-const validations=new WeakMap()
+const validations=new WeakMap(), validatedDocuments=new WeakSet()
 function anchorGeometry(target) {
     const entry = paginator.getContents().find(x => x.index === target?.section)
     if (!entry?.doc?.body) return {visible:false}
@@ -187,12 +194,12 @@ async function stable(target) {
         }
         await bounded(Promise.all(contents.map(({doc}) => {
             let validation=validations.get(doc)
-            if(!validation){validation=validateCanonical(doc);validations.set(doc,validation)}
+            if(!validation){validation=validateCanonical(doc).then(()=>validatedDocuments.add(doc));validations.set(doc,validation)}
             return validation
-        })))
+        })), 'canonical')
         // iframe load includes linked/flattened package CSS. Font faces are now
         // discoverable; fonts.ready alone before stylesheet load would be premature.
-        await bounded(Promise.all(contents.map(({doc}) => doc.fonts.ready)))
+        await bounded(Promise.all(contents.map(({doc}) => doc.fonts.ready)), 'fonts')
         for(const {doc} of contents) {
             const failed=[...doc.fonts].filter(face=>face.status==='error')
             if(failed.length && !fontWarnings.has(doc))failedFontDocuments.add(doc)
@@ -203,7 +210,7 @@ async function stable(target) {
                 new Promise((resolve,reject) => {
                     image.addEventListener('load',resolve,{once:true,signal:listeners.signal})
                     image.addEventListener('error',()=>reject(new Error('Article image failed to load')),{once:true,signal:listeners.signal})
-                })))))
+                })))), 'images')
         } finally { listeners.abort() }
         if (contents.some(({doc}) => [...doc.images].some(image => !image.naturalWidth))) throw new Error('Article image failed to load')
         if (target && !anchored) {
@@ -212,16 +219,21 @@ async function stable(target) {
             const normalized=normalizeTarget(doc,target)
             Object.assign(target,normalized)
             anchored = true
-            await bounded(paginator.goTo({ index: target.section, anchor: doc => rangeFor(doc, target) }))
+            // Re-anchor a loaded primary Range without re-running section navigation.
+            // goTo on this same section also awaits an additional previous-section
+            // preload; that spare view must not block settling the visible source.
+            if(paginator.primaryIndex===target.section)
+                await bounded(paginator.scrollToAnchor(rangeFor(doc,target)), 'anchorRange')
+            else await bounded(paginator.goTo({ index: target.section, anchor: doc => rangeFor(doc, target) }), 'anchorGoTo')
         }
         await new Promise(resolve => setTimeout(resolve, 50))
         const now = paginator.getContents()
         const next = JSON.stringify([stabilizedSequence, now.map(({index,doc}) => [index,doc.fonts.status,doc.body?.scrollWidth,doc.body?.scrollHeight]),target ? anchorGeometry(target) : null])
         frames = next === signature ? frames + 1 : 0
         signature = next
-        if (frames >= 3 && now.every(({doc}) => doc.fonts.status === 'loaded') && (!target || anchorGeometry(target).visible)) return
+        if (frames >= 3 && now.every(({doc}) => doc.readyState==='complete' && doc.body?.hasAttribute('data-reader-canonical-sha') && validatedDocuments.has(doc) && doc.fonts.status === 'loaded') && (!target || anchorGeometry(target).visible)) return
     }
-    throw new Error('Reader layout did not stabilize')
+    throw new Error(`Reader layout did not stabilize: phase=${operationPhase},${contentState()},anchor=${JSON.stringify(anchorGeometry(target)).slice(0,180)}`)
 }
 function installListeners(instance) {
 instance.addEventListener('load', ({ detail: { doc, index } }) => {
@@ -313,11 +325,11 @@ async function execute(command) {
             paginator.setAttribute('flow', payload.flow)
             paginator.setStyles([payload.beforeAuthor, payload.afterAuthor])
             lastTarget = payload.target
-            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }))
+            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }), 'navigationGoTo')
             await stable(lastTarget)
         } else if (command.type === 'goTo') {
             lastTarget = payload.target
-            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }))
+            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }), 'navigationGoTo')
             await stable(lastTarget)
         } else if (command.type === 'setRules') {
             lastTarget = payload.target
@@ -326,7 +338,7 @@ async function execute(command) {
             paginator.setStyles([payload.beforeAuthor, payload.afterAuthor])
             await stable(lastTarget)
         } else if (command.type === 'next' || command.type === 'prev') {
-            await bounded(paginator[command.type]())
+            await bounded(paginator[command.type](), 'pageTurn')
             await stable()
             const visible=relocationRange && targetFor(relocationRange.range,relocationRange.index)
             if(!visible)throw new Error('Page has no visible reading position')
@@ -354,9 +366,9 @@ globalThis.readerHost = Object.freeze({
     // Read-only diagnostics shared by device and desktop tests; no content/native privileges.
     diagnostics() {
         return { protocol: 2, identity, layoutEpoch: epoch, commandId, loaded: true, flow: paginator.getAttribute('flow'),
-            activeViews: paginator.getContents().length, target: lastTarget, actualVisibleTarget: relocationDraft, anchorGeometry:anchorGeometry(lastTarget), events: [...events],
+            operationPhase, primaryIndex:paginator.primaryIndex, contentState:contentState(), activeViews: paginator.getContents().length, target: lastTarget, actualVisibleTarget: relocationDraft, anchorGeometry:anchorGeometry(lastTarget), events: [...events],
             contents: paginator.getContents().map(({ index, doc }) => ({ section: index, blocks:doc.body ? textIndex(doc).runs.length : 0, canonicalHash:doc.body?.dataset.readerCanonicalSha, canonicalLength:doc.body?.dataset.readerCanonicalLength,
-                textLength: doc.body?.textContent.length ?? 0, url: doc.URL, state: doc.readyState, scriptExecuted: doc.defaultView?.attacked === true,
+                indexedLength:canonical.get(doc)?.length ?? null,validated:validatedDocuments.has(doc),textLength: doc.body?.textContent.length ?? 0, url: doc.URL, state: doc.readyState, scriptExecuted: doc.defaultView?.attacked === true,
                 failedFontFamilies:[...doc.fonts].filter(face=>face.status==='error').map(face=>face.family), fontSize: doc.body ? getComputedStyle(doc.body).fontSize : '', fontFamily: doc.body ? getComputedStyle(doc.body).fontFamily : '' })) }
     },
 })

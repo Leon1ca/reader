@@ -50,6 +50,12 @@ class LibraryRepository(private val context: Context) : ContentRepository {
     override fun updateMetadata(id: String,title: String,author: String) { db.setMetadata(id,title,author);db.notifyContentsChanged() }
     fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}")
     fun directory(book: TxtRecord) = File(File(library, book.id), "versions/${book.version}")
+    internal fun currentEpubCache(book: ContentRecord,checkpoint: () -> Unit): Pair<File,EpubCacheRecord> = mutate {
+        val directory=directory(book)
+        val refreshed=EpubCache.refresh(File(directory.parentFile!!.parentFile,"original.epub"),directory,book.hash,checkpoint)
+        db.replaceEpubCache(book.id,refreshed.second)
+        refreshed
+    }
     fun engine(book: TxtRecord) = TxtEngine(directory(book), book.version)
 
     /** The Android facade never retains permission or mutates the provider's original file. */

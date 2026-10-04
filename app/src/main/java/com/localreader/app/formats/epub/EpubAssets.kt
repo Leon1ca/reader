@@ -13,7 +13,9 @@ import java.util.Base64
 data class EpubResourceRecord(val id: String,val mime: String,val file: String,val bytes: Long)
 
 /** Generated cache filenames are opaque. No ZIP entry is extracted as a filesystem path. */
-class EpubAssets(private val zip: EpubZip,private val book: EpubPackage,private val directory: File,private val checkpoint: () -> Unit = {}) : EpubResourceWriter {
+class EpubAssets(private val zip: EpubZip,private val book: EpubPackage,private val directory: File,private val checkpoint: () -> Unit = {},private var selector: (String) -> String = { it }) : EpubResourceWriter {
+    private var selectorScope: String?=null
+    internal fun selectorScope(identity: String?,compile: (String) -> String = { it }) { selectorScope=identity;selector=if(identity==null) { { it } } else compile }
     val records=linkedMapOf<String,EpubResourceRecord>()
     val warnings=linkedSetOf<String>()
     private val processing=linkedSetOf<PackagePath>()
@@ -113,7 +115,7 @@ class EpubAssets(private val zip: EpubZip,private val book: EpubPackage,private 
     override fun stylesheet(base: PackagePath,href: String): String? {
         val path=resolve(base,href)?.takeIf { it.fragment==null }?.path ?: return null
         if(book.resources.getValue(path).mime!="text/css")return null
-        val name="css-${id(path.value)}.css"
+        val name="css-${id(path.value+selectorScope.orEmpty())}.css"
         if(name !in records) {
             if(processing.size>=8 || !processing.add(path)) { warnings.add("CSS import 循环或深度超限已阻止");return null }
             try { compileSheet(path,zip.read(path,EpubLimits.CSS_BYTES).toString(Charsets.UTF_8),name) }
@@ -122,7 +124,7 @@ class EpubAssets(private val zip: EpubZip,private val book: EpubPackage,private 
         return "../resources/$name"
     }
     override fun inlineStylesheet(base: PackagePath,css: String): String? {
-        val name="css-${id(base.value+":"+css)}.css"
+        val name="css-${id(base.value+":"+css+selectorScope.orEmpty())}.css"
         if(name !in records)compileSheet(base,css,name)
         return "../resources/$name"
     }
@@ -131,7 +133,7 @@ class EpubAssets(private val zip: EpubZip,private val book: EpubPackage,private 
         fun compile(mode: EpubStyleMode): FilteredCss = EpubCss({ href,isFont -> if(isFont)font(base,href) else image(base,href) },{ href ->
             val url=stylesheet(base,href);val imported=url?.substringAfterLast('/')?.let(sheets::get)
             if(mode==EpubStyleMode.AUTHOR)imported?.first else imported?.second
-        }).filter(source,mode)
+        },selector).filter(source,mode)
         val author=compile(EpubStyleMode.AUTHOR);val custom=compile(EpubStyleMode.CUSTOM)
         warnings.addAll(author.warnings);warnings.addAll(custom.warnings)
         sheets[name]=author.text to custom.text

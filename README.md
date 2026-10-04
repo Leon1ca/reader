@@ -86,3 +86,5 @@ python3 scripts/tests/verify-vendor.py
 ```
 
 浏览器回归覆盖真实连续跨节 / 反向重载、活动视图预算、真实来源字符可见性、分页 / 重排 / 窗口改变、慢字体 / 图片、取消与超时。最后一条默认下载固定上游单文件并验证 SHA256；离线可传 `--upstream /path/to/paginator.js`。vendor 中保留 MIT 许可、commit、原件 / 打包 / patch 哈希与可重放补丁。
+
+R3A 的长章使用有界技术分块，但定位和书签仍是原逻辑章节与 canonical UTF16 偏移。旧 schema1 EPUB 缓存保持只读；旧 schema2 排版派生缓存在打开时以 `parts2-style4` 重建，验证原件 SHA256、源身份、定位索引和逐章 canonical 文件不变后才原子发布不可变子目录。失败保留旧缓存并显示提示；原件、原缓存与 SQLite 位置不会被替换。此项当前仍须正式设备回归，不代表 R3B 固定版式或后续阶段已完成。

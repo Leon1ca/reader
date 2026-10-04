@@ -8,7 +8,7 @@ import org.jsoup.nodes.TextNode
 
 data class CanonicalFragment(val offset: Int,val elementId: String? = null)
 data class SanitizedSpine(val authorHtml: String,val customHtml: String,val canonicalText: String,
-    val fragments: Map<String,CanonicalFragment>,val elements: Set<String>,val warnings: List<String>,val heading: String?)
+    val fragments: Map<String,CanonicalFragment>,val elements: Set<String>,val warnings: List<String>,val heading: String?,val sourceStyleMarkers: List<String> = emptyList(),val sourceStyleHeaderMarkers: List<String> = emptyList())
 
 /** Import-side capabilities rewrite resources to opaque IDs, never archive paths or file URLs. */
 interface EpubResourceWriter {
@@ -20,8 +20,9 @@ interface EpubResourceWriter {
 
 /** Does not insert text wrappers; canonical coordinates are the safe body text-node stream. */
 class EpubSanitizer(private val resources: EpubResourceWriter) {
-    fun sanitize(bytes: ByteArray,path: PackagePath,mime: String = "text/html"): SanitizedSpine {
-        require(bytes.size<=EpubLimits.SMALL_SPINE_BYTES) { "EPUB 章节超过当前常规章节预算；长章分段将在下一增量接入" }
+    fun sanitize(bytes: ByteArray,path: PackagePath,mime: String = "text/html",inputLimit: Long = EpubLimits.SMALL_SPINE_BYTES,elementPrefix: String=""): SanitizedSpine {
+        require(elementPrefix.isEmpty() || elementPrefix.matches(Regex("batch-[0-9]{1,5}-")))
+        require(inputLimit in EpubLimits.SMALL_SPINE_BYTES..8L*1024*1024 && bytes.size<=inputLimit) { "EPUB 单个解析批次超过 8 MB 或常规章节预算" }
         val inputWarnings=linkedSetOf<String>()
         val input=if(mime=="application/xhtml+xml") {
             val xml=Jsoup.parse(bytes.inputStream(),null,"https://epub.invalid/",org.jsoup.parser.Parser.xmlParser().setMaxDepth(128))
@@ -107,7 +108,7 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
                 is TextNode -> canonical.append(node.wholeText)
                 is Element -> {
                     val elementId=if(node.tagName() in setOf("img","svg","image","hr") || (node.hasAttr("id") && node.childNodes().none { it is TextNode && it.wholeText.isNotEmpty() })) {
-                        "element-${elementCounter++}".also { elements.add(it);node.attr("data-reader-element",it) }
+                        "${elementPrefix}element-${elementCounter++}".also { elements.add(it);node.attr("data-reader-element",it) }
                     } else null
                     if(node.hasAttr("id"))fragments.putIfAbsent(node.id(),CanonicalFragment(canonical.length,elementId))
                     if(node.tagName() !in setOf("script","style","noscript"))node.childNodes().forEach(::walk)
@@ -117,7 +118,7 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
         }
         walk(body)
         // Empty/image-only documents get a real element anchor, never fabricated text.
-        if(canonical.isEmpty() && elements.isEmpty()) { body.attr("data-reader-element","body");elements.add("body") }
+        if(canonical.isEmpty() && elements.isEmpty()) { body.attr("data-reader-element",elementPrefix+"body");elements.add(elementPrefix+"body") }
         val text=canonical.toString()
         val hash=java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
         body.attr("data-reader-canonical-sha",hash).attr("data-reader-canonical-length",text.length.toString())
@@ -130,7 +131,7 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
         // Separate stylesheet capabilities serve the custom copy; canonical text/revision stay identical.
         custom.select("link[rel=stylesheet]").forEach { it.attr("href",it.attr("href").removeSuffix(".css")+"-custom.css") }
         warnings.addAll(css.notices)
-        require(author.toByteArray(Charsets.UTF_8).size<=2*EpubLimits.SMALL_SPINE_BYTES && text.length<=EpubLimits.SMALL_SPINE_BYTES) { "EPUB 净化章节超过正文预算" }
+        require(author.toByteArray(Charsets.UTF_8).size<=2*inputLimit && text.length<=inputLimit) { "EPUB 净化章节超过正文预算" }
         return SanitizedSpine(author,custom.outerHtml(),text,fragments,elements,warnings.toList(),body.selectFirst("h1,h2,h3")?.text())
     }
     private fun externalLink(href: String): Boolean = try { val uri=java.net.URI(href);uri.scheme in setOf("http","https") && !uri.host.isNullOrEmpty() && uri.userInfo==null } catch(_: Exception) { false }

@@ -91,6 +91,10 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         val key="$id:${content.revision}"
         return synchronized(epubPackages) { epubPackages[key] ?: EpubCache.read(java.io.File(context.filesDir,"library/$id/versions/${content.revision}")).also { check(it.revision==content.revision);epubPackages[key]=it } }
     }
+    internal fun replaceEpubCache(id: String,cache: EpubCacheRecord) {
+        val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB && content.revision==cache.revision)
+        synchronized(epubPackages) { epubPackages["$id:${content.revision}"]=cache }
+    }
     fun insertEpub(record: ContentRecord,cache: EpubCacheRecord) = transaction { db ->
         require(record.format==ContentFormat.EPUB && record.revision==cache.revision)
         db.insertOrThrow("contents",null,ContentValues().apply { put("id",record.id);put("format","epub");put("revision",record.revision);put("title",record.title);put("author",record.author);put("hash",record.hash);put("bytes",record.bytes);put("imported_at",record.imported);put("last_read_at",0);put("original_name",record.originalName);put("language",cache.language);put("cover_path",cache.coverFile?.let { "versions/${cache.revision}/$it" }) })
