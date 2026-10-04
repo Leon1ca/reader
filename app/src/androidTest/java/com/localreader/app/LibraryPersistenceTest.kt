@@ -123,8 +123,8 @@ class LibraryPersistenceTest {
                 val text = "配置重建回归 ${UUID.randomUUID()}\n" + (1..200).joinToString("\n") { "段落 $it：这是一段用于配置重建的正文。" }
                 importedId = requireNotNull(actual.import(fixture(text.toByteArray())).bookId)
                 val book = requireNotNull(actual.db.book(requireNotNull(importedId)))
-                scenario.onActivity { ViewModelProvider(it)[ReaderViewModel::class.java].open(book) }
-                waitUntil { var active = false; scenario.onActivity { active = ViewModelProvider(it)[ReaderViewModel::class.java].state.value.reader?.book?.id == book.id }; active }
+                scenario.onActivity { ViewModelProvider(it)[ReaderViewModel::class.java].open(book.id) }
+                waitUntil { var active = false; scenario.onActivity { active = ViewModelProvider(it)[ReaderViewModel::class.java].state.value.reader?.contentId == book.id }; active }
                 Thread.sleep(500)
                 val anchor = actual.engine(book).use { engine -> engine.block(80).let { Locator.Text(book.version, it.sourceOffset, 80) } }
                 scenario.onActivity {
@@ -165,8 +165,8 @@ class LibraryPersistenceTest {
         try {
             instrumentation.runOnMainSync { model = ReaderViewModel(target.applicationContext as ReaderApplication); store.put("fast-backtrack", model) }
             waitUntil { !model.state.value.loading }
-            instrumentation.runOnMainSync { model.open(book) }
-            waitUntil { model.state.value.reader?.book?.id == id && !model.state.value.busy }
+            instrumentation.runOnMainSync { model.open(book.id) }
+            waitUntil { model.state.value.reader?.contentId == id && !model.state.value.busy }
             val anchors = actual.engine(book).use { engine ->
                 engine.block(100).let { far -> Locator.Text(book.version, far.sourceOffset, 100) } to
                     engine.block(10).let { back -> Locator.Text(book.version, back.sourceOffset, 10) }
@@ -479,12 +479,16 @@ class LibraryPersistenceTest {
         }
         val book = requireNotNull(repository.db.book(requireNotNull(repository.import(uri).bookId)))
         assertTrue(book.bytes >= 20L*1024*1024)
-        val engine = repository.engine(book)
-        val document = TxtPublication(engine)
+        val opened = kotlinx.coroutines.runBlocking { com.localreader.app.data.LibraryOpenedBookFactory(repository).open(book.id) }
+        val document = opened.publication
         assertTrue(document.sectionCount > 100)
-        val targetBlock = engine.block(engine.index.paragraphs*3/4)
-        val target = Locator.Text(book.version,targetBlock.sourceOffset+6,targetBlock.index,6,
-            (targetBlock.sourceOffset+6).toDouble()/engine.index.totalCharacters)
+        // Independently compute the same source anchor as the prior runtime regression.
+        val target = repository.engine(book).use { engine ->
+            val block = engine.block(engine.index.paragraphs*3/4)
+            Locator.Text(book.version,block.sourceOffset+6,block.index,6,(block.sourceOffset+6).toDouble()/engine.index.totalCharacters)
+        }
+        val store = com.localreader.app.data.LegacyTxtReadingStore(repository.db)
+        val owner = ReadingSessionOwner(opened,1,store,store.loadSnapshot(book.id))
         val ready = AtomicReference(false)
         val position = AtomicReference<Locator.Text?>()
         val error = AtomicReference<String?>()
@@ -498,12 +502,13 @@ class LibraryPersistenceTest {
             try {
                 scenario.onActivity { activity ->
                     adapter = WebReaderAdapter(activity) { event -> when(event) {
-                        is RendererEvent.Position -> position.set(event.locator as? Locator.Text)
+                        is RendererEvent.Position -> { assertTrue(owner.position(event.locator,event.reason != "anchor",System.currentTimeMillis())); position.set(event.locator as? Locator.Text) }
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
                         RendererEvent.Loading -> ready.set(false)
                     } }
+                    owner.bind(adapter)
                     activity.setContentView(adapter.view)
                     adapter.open(document,target,ReaderRules(flow = ReaderFlow.SCROLLED))
                 }
@@ -520,7 +525,254 @@ class LibraryPersistenceTest {
                 assertNull(error.get())
                 assertEquals("true",evaluate("(()=>{const d=readerHost.diagnostics();return d.anchorGeometry.visible && d.anchorGeometry.width>0 && d.activeViews<=8 && parseFloat(d.contents[0].fontSize)>$initialFontSize})()"))
                 assertTrue(adapter.cachedResourceBytes <= 2*SessionResources.MAX_SECTION_BYTES)
-            } finally { scenario.onActivity { adapter.close() };engine.close() }
+                scenario.onActivity { owner.flush() }
+                assertEquals(target,store.loadSnapshot(book.id).current)
+                assertEquals(0L,repository.db.book(book.id)?.furthest) // programmatic late anchor must not advance furthest
+            } finally { scenario.onActivity { owner.revokeRenderers(); owner.closeSource() } }
         }
     }
+    @Test fun openedFactoryAndLegacyStorePreserveVersionThreeFieldsAcrossSessions() = kotlinx.coroutines.runBlocking {
+        val store = com.localreader.app.data.LegacyTxtReadingStore(repository.db)
+        val factory = com.localreader.app.data.LibraryOpenedBookFactory(repository)
+        for (flow in listOf("paginated","scrolled")) {
+            val id = requireNotNull(repository.import(fixture(("第一章 $flow 开始\r\n中文😀 English。\r\n" +
+                "正文 $flow。\r\n".repeat(100) + "第二章 结束\r\n结尾。").toByteArray())).bookId)
+            val book = requireNotNull(repository.db.book(id))
+            val anchors = repository.engine(book).use { source ->
+                source.block(30).let { Locator.Text(book.version,it.sourceOffset + 1,30,1,0.3) } to
+                    source.block(80).sourceOffset
+            }
+            repository.db.savePosition(id,anchors.first,anchors.second)
+            repository.db.setStyle(id,22f,"paper"); repository.db.setFlow(id,flow)
+            repository.db.addBookmark(id,anchors.first,"原书签")
+            repository.db.addBookmark(id,anchors.first.copy(version = "retained-old",fallbackFraction = 0.8),"旧版本书签")
+            val original = requireNotNull(repository.db.book(id))
+            val bookmarks = repository.db.bookmarks(id)
+            val rawFiles = repository.directory(book).listFiles().orEmpty().associate { it.name to it.readBytes().toList() }
+            val opened = factory.open(id)
+            val snapshot = store.loadSnapshot(id)
+            assertEquals(original.current,snapshot.current)
+            assertEquals(anchors.second,(snapshot.furthest as com.localreader.app.formats.txt.TxtReadingExtent).sourceOffset)
+            assertEquals(ReaderRules(fontSize = 22f,theme = "paper",flow = if (flow == "scrolled") ReaderFlow.SCROLLED else ReaderFlow.PAGINATED),snapshot.rules)
+            val owner = ReadingSessionOwner(opened,1,store,snapshot)
+            val destination = requireNotNull(opened.locatorForToc(opened.toc().last().id))
+            val target = opened.publication.target(destination)
+            val normalized = requireNotNull(opened.publication.locator(target.section,target.blockId,target.character))
+            assertTrue(owner.position(normalized,false,System.currentTimeMillis()))
+            owner.flush()
+            assertTrue(store.addBookmark(id,opened.revision,normalized,opened.excerpt(normalized,100)))
+            owner.revokeRenderers(); owner.closeSource()
+            val restored = factory.open(id)
+            try {
+                val after = store.loadSnapshot(id)
+                assertEquals(normalized,after.current)
+                assertEquals(anchors.second,(after.furthest as com.localreader.app.formats.txt.TxtReadingExtent).sourceOffset)
+                assertEquals(snapshot.rules,after.rules)
+                bookmarks.forEach { old ->
+                    val kept = repository.db.bookmarks(id).single { it.id == old.id }
+                    assertEquals(old,kept)
+                }
+                assertTrue(restored.publication.target(after.bookmarks.single { it.locator.version == "retained-old" }.locator).nearby)
+                assertEquals(rawFiles,repository.directory(book).listFiles().orEmpty().associate { it.name to it.readBytes().toList() })
+                try { store.savePosition(id,"wrong",normalized,after.furthest); fail("foreign revision must be rejected") } catch (_: IllegalArgumentException) { }
+                try { store.addBookmark(id,restored.revision,Locator.Article(restored.revision,"0",0),"invalid"); fail("foreign format must be rejected") } catch (_: IllegalArgumentException) { }
+            } finally { restored.close() }
+        }
+    }
+    @Test fun preparedEncodingFailureLeavesOldBookAndFactoryUsable() = kotlinx.coroutines.runBlocking {
+        val id = requireNotNull(repository.import(fixture(("第一章 开始\n中文 English。\n".repeat(80)).toByteArray())).bookId)
+        val book = requireNotNull(repository.db.book(id))
+        val versions = requireNotNull(repository.directory(book).parentFile).listFiles().orEmpty().map { it.name }.toSet()
+        try {
+            repository.reencodePrepared(book,"UTF-8") { candidate ->
+                repository.engine(candidate).use { assertTrue(it.index.totalCharacters > 0) }
+                error("presentation preparation failed")
+            }
+            fail("preparation failure must abort commit")
+        } catch (_: IllegalStateException) { }
+        assertEquals(book,repository.db.book(id))
+        assertEquals(versions,requireNotNull(repository.directory(book).parentFile).listFiles().orEmpty().map { it.name }.toSet())
+        assertTrue(repository.db.retainedVersions(id).isEmpty())
+        com.localreader.app.data.LibraryOpenedBookFactory(repository).open(id).use { opened ->
+            assertEquals(book.version,opened.revision)
+            assertTrue(opened.publication.section(0).html.contains("中文"))
+        }
+        val result = com.localreader.app.data.LibraryOpenedBookFactory(repository).reencode(id,"UTF-8")
+        result.opened.use { opened ->
+            assertNotEquals(book.version,opened.revision)
+            assertEquals(opened.revision,repository.db.book(id)?.version)
+            assertEquals(opened.revision,result.snapshot.current.version)
+            assertTrue(result.presentation.currentFraction in 0.0..1.0)
+        }
+    }
+    @Test fun closeImmediatelyThenClearRevokesBackendAndRejectsOldGeneration() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as ReaderApplication
+        val actual = app.repository
+        val id = requireNotNull(actual.import(fixture(("关闭资源 ${UUID.randomUUID()}\n" + "正文。\n".repeat(80)).toByteArray())).bookId)
+        val models = ViewModelStore()
+        lateinit var model: ReaderViewModel
+        try {
+            instrumentation.runOnMainSync { model = ReaderViewModel(app); models.put("owner-test",model) }
+            waitUntil { !model.state.value.loading }
+            instrumentation.runOnMainSync { model.open(id) }
+            waitUntil { model.state.value.reader != null && !model.state.value.busy }
+            val session = requireNotNull(model.state.value.reader)
+            val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+            val backend = object : RendererBackend {
+                override fun open(document: ReaderPublication, locator: Locator, rules: ReaderRules) = Unit
+                override fun goTo(locator: Locator) = Unit
+                override fun setRules(rules: ReaderRules, locator: Locator) = Unit
+                override fun next() = Unit
+                override fun prev() = Unit
+                override fun close() { closed.set(true) }
+            }
+            instrumentation.runOnMainSync {
+                model.bindRenderer(session.generation,backend)
+                model.closeReader()
+                models.clear() // source closure must not depend on the now-cancelled VM scope
+                assertTrue(closed.get())
+                assertFalse(model.rendererEvent(session.generation,RendererEvent.Position(session.snapshot.current)))
+            }
+            try { session.document.section(0); fail("retired source must already be closed") } catch (_: java.io.IOException) { }
+        } finally { instrumentation.runOnMainSync { models.clear() }; actual.db.book(id)?.let(actual::delete) }
+    }
+
+    @Test fun inclusiveEndOfFilePositionBookmarkAndOldFurthestSurviveReopen() = kotlinx.coroutines.runBlocking {
+        val id = requireNotNull(repository.import(fixture("abc".toByteArray())).bookId)
+        val factory = com.localreader.app.data.LibraryOpenedBookFactory(repository)
+        val store = com.localreader.app.data.LegacyTxtReadingStore(repository.db)
+        factory.open(id).use { opened ->
+            val endpoint = requireNotNull(opened.publication.locator(0,"0",3))
+            assertTrue(opened.accepts(endpoint))
+            val extent = com.localreader.app.formats.txt.TxtReadingExtent(opened.revision,3)
+            store.savePosition(id,opened.revision,endpoint,extent)
+            assertTrue(store.addBookmark(id,opened.revision,endpoint,"EOF"))
+        }
+        factory.open(id).use { opened ->
+            val saved = store.loadSnapshot(id)
+            assertEquals(3L,(saved.current as Locator.Text).sourceOffset)
+            assertEquals(3L,(saved.furthest as com.localreader.app.formats.txt.TxtReadingExtent).sourceOffset)
+            assertEquals(saved.current,saved.bookmarks.single().locator)
+            val owner = ReadingSessionOwner(opened,2,store,saved)
+            assertTrue(owner.position(requireNotNull(opened.publication.locator(0,"0",0)),false,System.currentTimeMillis()))
+            owner.flush()
+            assertEquals(3L,repository.db.book(id)?.furthest)
+        }
+    }
+
+    @Test fun capturedBookmarkAndRulesCompleteBeforeSameBookReopenSnapshot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as ReaderApplication
+        val actual = app.repository
+        val id = requireNotNull(actual.import(fixture(("写队列 ${UUID.randomUUID()}\n" + "正文。\n".repeat(120)).toByteArray())).bookId)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val completed = java.util.concurrent.CountDownLatch(1)
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val delayed = object : ReadingStore by app.readingStore {
+            override fun loadSnapshot(contentId: String): ReadingSnapshot {
+                reads.incrementAndGet(); order += "snapshot"
+                return app.readingStore.loadSnapshot(contentId)
+            }
+            override fun addBookmark(contentId: String, revision: String, locator: Locator, excerpt: String): Boolean {
+                entered.countDown()
+                try {
+                    check(release.await(10,java.util.concurrent.TimeUnit.SECONDS)) { "test write barrier timed out" }
+                    return app.readingStore.addBookmark(contentId,revision,locator,excerpt).also { order += "bookmark" }
+                } finally { completed.countDown() }
+            }
+            override fun saveRules(contentId: String, revision: String, rules: ReaderRules) {
+                app.readingStore.saveRules(contentId,revision,rules); order += "rules"
+            }
+        }
+        val models = ViewModelStore()
+        lateinit var model: ReaderViewModel
+        try {
+            instrumentation.runOnMainSync { model = ReaderViewModel(app,delayed); models.put("queued-open",model) }
+            waitUntil { !model.state.value.loading }
+            instrumentation.runOnMainSync { model.open(id) }
+            waitUntil { model.state.value.reader != null && !model.state.value.busy }
+            val old = requireNotNull(model.state.value.reader)
+            instrumentation.runOnMainSync { model.addBookmark() }
+            assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+            instrumentation.runOnMainSync { model.style(22f,"paper"); model.closeReader(); model.open(id) }
+            Thread.sleep(200)
+            assertEquals(1,reads.get()) // reopening must not bypass the captured write in the serial queue
+            assertNull(model.state.value.reader)
+            release.countDown()
+            waitUntil { model.state.value.reader != null && !model.state.value.busy }
+            val reopened = requireNotNull(model.state.value.reader)
+            assertTrue(reopened.generation > old.generation)
+            assertEquals(old.snapshot.current,reopened.snapshot.bookmarks.single().locator)
+            assertEquals(22f,reopened.snapshot.rules.fontSize); assertEquals("paper",reopened.snapshot.rules.theme)
+            assertTrue(order.indexOf("bookmark") < order.indexOf("rules"))
+            assertTrue(order.indexOf("rules") < order.lastIndexOf("snapshot"))
+            assertFalse(model.rendererEvent(old.generation,RendererEvent.Error("old")))
+        } finally {
+            release.countDown(); completed.await(5,java.util.concurrent.TimeUnit.SECONDS)
+            instrumentation.runOnMainSync { models.clear() }
+            actual.db.book(id)?.let(actual::delete)
+        }
+    }
+    @Test fun failedClosedProgressBlocksSameBookUntilRetryBeforeSnapshotButAllowsOtherBook() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as ReaderApplication
+        val actual = app.repository
+        val id = requireNotNull(actual.import(fixture(("保存重试 ${UUID.randomUUID()}\n" + "正文。\n".repeat(120)).toByteArray())).bookId)
+        val otherId = requireNotNull(actual.import(fixture(("其他书 ${UUID.randomUUID()}\n正文。\n").toByteArray())).bookId)
+        val failing = java.util.concurrent.atomic.AtomicBoolean(true)
+        val flaky = object : ReadingStore by app.readingStore {
+            override fun savePosition(contentId: String, revision: String, current: Locator, furthest: ReadingExtent) {
+                if (contentId == id && failing.get()) throw java.io.IOException("test unavailable storage")
+                app.readingStore.savePosition(contentId,revision,current,furthest)
+            }
+        }
+        val models = ViewModelStore()
+        lateinit var model: ReaderViewModel
+        try {
+            instrumentation.runOnMainSync { model = ReaderViewModel(app,flaky); models.put("retry-open",model) }
+            waitUntil { !model.state.value.loading }
+            instrumentation.runOnMainSync { model.open(id) }
+            waitUntil { model.state.value.reader != null && !model.state.value.busy }
+            val book = requireNotNull(actual.db.book(id))
+            val anchor = actual.engine(book).use { engine -> engine.block(100).let { Locator.Text(book.version,it.sourceOffset,100) } }
+            instrumentation.runOnMainSync { model.position(anchor); assertFalse(model.flushPosition()); model.closeReader(); model.open(id) }
+            waitUntil { !model.state.value.busy }
+            assertNull(model.state.value.reader)
+            assertTrue(model.state.value.error?.contains("进度尚未保存") == true)
+            assertEquals(0L,actual.db.book(id)?.current?.sourceOffset)
+            instrumentation.runOnMainSync { model.dismissError(); model.open(otherId) }
+            waitUntil { model.state.value.reader?.contentId == otherId && !model.state.value.busy }
+            instrumentation.runOnMainSync { model.closeReader() }
+            failing.set(false)
+            instrumentation.runOnMainSync { model.dismissError(); model.open(id) }
+            waitUntil { model.state.value.reader?.contentId == id && !model.state.value.busy }
+            val restored = requireNotNull(model.state.value.reader)
+            assertEquals(anchor,restored.snapshot.current)
+            assertEquals(anchor,actual.db.book(id)?.current)
+            assertEquals(anchor.sourceOffset,actual.db.book(id)?.furthest)
+            instrumentation.runOnMainSync { model.rendererEvent(restored.generation,RendererEvent.Position(anchor,"anchor")); model.flushPosition() }
+            assertEquals(anchor,actual.db.book(id)?.current)
+            failing.set(true)
+            instrumentation.runOnMainSync { model.position(anchor); model.closeReader(); model.delete(requireNotNull(actual.db.book(id))) }
+            waitUntil { !model.state.value.busy && actual.db.book(id) == null }
+            val otherRevision = requireNotNull(actual.db.book(otherId)).version
+            instrumentation.runOnMainSync { model.dismissError(); model.open(otherId) }
+            waitUntil { model.state.value.reader?.contentId == otherId && !model.state.value.busy }
+            instrumentation.runOnMainSync {
+                assertTrue(model.flushPosition()) // explicitly deleted pending must not keep raising "book missing"
+                model.reencode("UTF-8")
+            }
+            waitUntil { !model.state.value.busy && model.state.value.reader?.revision != otherRevision }
+            assertEquals(otherId,model.state.value.reader?.contentId)
+            assertNull(model.state.value.error)
+        } finally {
+            failing.set(false)
+            instrumentation.runOnMainSync { models.clear() }
+            listOf(id,otherId).forEach { actual.db.book(it)?.let(actual::delete) }
+        }
+    }
+
 }

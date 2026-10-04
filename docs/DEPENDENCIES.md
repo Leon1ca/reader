@@ -8,6 +8,7 @@
 | Gradle Wrapper / Gradle | 9.5.1 | 可复现构建入口 | Apache-2.0 |
 | Kotlin / Compose compiler plugin | 2.2.10 | Kotlin 与 Compose 编译 | Apache-2.0 |
 | Compose BOM | 2026.09.00 | 固定 Compose 模块版本矩阵 | Apache-2.0 |
+| Compose UI Test JUnit4 | androidTest 显式 BOM 2026.09.00 约束（编译及运行） | 仅 androidTest：真实 MainActivity 阅读界面操作 | Apache-2.0 |
 | AndroidX Activity Compose | 1.13.0 | Activity、SAF、原生 Compose | Apache-2.0 |
 | AndroidX Lifecycle Compose | 2.11.0 | 生命周期与状态 | Apache-2.0 |
 | AndroidX WebKit | 1.17.1 | origin / 主 frame 可验证的 WebMessage 通信 | Apache-2.0 |
@@ -15,6 +16,7 @@
 | AndroidX Test runner | 1.7.0 | 设备测试 | Apache-2.0 |
 | AndroidX Test core | 1.7.0 | 设备测试上下文 | Apache-2.0 |
 | AndroidX Test ext JUnit | 1.3.0 | JUnit 设备入口 | Apache-2.0 |
+| AndroidX Espresso core | 3.7.0 | 仅 androidTest：API 37 兼容的界面输入（系统服务代替旧反射） | Apache-2.0 |
 | JUnit | 4.13.2 | 核心解析测试 | EPL-1.0 |
 
 SQLite 使用 Android 平台提供的 SQLiteOpenHelper，不额外接入 Room 或远程数据库。正文使用固定官方 OFL 字体，来源、哈希及比较范围见 FONTS.md / FONTS_MANIFEST.json；文章开发样本中的山景 SVG 为本项目自建，未使用外部图像资产。WebView 使用系统组件，字体、CSS 和正文资源均离线。此表是直接依赖登记，尚不代表发布所需的完整传递依赖许可清单或最终项目许可决议；升级须固定新版本并回归编码、定位和数据库可靠性样本。

@@ -116,18 +116,31 @@ class LibraryRepository(private val context: Context) {
         db.delete(book.id)
         File(library, book.id).deleteRecursively()
     }
-    fun reencode(book: Book, encoding: String) {
+    fun reencode(book: Book, encoding: String) { reencodePrepared(book, encoding) { Unit } }
+    /** Validate/open the new source before the database switches; failure keeps the previous version active. */
+    fun <T> reencodePrepared(book: Book, encoding: String, checkpoint: () -> Unit = {}, prepare: (Book) -> T): T {
         val task = File(staging, UUID.randomUUID().toString()).apply { mkdirs() }
         val version = UUID.randomUUID().toString()
         var destination: File? = null
         try {
             val parsed = TxtParser.build(File(File(library, book.id), "original.txt"), task, encoding) {
+                checkpoint()
                 require(StatFs(staging.absolutePath).availableBytes > 8 * 1024 * 1024) { "空间不足，旧索引已保留" }
             }
             val target = File(File(library, book.id), "versions/$version")
             check(task.renameTo(target)) { "无法提交新索引" }; destination = target
+            val fresh = requireNotNull(db.book(book.id))
+            check(fresh.version == book.version) { "书籍版本已改变；保留当前索引" }
+            val last = (parsed.totalCharacters - 1).coerceAtLeast(0)
+            val scale = if (fresh.characters > 0 && fresh.characters != parsed.totalCharacters) parsed.totalCharacters.toDouble() / fresh.characters else 1.0
+            fun remap(offset: Long) = (offset * scale).toLong().coerceIn(0,last)
+            val offset = remap(fresh.current.sourceOffset)
+            val candidate = fresh.copy(encoding = encoding,version = version,paragraphs = parsed.paragraphs,characters = parsed.totalCharacters,
+                current = Locator.Text(version,offset,0,0,offset.toDouble() / parsed.totalCharacters.coerceAtLeast(1)),furthest = remap(fresh.furthest))
+            val prepared = prepare(candidate)
             db.reindex(book.id, encoding, version, parsed.paragraphs, parsed.totalCharacters)
             destination = null
+            return prepared
         } finally { task.deleteRecursively(); destination?.deleteRecursively() }
     }
     private companion object { const val TRASH_RETENTION_MS = 7L * 24 * 60 * 60 * 1000 }

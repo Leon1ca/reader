@@ -47,7 +47,7 @@ private val ink = Color(0xFF272C28)
 fun ReaderApp(model: ReaderViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     var articlePreview by rememberSaveable { mutableStateOf(false) }
-    val dark = state.reader?.book?.theme == "dark"
+    val dark = state.reader?.snapshot?.rules?.theme == "dark"
     SystemBarAppearance(dark)
     MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = Color(0xFFB8D8BE)) else lightColorScheme(primary = Color(0xFF365B46), background = paper)) {
         Surface(Modifier.fillMaxSize()) {
@@ -139,7 +139,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                         if (query.isEmpty()) Button(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy) { Text("导入图书") }
                     } else LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                         items(books, key = { it.id }) { book -> Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth().clickable(enabled = !state.busy) { model.open(book) }.padding(16.dp)) {
+                            Column(Modifier.fillMaxWidth().clickable(enabled = !state.busy) { model.open(book.id) }.padding(16.dp)) {
                                 Text(book.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                 Text(book.author, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium)
                                 val percentage = percent(book.current.sourceOffset, book.characters)
@@ -148,7 +148,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = { edit = book }, enabled = !state.busy) { Text("信息") }
                                     TextButton(onClick = { delete = book }, enabled = !state.busy) { Text("删除") }
-                                    TextButton(onClick = { model.open(book) }, enabled = !state.busy) { Text(if (book.lastRead == 0L) "开始阅读" else "继续阅读") }
+                                    TextButton(onClick = { model.open(book.id) }, enabled = !state.busy) { Text(if (book.lastRead == 0L) "开始阅读" else "继续阅读") }
                                 }
                             }
                         } }
@@ -198,69 +198,66 @@ private fun formatBytes(bytes: Long) = if (bytes < 1048576) "${bytes / 1024} KB"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, busy: Boolean, operation: String) {
+private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: Boolean, operation: String) {
     var panel by remember { mutableStateOf<String?>(null) }
     var encoding by remember { mutableStateOf<String?>(null) }
-    var localNotice by remember(session.engine) { mutableStateOf<String?>(session.notice) }
-    var restored by remember(session.engine) { mutableStateOf(false) }
+    var localNotice by remember(session.generation) { mutableStateOf<String?>(session.notice) }
+    var restored by remember(session.generation) { mutableStateOf(false) }
     // A dead system renderer is rebuilt in place (at most twice in a row) from the last reported position.
-    var attempt by remember(session.engine) { mutableIntStateOf(0) }
-    var crashes by remember(session.engine) { mutableIntStateOf(0) }
-    var failed by remember(session.engine) { mutableStateOf(false) }
+    var attempt by remember(session.generation) { mutableIntStateOf(0) }
+    var crashes by remember(session.generation) { mutableIntStateOf(0) }
+    var failed by remember(session.generation) { mutableStateOf(false) }
     val context = LocalContext.current
-    val adapter = remember(session.document, attempt) { WebReaderAdapter(context) { event -> when (event) {
+    val adapter = remember(session.document, attempt) { WebReaderAdapter(context) { event -> if (model.rendererEvent(session.generation,event)) when (event) {
         RendererEvent.Loading -> restored = false
         is RendererEvent.Ready -> { crashes = 0; failed = false; localNotice = if (event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
-        is RendererEvent.Position -> (event.locator as? Locator.Text)?.let { model.position(it, advanceFurthest = event.reason != "anchor"); restored = true }
+        is RendererEvent.Position -> restored = true
         is RendererEvent.Error -> { restored = false; failed = true; localNotice = event.message }
         is RendererEvent.Crashed -> {
             restored = false
             if (crashes < 2) { crashes++; attempt++ } else { failed = true; localNotice = "自动恢复失败，请点击重试。" }
         }
     } } }
-    DisposableEffect(adapter) { onDispose { adapter.destroy() } }
-    val background = when (session.book.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
+    DisposableEffect(adapter) { val unbind = model.bindRenderer(session.generation,adapter); onDispose { unbind() } }
+    val background = when (session.snapshot.rules.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
     BackHandler { if (encoding != null) encoding = null else if (panel != null) panel = null else if (!busy) model.closeReader() }
 
-    Scaffold(containerColor = background, topBar = { TopAppBar(title = { Text(session.book.title, maxLines = 1) },
+    Scaffold(containerColor = background, topBar = { TopAppBar(title = { Text(session.metadata.title, maxLines = 1) },
         navigationIcon = { TextButton(onClick = model::closeReader, enabled = !busy) { Text("返回") } },
         actions = { TextButton(onClick = { panel = "目录" }, enabled = !busy) { Text("目录") }; TextButton(onClick = { panel = "设置" }, enabled = !busy) { Text("设置") } }) },
         bottomBar = { Surface { Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { panel = "书签" }, enabled = !busy) { Text("书签 ${session.bookmarks.size}") }
+                TextButton(onClick = { panel = "书签" }, enabled = !busy) { Text("书签 ${session.snapshot.bookmarks.size}") }
                 TextButton(onClick = model::addBookmark, enabled = !busy && restored) { Text("添加书签") }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = adapter::prev, enabled = !busy && restored) { Text("上一页") }
                 TextButton(onClick = adapter::next, enabled = !busy && restored) { Text("下一页") }
             }
-            Text("当前位置 ${percent(session.book.current.sourceOffset, session.book.characters)}% · 最远 ${percent(session.book.furthest, session.book.characters)}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
+            Text("当前位置 ${(session.currentFraction * 100).roundToInt()}% · 最远 ${(session.furthestFraction * 100).roundToInt()}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
         } } }) { padding -> Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
             val notice = localNotice ?: session.notice
             if (notice != null) Text(notice, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
             if (failed) TextButton(onClick = { failed = false; localNotice = null; attempt++ }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
-            key(session.engine, attempt) { AndroidView(factory = { adapter.view }, modifier = Modifier.weight(1f).fillMaxWidth(), update = {
-                // Stored values are validated by ReaderRules; clamp so a damaged row can never crash the reader.
-                adapter.render(session.document,session.jump,session.jumpSerial,ReaderRules(fontSize = session.book.fontSize.coerceIn(12f, 36f),
-                    theme = session.book.theme.takeIf { it in setOf("white", "paper", "dark") } ?: "white",
-                    flow = if (session.book.flow == "scrolled") ReaderFlow.SCROLLED else ReaderFlow.PAGINATED))
+            key(session.generation, attempt) { AndroidView(factory = { adapter.view }, modifier = Modifier.weight(1f).fillMaxWidth(), update = {
+                adapter.render(session.document,session.jump,session.jumpSerial,session.snapshot.rules)
             }) }
         } }
     panel?.let { selected -> ModalBottomSheet(onDismissRequest = { panel = null }) {
-        SystemBarAppearance(session.book.theme == "dark")
+        SystemBarAppearance(session.snapshot.rules.theme == "dark")
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Text(selected, style = MaterialTheme.typography.headlineSmall)
             when (selected) {
                 "目录" -> {
-                    Text(if (session.engine.index.chapters.firstOrNull()?.title?.startsWith("分段 ") == true) "未识别到章节标题，以下为按文本长度建立的分段。" else "按 TXT 章节标题建立目录。", Modifier.padding(vertical = 12.dp))
-                    LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.engine.index.chapters) { chapter ->
-                        TextButton(onClick = { model.jump(Locator.Text(session.book.version, chapter.sourceOffset, chapter.paragraph)); panel = null }, modifier = Modifier.fillMaxWidth()) { Text(chapter.title) }
+                    Text(if (session.textControls?.tocSource == TocSource.TEXT_SEGMENTS) "未识别到章节标题，以下为按文本长度建立的分段。" else "按章节标题建立目录。", Modifier.padding(vertical = 12.dp))
+                    LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.toc, key = { it.id }) { chapter ->
+                        TextButton(onClick = { model.jumpToc(chapter.id); panel = null }, modifier = Modifier.fillMaxWidth()) { Text(chapter.title) }
                     } }
                 }
                 "书签" -> {
-                    if (session.bookmarks.isEmpty()) Text("还没有书签。阅读时可添加当前文本位置。", Modifier.padding(vertical = 20.dp))
-                    LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.bookmarks, key = { it.id }) { bookmark ->
+                    if (session.snapshot.bookmarks.isEmpty()) Text("还没有书签。阅读时可添加当前文本位置。", Modifier.padding(vertical = 20.dp))
+                    LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.snapshot.bookmarks, key = { it.id }) { bookmark ->
                         Row(Modifier.fillMaxWidth()) {
                             TextButton(onClick = { model.jump(bookmark.locator); panel = null }, Modifier.weight(1f)) { Text(bookmark.excerpt.ifBlank { "空白段落" }) }
                             TextButton(onClick = { model.deleteBookmark(bookmark.id) }) { Text("删除") }
@@ -269,12 +266,14 @@ private fun ReaderScreen(model: ReaderViewModel, session: TxtReadingSession, bus
                 }
                 "设置" -> {
                     Row { TextButton(onClick = { model.flow(ReaderFlow.PAGINATED) }) { Text("横向分页") }; TextButton(onClick = { model.flow(ReaderFlow.SCROLLED) }) { Text("连续滚动") } }
-                    Text("本书字号：${session.book.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
-                    Row { TextButton(onClick = { model.style((session.book.fontSize - 2).coerceAtLeast(12f), session.book.theme) }) { Text("减小") }; TextButton(onClick = { model.style((session.book.fontSize + 2).coerceAtMost(36f), session.book.theme) }) { Text("增大") } }
-                    Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.style(session.book.fontSize, theme) }) { Text(label) } } }
-                    Text("当前编码：${session.book.encoding}", Modifier.padding(top = 16.dp))
-                    Text("显示乱码时可手动纠正。新索引成功后才切换；旧索引与原定位备份会保留。", Modifier.padding(vertical = 8.dp))
-                    FlowRow(Modifier.fillMaxWidth()) { TxtParser.encodings.filter { it != session.book.encoding }.forEach { candidate -> TextButton(onClick = { encoding = candidate }) { Text(candidate, fontSize = 12.sp) } } }
+                    Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
+                    Row { TextButton(onClick = { model.style((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f), session.snapshot.rules.theme) }) { Text("减小") }; TextButton(onClick = { model.style((session.snapshot.rules.fontSize + 2).coerceAtMost(36f), session.snapshot.rules.theme) }) { Text("增大") } }
+                    Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.style(session.snapshot.rules.fontSize, theme) }) { Text(label) } } }
+                    session.textControls?.let { controls ->
+                        Text("当前编码：${controls.encoding}", Modifier.padding(top = 16.dp))
+                        Text("显示乱码时可手动纠正。新索引成功后才切换；旧索引与原定位备份会保留。", Modifier.padding(vertical = 8.dp))
+                        FlowRow(Modifier.fillMaxWidth()) { controls.availableEncodings.filter { it != controls.encoding }.forEach { candidate -> TextButton(onClick = { encoding = candidate }) { Text(candidate, fontSize = 12.sp) } } }
+                    }
                     Text("使用离线阅读内核与 Readest 基准排版参数，正文一致性仍待同设备验收。字体导入尚未实现。", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
                 }
             }
