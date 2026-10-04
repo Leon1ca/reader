@@ -9,7 +9,7 @@ import com.localreader.app.formats.epub.*
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-/** Real schema4 storage; JSON is format-neutral and all attribution checks share the write transaction. */
+/** Real versioned storage; JSON is format-neutral and all attribution checks share the write transaction. */
 class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPreferences {
     override val preferencesRevision = db.preferencesRevision.asStateFlow()
     override fun loadSnapshot(contentId: String): ReadingSnapshot = db.transaction { database ->
@@ -73,7 +73,6 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
             }
             val time=System.currentTimeMillis();values.put("updated_at",time)
             check(database.update("positions",values,"content_id=?",arrayOf(contentId))==1)
-            check(database.update("contents",ContentValues().apply { put("last_read_at",time) },"id=? AND revision=?",arrayOf(contentId,revision))==1)
         }
         db.notifyContentsChanged()
     }

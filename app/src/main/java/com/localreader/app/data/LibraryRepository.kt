@@ -48,6 +48,30 @@ class LibraryRepository(private val context: Context) : ContentRepository {
     override fun summaries() = db.contents()
     override fun content(id: String) = db.content(id)
     override fun updateMetadata(id: String,title: String,author: String) { db.setMetadata(id,title,author);db.notifyContentsChanged() }
+    override fun markRead(id: String,revision: String,time: Long) {
+        db.transaction { database -> check(database.update("contents",android.content.ContentValues().apply {
+            put("last_read_at",time);put("hidden_from_continue",0)
+        },"id=? AND revision=?",arrayOf(id,revision))==1) { "书籍版本已改变" } }
+        db.notifyContentsChanged()
+    }
+    override fun setFinished(id: String,finished: Boolean) {
+        db.transaction { database -> check(database.update("contents",android.content.ContentValues().apply {
+            if(finished)put("finished_at",System.currentTimeMillis()) else putNull("finished_at")
+        },"id=?",arrayOf(id))==1) { "书籍不存在" } };db.notifyContentsChanged()
+    }
+    override fun hideFromContinue(id: String,hidden: Boolean) {
+        db.transaction { database -> check(database.update("contents",android.content.ContentValues().apply {
+            put("hidden_from_continue",if(hidden)1 else 0)
+        },"id=?",arrayOf(id))==1) { "书籍不存在" } };db.notifyContentsChanged()
+    }
+    override fun detail(id: String) = db.contentsRevision.map {
+        db.transaction { database -> db.content(id)?.let { content ->
+            val summary=db.contents().single { it.id==id }
+            val chars=if(content.format==ContentFormat.TXT)db.txtMetadata(id)?.characters else database.rawQuery("SELECT canonical_characters FROM epub_meta WHERE content_id=?",arrayOf(id)).use { c -> if(c.moveToFirst() && !c.isNull(0))c.getLong(0) else null }
+            val settings=database.rawQuery("SELECT * FROM reading_settings WHERE content_id=?",arrayOf(id)).use { c -> c.moveToFirst() && (1 until c.columnCount).any { !c.isNull(it) } }
+            BookDetail(content,summary,chars,db.bookmarks(id).size,settings)
+        } }
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
     fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}")
     fun directory(book: TxtRecord) = File(File(library, book.id), "versions/${book.version}")
     internal fun currentEpubCache(book: ContentRecord,checkpoint: () -> Unit): Pair<File,EpubCacheRecord> = mutate {

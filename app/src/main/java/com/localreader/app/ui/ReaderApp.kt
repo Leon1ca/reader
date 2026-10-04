@@ -83,24 +83,19 @@ private fun Context.activity(): Activity? {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable
 private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePreview: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(model.preferences.getInt("tab", 0)) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var sort by rememberSaveable { mutableStateOf(model.preferences.getString("sort", "最近阅读") ?: "最近阅读") }
+    val shelf by model.shelfController.state.collectAsStateWithLifecycle()
+    val query=shelf.query
+    val sort=when(shelf.sort) { ShelfSort.RECENT -> "最近阅读";ShelfSort.IMPORTED -> "导入时间";ShelfSort.TITLE -> "标题";ShelfSort.AUTHOR -> "作者" }
+    var continueMenu by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf<ContentSummary?>(null) }
     var edit by remember { mutableStateOf<ContentSummary?>(null) }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) model.importFiles(it) }
-    val books = remember(state.books, query, sort) {
-        val filtered = state.books.filter { it.title.contains(query, true) || it.author.contains(query, true) }
-        when (sort) {
-            "导入时间" -> filtered.sortedByDescending { it.imported }
-            "标题" -> filtered.sortedBy { it.title.lowercase() }
-            else -> filtered.sortedWith(compareByDescending<ContentSummary> { it.lastRead }.thenByDescending { it.imported })
-        }
-    }
+    val books=shelf.items
     Scaffold(topBar = { TopAppBar(title = { Text(listOf("书架", "稍后阅读", "RSS", "设置")[tab]) }, actions = {
         if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream")) }, enabled = !state.busy && !state.loading && state.libraryReady) { Text("导入图书") }
     }) }, bottomBar = {
@@ -119,19 +114,29 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
             }
             when (tab) {
                 0 -> {
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索标题或作者") }, singleLine = true)
+                    OutlinedTextField(query, { model.shelfController.query(it) }, Modifier.fillMaxWidth(), label = { Text("搜索标题或作者") }, singleLine = true)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("${books.size} 本", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.labelLarge)
                         Box {
                             TextButton(onClick = { sortMenu = true }) { Text("排序：$sort") }
                             DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                                listOf("最近阅读", "导入时间", "标题").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    sort = label; sortMenu = false; model.preferences.edit { putString("sort", label) }
+                                listOf("最近阅读", "导入时间", "标题", "作者").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = {
+                                    model.shelfController.sort(when(label) { "标题" -> ShelfSort.TITLE;"作者" -> ShelfSort.AUTHOR;"导入时间" -> ShelfSort.IMPORTED;else -> ShelfSort.RECENT });sortMenu = false
                                 }) }
                             }
                         }
                     }
-                    if (state.loading) CircularProgressIndicator()
+                    Row {
+                        ShelfFilter.entries.forEach { value -> TextButton(onClick={model.shelfController.filter(value)}) { Text(if(value==ShelfFilter.ALL)"全部" else value.name) } }
+                        Box {
+                            TextButton(onClick={continueMenu=true}) { Text("继续阅读 ${shelf.continueReading.size}") }
+                            DropdownMenu(expanded=continueMenu,onDismissRequest={continueMenu=false}) {
+                                shelf.continueReading.forEach { book -> DropdownMenuItem(text={Text(book.title)},onClick={continueMenu=false;model.open(book.id)}) }
+                            }
+                        }
+                    }
+                    shelf.error?.let { Text(it) }
+                    if (state.loading || shelf.loading) CircularProgressIndicator()
                     else if (!state.libraryReady) { Text("书库尚未就绪，已有数据保留。"); TextButton(onClick = model::retryLibrary) { Text("重试读取书库") } }
                     else if (books.isEmpty()) {
                         Spacer(Modifier.height(48.dp))
@@ -146,8 +151,10 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                                 val percentage = fractionPercent(book.fraction)
                                 Text("${book.format.name} · ${book.encoding ?: if(book.epubLayout=="pre-paginated")"固定版式" else "可重排"} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
                                 Text("当前位置 $percentage% · 最远 ${fractionPercent(book.furthestFraction)}%", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = { edit = book }, enabled = !state.busy) { Text("信息") }
+                                    TextButton(onClick = { model.shelfController.finished(book.id,book.finishedAt==null) }, enabled = !state.busy) { Text(if(book.finishedAt==null)"标记读完" else "撤销读完") }
+                                    TextButton(onClick = { model.shelfController.hide(book.id) }, enabled = !state.busy && book.lastRead>0) { Text("移出继续") }
                                     TextButton(onClick = { delete = book }, enabled = !state.busy) { Text("删除") }
                                     TextButton(onClick = { model.open(book.id) }, enabled = !state.busy) { Text(if (book.lastRead == 0L) "开始阅读" else "继续阅读") }
                                 }
@@ -183,18 +190,20 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
         text = { Text("删除应用内副本、进度、书签及该书的旧索引备份。外部原文件不会被删除。") },
         confirmButton = { TextButton(onClick = { model.delete(book); delete = null }) { Text("确认删除") } },
         dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } }) }
-    edit?.let { book -> MetadataDialog(book, onDismiss = { edit = null }, onSave = { title, author -> model.metadata(book, title, author); edit = null }) }
+    edit?.let { book -> MetadataDialog(book,model.shelfController, onDismiss = { edit = null }, onSave = { title, author -> model.metadata(book, title, author); edit = null }) }
     if (state.results.isNotEmpty() && !state.busy) AlertDialog(onDismissRequest = model::dismissResults,
         title = { Text("导入结果 · ${state.results.size} 项") },
         text = { LazyColumn { items(state.results) { result -> Column(Modifier.padding(vertical = 8.dp)) { Text(result.name, fontWeight = FontWeight.SemiBold); Text(result.status) } } } },
         confirmButton = { TextButton(onClick = model::dismissResults) { Text("完成") } })
 }
 
-@Composable private fun MetadataDialog(book: ContentSummary, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+@Composable private fun MetadataDialog(book: ContentSummary,shelf: ShelfController, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    val detail by remember(book.id) { shelf.detail(book.id) }.collectAsStateWithLifecycle(initialValue=null)
     var title by remember { mutableStateOf(book.title) }; var author by remember { mutableStateOf(book.author) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("图书信息") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(title, { title = it.take(250) }, label = { Text("标题") })
         OutlinedTextField(author, { author = it.take(250) }, label = { Text("作者") })
+        detail?.let { Text("原名：${it.content.originalName ?: "未知"}\n字数：${it.characters?.toString() ?: "未知"} · 书签：${it.bookmarkCount}\n单本覆盖：${if(it.hasBookSettings)"有" else "无"} · ${if(it.content.finishedAt!=null)"已读完" else "未读完"}") }
         Text("${book.encoding ?: book.format.name} · ${formatBytes(book.bytes)}\n内容校验：SHA-256\n标题和作者不会改变文件内容。")
     } }, confirmButton = { TextButton(onClick = { onSave(title, author) }) { Text("保存") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
@@ -210,8 +219,6 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     var localNotice by remember(session.generation) { mutableStateOf<String?>(session.notice) }
     var restored by remember(session.generation) { mutableStateOf(false) }
     // A dead system renderer is rebuilt in place (at most twice in a row) from the last reported position.
-    var attempt by remember(session.generation) { mutableIntStateOf(0) }
-    var crashes by remember(session.generation) { mutableIntStateOf(0) }
     var failed by remember(session.generation) { mutableStateOf(false) }
     val context = LocalContext.current
     val controller=remember(session.generation) { model.readerController(session.generation) }
@@ -221,25 +228,25 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             is RendererEvent.Zoom -> Unit
             is RendererEvent.Notice -> localNotice=event.message
             RendererEvent.Loading -> restored=false
-            is RendererEvent.Ready -> { crashes=0;failed=false;localNotice=if(event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
+            is RendererEvent.Ready -> { failed=false;localNotice=if(event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
             is RendererEvent.Position -> restored=true
             is RendererEvent.Error -> { restored=false;failed=true;localNotice=event.message }
-            is RendererEvent.Crashed -> { restored=false;if(crashes<2) { crashes++;attempt++ } else { failed=true;localNotice="自动恢复失败，请点击重试。" } }
+            is RendererEvent.Crashed -> { restored=false;failed=controller.state.value.phase==ReaderPhase.FAILED;localNotice=controller.state.value.message }
         } }
         onDispose { stop() }
     }
     val surface=remember(session.generation) { ReaderSurface(context).apply { bind(controller) } }
     DisposableEffect(surface) { onDispose { surface.close() } }
     val background = when (session.snapshot.rules.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
-    BackHandler { if (encoding != null) encoding = null else if (panel != null) panel = null else if (!busy) model.closeReader() }
+    BackHandler { if (encoding != null) encoding = null else if (panel != null) panel = null else if (!busy) controller.close() }
 
     Scaffold(containerColor = background, topBar = { TopAppBar(title = { Text(session.metadata.title, maxLines = 1) },
-        navigationIcon = { TextButton(onClick = model::closeReader, enabled = !busy) { Text("返回") } },
+        navigationIcon = { TextButton(onClick = controller::close, enabled = !busy) { Text("返回") } },
         actions = { TextButton(onClick = { panel = "目录" }, enabled = !busy) { Text("目录") }; TextButton(onClick = { panel = "设置" }, enabled = !busy) { Text("设置") } }) },
         bottomBar = { Surface { Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { panel = "书签" }, enabled = !busy) { Text("书签 ${session.snapshot.bookmarks.size}") }
-                TextButton(onClick = model::addBookmark, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("添加书签") }
+                TextButton(onClick = controller::addBookmark, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("添加书签") }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = controller::prev, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("上一页") }
@@ -251,8 +258,8 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
             val notice = localNotice ?: session.notice
             if (notice != null) Text(notice, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
-            if (failed) TextButton(onClick = { failed = false; localNotice = null; attempt++ }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
-            key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,attempt) }) }
+            if (failed) TextButton(onClick = { failed = false; localNotice = null; controller.retry() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
+            key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,rendererState.recoveryAttempt) }) }
         } }
     panel?.let { selected -> ModalBottomSheet(onDismissRequest = { panel = null }) {
         SystemBarAppearance(session.snapshot.rules.theme == "dark")
@@ -262,35 +269,37 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                 "目录" -> {
                     Text(if (session.textControls?.tocSource == TocSource.TEXT_SEGMENTS) "未识别到章节标题，以下为按文本长度建立的分段。" else "按章节标题建立目录。", Modifier.padding(vertical = 12.dp))
                     LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.toc, key = { it.id }) { chapter ->
-                        TextButton(onClick = { model.jumpToc(chapter.id); panel = null }, modifier = Modifier.fillMaxWidth()) { Text(chapter.title) }
+                        TextButton(onClick = { controller.goToToc(chapter.id); panel = null }, modifier = Modifier.fillMaxWidth()) { Text(chapter.title) }
                     } }
                 }
                 "书签" -> {
                     if (session.snapshot.bookmarks.isEmpty()) Text("还没有书签。阅读时可添加当前文本位置。", Modifier.padding(vertical = 20.dp))
                     LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.snapshot.bookmarks, key = { it.id }) { bookmark ->
                         Row(Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { model.jump(bookmark.locator); panel = null }, Modifier.weight(1f)) { Text(bookmark.excerpt.ifBlank { "空白段落" }) }
-                            TextButton(onClick = { model.deleteBookmark(bookmark.id) }) { Text("删除") }
+                            TextButton(onClick = { controller.goTo(bookmark.locator); panel = null }, Modifier.weight(1f)) { Text(bookmark.excerpt.ifBlank { "空白段落" }) }
+                            TextButton(onClick = { controller.deleteBookmark(bookmark.id) }) { Text("删除") }
                         }
                     } }
                 }
                 "设置" -> {
+                    TextButton(onClick={controller.markFinished(true)}) { Text("标记本书读完") }
+                    TextButton(onClick={controller.markFinished(false)}) { Text("撤销读完") }
                     Text("阅读模式和背景：全局，应用到所有书")
-                    TextButton(onClick = model::resetBookRules) { Text("恢复单本默认") }
+                    TextButton(onClick = controller::resetRules) { Text("恢复单本默认") }
                     Row { TextButton(onClick = { model.flow(ReaderFlow.PAGINATED) }) { Text("横向分页") }; TextButton(onClick = { model.flow(ReaderFlow.SCROLLED) }) { Text("连续滚动") } }
                     if(session.document.kind==WebContentKind.FIXED) {
                         Text("固定页面缩放：${session.snapshot.rules.fxlZoom}")
-                        FlowRow { listOf("fit-page" to "适合整页","fit-width" to "适合宽度","1" to "1×","2" to "2×","3" to "3×","4" to "4×","5" to "5×").forEach { (zoom,label) -> TextButton(onClick={model.fxlZoom(zoom)}) { Text(label) } } }
-                        Row { TextButton(onClick={model.spreadPreference("AUTO")}) { Text("自动双页") };TextButton(onClick={model.spreadPreference("SINGLE")}) { Text("单页") } }
+                        FlowRow { listOf("fit-page" to "适合整页","fit-width" to "适合宽度","1" to "1×","2" to "2×","3" to "3×","4" to "4×","5" to "5×").forEach { (zoom,label) -> TextButton(onClick={controller.patchRules(RulesPatch(fxlZoom=FieldUpdate.Set(zoom)))}) { Text(label) } } }
+                        Row { TextButton(onClick={controller.patchRules(RulesPatch(spreadPreference=FieldUpdate.Set("AUTO")))}) { Text("自动双页") };TextButton(onClick={controller.patchRules(RulesPatch(spreadPreference=FieldUpdate.Set("SINGLE")))}) { Text("单页") } }
                         Text("双指缩放，拖动平移；双击切换整页与 2×。固定页面保留作者版式。")
                     } else {
                         Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
-                        Row { TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)) }) { Text("减小") }; TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)) }) { Text("增大") } }
+                        Row { TextButton(onClick = { controller.patchRules(RulesPatch(fontSize=FieldUpdate.Set((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)))) }) { Text("减小") }; TextButton(onClick = { controller.patchRules(RulesPatch(fontSize=FieldUpdate.Set((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)))) }) { Text("增大") } }
                     }
                     Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.theme(theme) }) { Text(label) } } }
                     if(session.document.kind==WebContentKind.EPUB) {
                         Text("EPUB 样式：${session.snapshot.rules.epubStyleMode}")
-                        Row { TextButton(onClick={model.epubStyleMode("AUTHOR")}) { Text("作者样式") };TextButton(onClick={model.epubStyleMode("CUSTOM")}) { Text("自定义排版") } }
+                        Row { TextButton(onClick={controller.patchRules(RulesPatch(epubStyleMode=FieldUpdate.Set("AUTHOR")))}) { Text("作者样式") };TextButton(onClick={controller.patchRules(RulesPatch(epubStyleMode=FieldUpdate.Set("CUSTOM")))}) { Text("自定义排版") } }
                         Text("作者模式保留安全包内字体与样式；自定义模式使用阅读设置。")
                     }
                     session.textControls?.let { controls ->

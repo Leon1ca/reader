@@ -234,7 +234,7 @@ class LibraryPersistenceTest {
         createLegacyDatabase(version = 1,withFlow = false,withBackups = false)
         repository = LibraryRepository(context)
         val migrated = repository.db.writableDatabase
-        assertEquals(4,migrated.version)
+        assertEquals(5,migrated.version)
         val record = requireNotNull(repository.db.txt("legacy"))
         assertEquals("旧书",record.title);assertEquals(40L,record.current.sourceOffset)
         assertEquals(0.4,record.current.fallbackFraction,0.00001);assertEquals("scrolled",record.flow)

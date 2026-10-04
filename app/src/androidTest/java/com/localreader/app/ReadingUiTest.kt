@@ -86,9 +86,13 @@ class ReadingUiTest {
             id = requireNotNull(model().state.value.results.single().bookId)
             val imported = requireNotNull(repository.db.txt(requireNotNull(id)))
             compose.onNodeWithText("完成").performClick()
+            assertEquals(0L,repository.content(imported.id)!!.lastRead)
+            repository.hideFromContinue(imported.id,true)
             openFromShelf(imported.title)
             waitFor { model().state.value.reader?.contentId == id }
             ready()
+            waitFor { repository.content(imported.id)!!.lastRead>0L && !repository.content(imported.id)!!.hiddenFromContinue }
+            assertNull(repository.content(imported.id)!!.finishedAt)
             val firstGeneration = requireNotNull(model().state.value.reader).generation
             compose.onNodeWithText("目录").performClick()
             compose.onNodeWithText("Chapter 2 UI end").performClick()

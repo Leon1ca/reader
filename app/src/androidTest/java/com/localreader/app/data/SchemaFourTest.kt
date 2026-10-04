@@ -55,7 +55,7 @@ class SchemaFourTest {
         for(version in 1..3) {
             val source = fixture(version)
             val db = helper();val store = SqliteReadingStore(db)
-            assertEquals(4,db.writableDatabase.version)
+            assertEquals(5,db.writableDatabase.version)
             db.writableDatabase.rawQuery("SELECT font_size FROM reading_settings WHERE content_id='a'",null).use { assertTrue(it.moveToFirst());assertEquals(17.7,it.getDouble(0),0.0) }
             for(id in listOf("a","b")) {
                 val snapshot = store.loadSnapshot(id)
@@ -100,7 +100,7 @@ class SchemaFourTest {
             assertFalse(File(backup.path+"-wal").exists())
             SQLiteDatabase.openDatabase(backup.path,null,SQLiteDatabase.OPEN_READONLY).use { saved -> saved.rawQuery("SELECT title FROM books WHERE id='a'",null).use { assertTrue(it.moveToFirst());assertEquals("WAL committed",it.getString(0)) } }
         }
-        assertEquals(4,helper().writableDatabase.version)
+        assertEquals(5,helper().writableDatabase.version)
     }
     @Test @SdkSuppress(minSdkVersion = 35) fun committedWalIsPresentInIndependentBackupAndBusyReaderPreventsUpgrade() {
         val source=fixture()
@@ -120,7 +120,7 @@ class SchemaFourTest {
             val backup=root.listFiles()!!.single { it.name.endsWith(".bak") }
             SQLiteDatabase.openDatabase(backup.path,null,SQLiteDatabase.OPEN_READONLY).use { saved -> saved.rawQuery("SELECT title FROM books WHERE id='a'",null).use { assertTrue(it.moveToFirst());assertEquals("只在日志中的新标题",it.getString(0)) } }
         }
-        assertEquals(4,helper().writableDatabase.version)
+        assertEquals(5,helper().writableDatabase.version)
     }
     @Test fun failedBackupAndMigrationLeaveOriginalRowsAndValidBackupIntact() {
         val source=fixture()
@@ -136,7 +136,7 @@ class SchemaFourTest {
             }
         }
         val kept=root.listFiles()!!.filter { it.name.endsWith(".bak") }.map { it.name to it.readBytes().toList() }.toMap()
-        assertEquals(4,helper().writableDatabase.version)
+        assertEquals(5,helper().writableDatabase.version)
         kept.forEach { (name,bytes) -> assertEquals(bytes,File(root,name).readBytes().toList()) }
     }
     @Test fun corruptMissingAndUnknownVersionDoNotCreateEmptyLibraryOrRunRecovery() {
@@ -199,7 +199,7 @@ class SchemaFourTest {
         val db=helper();val database=db.writableDatabase
         val raw="{ \"schema\":9, \"t\":\"future\", \"version\":\"epub-version\", \"payload\":42 }"
         database.execSQL("INSERT INTO contents(id,format,revision,title,author,hash,bytes,imported_at) VALUES('epub','epub','epub-version','存储夹具','作者','epub-hash',12,1)")
-        database.execSQL("INSERT INTO epub_meta VALUES('epub',2,'package','future','reflowable',NULL)")
+        database.execSQL("INSERT INTO epub_meta(content_id,spine_count,package_revision,sanitizer_version,layout,fxl_json) VALUES('epub',2,'package','future','reflowable',NULL)")
         database.execSQL("INSERT INTO positions VALUES('epub',?,0,?,0,1)",arrayOf(raw,raw))
         database.execSQL("INSERT INTO reading_settings(content_id) VALUES('epub')")
         val store=SqliteReadingStore(db);val snapshot=store.loadSnapshot("epub")
@@ -232,7 +232,7 @@ class SchemaFourTest {
             while(model.state.value.error!=null && android.os.SystemClock.uptimeMillis()<retryDeadline) Thread.sleep(25)
             assertNull(model.state.value.error)
             preferences.defaults()
-            SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READONLY).use { db -> assertEquals(4,db.version) }
+            SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READONLY).use { db -> assertEquals(5,db.version) }
         } finally { instrumentation.runOnMainSync { models.clear() } }
     }
     @Test fun historicalOutOfRangeFractionsSurviveMigrationButNewWritesStayStrict() = kotlinx.coroutines.runBlocking {

@@ -24,16 +24,17 @@ internal object LibraryBootstrap {
             return
         }
         val counts = linkedMapOf<String,Long>()
+        val rows = linkedMapOf<String,String>()
         val version = SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READWRITE,preserveCorruption).use { db ->
             val version = db.version
-            require(version in 1..4) { "书库版本不受支持，原库已保留" }
+            require(version in 1..5) { "书库版本不受支持，原库已保留" }
             checkIntegrity(db)
-            if (version == 4) return
+            if (version == 5) return
             db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)",null).use { c ->
                 check(c.moveToFirst() && c.getInt(0) == 0 && (c.getLong(1) == c.getLong(2))) { "书库仍被使用，无法完成一致备份，请重试" }
             }
-            listOf("books","bookmarks","locator_backups").filter { tableExists(db,it) }.forEach { table ->
-                counts[table] = count(db,table)
+            (if(version >= 4) listOf("contents","txt_meta","epub_meta","positions","bookmarks","locator_backups","reading_settings","reader_defaults","sqlite_sequence") else listOf("books","bookmarks","locator_backups","sqlite_sequence")).filter { tableExists(db,it) }.forEach { table ->
+                counts[table] = count(db,table);rows[table] = rowDigest(db,table)
             }
             version
         }
@@ -54,7 +55,7 @@ internal object LibraryBootstrap {
             check(verifiedDigest.digest().contentEquals(expectedHash)) { "备份字节校验失败" }
             SQLiteDatabase.openDatabase(temporary.path,null,SQLiteDatabase.OPEN_READONLY,preserveCorruption).use { copy ->
                 check(copy.version == version); checkIntegrity(copy)
-                counts.forEach { (table,total) -> check(count(copy,table) == total) { "备份记录校验失败" } }
+                counts.forEach { (table,total) -> check(count(copy,table) == total && rowDigest(copy,table) == rows[table]) { "备份记录校验失败" } }
             }
             checkpoint("verified")
             check(temporary.renameTo(target)) { "无法提交书库备份" }
@@ -70,5 +71,20 @@ internal object LibraryBootstrap {
         db.rawQuery("PRAGMA integrity_check",null).use { c -> check(c.moveToFirst() && c.getString(0) == "ok" && !c.moveToNext()) { "书库完整性校验失败，原库已保留" } }
     }
     internal fun tableExists(db: SQLiteDatabase, table: String): Boolean = db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",arrayOf(table)).use { it.moveToFirst() }
+    private fun rowDigest(db: SQLiteDatabase,table: String): String {
+        val digest=MessageDigest.getInstance("SHA-256")
+        db.rawQuery("SELECT * FROM $table ORDER BY rowid",null).use { cursor ->
+            while(cursor.moveToNext())for(column in 0 until cursor.columnCount) {
+                val type=cursor.getType(column);digest.update(type.toByte())
+                val value=when(type) {
+                    android.database.Cursor.FIELD_TYPE_NULL -> byteArrayOf()
+                    android.database.Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(column)
+                    else -> cursor.getString(column).toByteArray(Charsets.UTF_8)
+                }
+                digest.update(java.nio.ByteBuffer.allocate(4).putInt(value.size).array());digest.update(value)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
     private fun count(db: SQLiteDatabase, table: String): Long = db.rawQuery("SELECT COUNT(*) FROM $table",null).use { check(it.moveToFirst()); it.getLong(0) }
 }

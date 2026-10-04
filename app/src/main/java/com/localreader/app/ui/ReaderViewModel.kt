@@ -24,14 +24,18 @@ class ReaderViewModel internal constructor(application: Application, private val
     private val app = application as ReaderApplication
     private val repository = app.repository
     private val contents: ContentRepository = repository
+    val shelfController=ShelfController(contents,viewModelScope,AndroidUiPrefsStore(application))
+    private val verifiedReaders=java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val factory: OpenedBookFactory = app.openedBooks
+    private val controllers=ReaderControllerFactory(factory,readingStore)
     private val reencoder: TextReencoder = app.openedBooks
     @Volatile private var owner: ReadingSessionOwner? = null
     private var generation = 0L
     private var controller: ReaderController?=null
     fun readerController(sessionGeneration: Long): ReaderController {
         check(owner?.generation==sessionGeneration)
-        return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) }).also { controller=it }
+        return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) },
+            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::resetBookRules,::finished,::closeReader,::flushPosition)).also { controller=it }
     }
     private val retryOwners = java.util.concurrent.CopyOnWriteArrayList<ReadingSessionOwner>()
     val preferences = application.getSharedPreferences("ui", 0)
@@ -49,6 +53,7 @@ class ReaderViewModel internal constructor(application: Application, private val
             val books = withContext(dbWriter) { repository.recover(); contents.summaries() }
             val defaults = withContext(dbWriter) { readingPreferences.defaults().rules }
             mutable.update { it.copy(loading = false,books = books,defaults = defaults,error = null,libraryReady = true) }
+            shelfController.start()
             refreshRules()
         } catch(cancel: CancellationException) { throw cancel }
         catch(e: Exception) { mutable.update { it.copy(loading = false,error = e.message ?: "无法读取书库；原数据已保留") } } }
@@ -111,21 +116,18 @@ class ReaderViewModel internal constructor(application: Application, private val
         viewModelScope.launch {
             var opened: OpenedBook? = null
             try {
-                val handle = factory.open(contentId)
-                opened = handle
-                val snapshot = withContext(dbWriter) {
-                    // Prior captured bookmarks/rules and unsaved closed-session progress must precede this read.
-                    retryOwners.filter { it.opened.contentId == contentId }.forEach { retired ->
-                        check(retired.opened.revision == handle.revision) { "该书仍有旧版本进度未保存；请先处理保存失败" }
-                        try { retired.flush(); retryOwners.remove(retired) }
-                        catch (e: Exception) { throw java.io.IOException("该书进度尚未保存，请稍后重试",e) }
+                val prepared=controllers.open(contentId,request) { handle ->
+                    withContext(dbWriter) {
+                        retryOwners.filter { it.opened.contentId==contentId }.forEach { retired ->
+                            check(retired.opened.revision==handle.revision) { "该书仍有旧版本进度未保存；请先处理保存失败" }
+                            try { retired.flush();retryOwners.remove(retired) }
+                            catch(error: Exception) { throw java.io.IOException("该书进度尚未保存，请稍后重试",error) }
+                        }
+                        readingStore.loadSnapshot(contentId)
                     }
-                    readingStore.loadSnapshot(contentId)
                 }
-                ensureActive()
-                check(handle.revision == snapshot.current.version) { "书籍版本在打开期间改变" }
-                val next = ReadingSessionOwner(handle,request,readingStore,snapshot)
-                val screen = withContext(Dispatchers.IO) { next.state() }
+                val next=prepared.owner;val screen=prepared.session
+                opened=next.opened
                 if (request == generation) { controller?.detach();controller=null;owner = next; opened = null; mutable.update { it.copy(reader = screen) } }
             } catch (cancel: CancellationException) { throw cancel }
             catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "正文无法打开") } }
@@ -140,7 +142,18 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun rendererEvent(sessionGeneration: Long, event: RendererEvent): Boolean {
         if (owner?.generation != sessionGeneration) return false
         return when(event) {
-            is RendererEvent.Position -> position(event.locator,event.intent==IntentCause.UserNavigation)
+            is RendererEvent.Position -> {
+                val accepted=position(event.locator,event.intent==IntentCause.UserNavigation)
+                if(accepted && verifiedReaders.add(sessionGeneration)) {
+                    val active=owner ?: return false
+                    val readTime=System.currentTimeMillis()
+                    viewModelScope.launch(dbWriter) { try { contents.markRead(active.opened.contentId,active.opened.revision,readTime) }
+                        catch(cancel: CancellationException) { throw cancel }
+                        catch(error: Exception) { verifiedReaders.remove(sessionGeneration);if(owner===active)mutable.update { it.copy(error="阅读状态保存失败：${error.message}") } }
+                    }
+                }
+                accepted
+            }
             is RendererEvent.Zoom -> if(position(event.locator,false)) { fxlZoom(event.zoom);true } else false
             else -> true
         }
@@ -260,6 +273,10 @@ class ReaderViewModel internal constructor(application: Application, private val
                 } }
             } catch (e: Exception) { if (owner === active) mutable.update { it.copy(error = "书签删除失败：${e.message}") } }
         }
+    }
+    fun finished(finished: Boolean) {
+        val active=owner ?: return
+        shelfController.finished(active.opened.contentId,finished)
     }
     fun delete(book: ContentSummary) = operation("正在删除应用内副本") {
         repository.delete(book)

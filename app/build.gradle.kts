@@ -5,7 +5,7 @@ plugins {
 android {
     namespace = "com.localreader.app"
     compileSdk { version = release(37) { minorApiLevel = 0 } }
-    defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 5; versionName = "0.3.0-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 7; versionName = "0.4.0-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     lint { warningsAsErrors = true }

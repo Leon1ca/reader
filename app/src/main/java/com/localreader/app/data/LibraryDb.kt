@@ -11,7 +11,7 @@ import com.localreader.app.formats.epub.*
 import kotlinx.coroutines.flow.update
 
 /** One schema and one write path for every format. Bootstrap precedes Helper's automatic upgrade. */
-class LibraryDb(private val context: Context, private val migrationCheckpoint: (String) -> Unit = {}) : SQLiteOpenHelper(context,"library.db",null,4,LibraryBootstrap.preserveCorruption) {
+class LibraryDb(private val context: Context, private val migrationCheckpoint: (String) -> Unit = {}) : SQLiteOpenHelper(context,"library.db",null,5,LibraryBootstrap.preserveCorruption) {
     val preferencesRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     val contentsRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
     internal fun notifyContentsChanged() { contentsRevision.update { it+1 } }
@@ -26,8 +26,14 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) = createSchema(db)
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        require(oldVersion in 1..3 && newVersion == 4) { "此版本没有迁移路径，原库已保留" }
-        migrate(db,oldVersion)
+        require(oldVersion in 1..4 && newVersion == 5) { "此版本没有迁移路径，原库已保留" }
+        if(oldVersion < 4) migrate(db,oldVersion)
+        else {
+            migrationCheckpoint("before-alter")
+            db.execSQL("ALTER TABLE contents ADD COLUMN hidden_from_continue INTEGER NOT NULL DEFAULT 0 CHECK(hidden_from_continue IN (0,1))")
+            db.execSQL("ALTER TABLE epub_meta ADD COLUMN canonical_characters INTEGER")
+            migrationCheckpoint("after-alter")
+        }
         migrationCheckpoint("before-commit")
     }
     override fun onOpen(db: SQLiteDatabase) {
@@ -84,7 +90,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     }
     fun content(id: String): ContentRecord? = readableDatabase.rawQuery("SELECT * FROM contents WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) it.content() else null }
     fun txtMetadata(id: String): TxtMetadata? = readableDatabase.rawQuery("SELECT * FROM txt_meta WHERE content_id=?",arrayOf(id)).use { if(it.moveToFirst()) TxtMetadata(it.string("encoding"),it.int("paragraphs"),it.long("characters")) else null }
-    fun contents(): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding,e.layout AS epub_layout FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id LEFT JOIN epub_meta e ON e.content_id=c.id",null).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"),c.nullString("epub_layout"))) } }
+    fun contents(): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding,e.layout AS epub_layout FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id LEFT JOIN epub_meta e ON e.content_id=c.id",null).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"),c.nullString("epub_layout"),if(c.isNull(c.getColumnIndexOrThrow("finished_at"))) null else c.long("finished_at"),c.int("hidden_from_continue")!=0,c.nullString("cover_path"))) } }
     fun byHash(hash: String): ContentRecord? = readableDatabase.rawQuery("SELECT * FROM contents WHERE hash=?",arrayOf(hash)).use { if(it.moveToFirst()) it.content() else null }
     internal fun epubCache(id: String): EpubCacheRecord {
         val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB)
@@ -94,11 +100,12 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     internal fun replaceEpubCache(id: String,cache: EpubCacheRecord) {
         val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB && content.revision==cache.revision)
         synchronized(epubPackages) { epubPackages["$id:${content.revision}"]=cache }
+        writableDatabase.update("epub_meta",ContentValues().apply { put("canonical_characters",cache.sections.sumOf { it.characters.toLong() }) },"content_id=? AND package_revision=?",arrayOf(id,content.revision))
     }
     fun insertEpub(record: ContentRecord,cache: EpubCacheRecord) = transaction { db ->
         require(record.format==ContentFormat.EPUB && record.revision==cache.revision)
         db.insertOrThrow("contents",null,ContentValues().apply { put("id",record.id);put("format","epub");put("revision",record.revision);put("title",record.title);put("author",record.author);put("hash",record.hash);put("bytes",record.bytes);put("imported_at",record.imported);put("last_read_at",0);put("original_name",record.originalName);put("language",cache.language);put("cover_path",cache.coverFile?.let { "versions/${cache.revision}/$it" }) })
-        db.insertOrThrow("epub_meta",null,ContentValues().apply { put("content_id",record.id);put("spine_count",cache.sections.size);put("package_revision",cache.revision);put("sanitizer_version",EpubSanitizer.VERSION);put("layout",cache.layout) })
+        db.insertOrThrow("epub_meta",null,ContentValues().apply { put("content_id",record.id);put("spine_count",cache.sections.size);put("package_revision",cache.revision);put("sanitizer_version",EpubSanitizer.VERSION);put("layout",cache.layout);put("canonical_characters",cache.sections.sumOf { it.characters.toLong() }) })
         val first=cache.sections.first();val locator=if(cache.layout=="pre-paginated")Locator.Page(cache.revision,0,0.0,0.0) else Locator.Epub(cache.revision,0,0,elementId=if(first.characters==0)first.elements.keys.firstOrNull() else null)
         db.insertOrThrow("positions",null,ContentValues().apply { put("content_id",record.id);put("locator_json",LocatorCodec.encode(locator));put("fraction",0.0);put("furthest_json",ReadingExtentCodec.encode(if(cache.layout=="pre-paginated")FixedReadingExtent(cache.revision,0,0.0,0.0) else EpubReadingExtent(cache.revision,0,0)));put("furthest_fraction",0.0);put("updated_at",0) })
         db.insertOrThrow("reading_settings",null,ContentValues().apply { put("content_id",record.id) })
@@ -135,7 +142,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         val meta = requireNotNull(txtMetadata(id)); check(content(id)?.revision == locator.version)
         val old = txt(id) ?: error("书籍不存在")
         check(db.update("positions",positionValues(locator,TxtReadingExtent(locator.version,maxOf(old.furthest,furthest)),meta.characters).apply { put("updated_at",time) },"content_id=?",arrayOf(id)) == 1)
-        db.update("contents",ContentValues().apply { put("last_read_at",time) },"id=?",arrayOf(id));Unit
+        Unit
     }
     fun setStyle(id: String,font: Float,theme: String) { SqliteReadingStore(this).patchRules(id,requireNotNull(content(id)).revision,ContentFormat.TXT,RulesScope.BOOK,RulesPatch(fontSize=FieldUpdate.Set(font),theme=FieldUpdate.Set(theme))) }
     fun setFlow(id: String,flow: String) { SqliteReadingStore(this).patchRules(id,requireNotNull(content(id)).revision,ContentFormat.TXT,RulesScope.BOOK,RulesPatch(flow=FieldUpdate.Set(ReaderFlow.entries.first { it.wire == flow }))) }
@@ -159,12 +166,12 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         val db = writableDatabase;db.beginTransaction()
         try { return action(db).also { db.setTransactionSuccessful() } } finally { db.endTransaction() }
     }
-    private fun Cursor.content() = ContentRecord(string("id"),ContentFormat.valueOf(string("format").uppercase()),string("revision"),string("title"),string("author"),string("hash"),long("bytes"),long("imported_at"),long("last_read_at"),nullString("language"),nullString("original_name"),nullString("cover_path"),if(isNull(getColumnIndexOrThrow("finished_at"))) null else long("finished_at"))
+    private fun Cursor.content() = ContentRecord(string("id"),ContentFormat.valueOf(string("format").uppercase()),string("revision"),string("title"),string("author"),string("hash"),long("bytes"),long("imported_at"),long("last_read_at"),nullString("language"),nullString("original_name"),nullString("cover_path"),if(isNull(getColumnIndexOrThrow("finished_at"))) null else long("finished_at"),int("hidden_from_continue")!=0)
     internal companion object {
         val SCHEMA = listOf(
-            "CREATE TABLE contents(id TEXT PRIMARY KEY,format TEXT NOT NULL CHECK(format IN ('txt','epub')),revision TEXT NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,bytes INTEGER NOT NULL,imported_at INTEGER NOT NULL,last_read_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER,cover_path TEXT,language TEXT,original_name TEXT)",
+            "CREATE TABLE contents(id TEXT PRIMARY KEY,format TEXT NOT NULL CHECK(format IN ('txt','epub')),revision TEXT NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,bytes INTEGER NOT NULL,imported_at INTEGER NOT NULL,last_read_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER,cover_path TEXT,language TEXT,original_name TEXT,hidden_from_continue INTEGER NOT NULL DEFAULT 0 CHECK(hidden_from_continue IN (0,1)))",
             "CREATE TABLE txt_meta(content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,encoding TEXT NOT NULL,paragraphs INTEGER NOT NULL,characters INTEGER NOT NULL)",
-            "CREATE TABLE epub_meta(content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,spine_count INTEGER NOT NULL,package_revision TEXT NOT NULL,sanitizer_version TEXT NOT NULL,layout TEXT NOT NULL,fxl_json TEXT)",
+            "CREATE TABLE epub_meta(content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,spine_count INTEGER NOT NULL,package_revision TEXT NOT NULL,sanitizer_version TEXT NOT NULL,layout TEXT NOT NULL,fxl_json TEXT,canonical_characters INTEGER)",
             "CREATE TABLE positions(content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,locator_json TEXT NOT NULL,fraction REAL NOT NULL,furthest_json TEXT NOT NULL,furthest_fraction REAL NOT NULL,updated_at INTEGER NOT NULL)",
             "CREATE TABLE bookmarks(id INTEGER PRIMARY KEY AUTOINCREMENT,content_id TEXT NOT NULL REFERENCES contents(id) ON DELETE CASCADE,locator_json TEXT NOT NULL,locator_key TEXT NOT NULL,fallback_fraction REAL NOT NULL,excerpt TEXT NOT NULL,chapter_title TEXT,created INTEGER NOT NULL,UNIQUE(content_id,locator_key))",
             "CREATE TABLE locator_backups(id INTEGER PRIMARY KEY AUTOINCREMENT,content_id TEXT NOT NULL REFERENCES contents(id) ON DELETE CASCADE,version TEXT NOT NULL,payload TEXT NOT NULL,payload_format TEXT NOT NULL,created INTEGER NOT NULL)",
