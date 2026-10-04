@@ -107,3 +107,14 @@ LocatorCodec须拒绝NaN/无穷/非法字段、保Long整数精度，支持Text�
 - [AGP内置Kotlin迁移](https://developer.android.com/build/migrate-to-built-in-kotlin)：不重新添加传统kotlin-android插件。
 - [Room发布页](https://developer.android.com/jetpack/androidx/releases/room)：当前2.8.5，Kotlin≥2.0/KSP2路径；[KSP官方2.3.12](https://github.com/google/ksp/releases/tag/2.3.12)。它们未在本计划安装，也未宣称完成兼容build；本阶段选平台SQLite。
 - [SQLite WAL](https://sqlite.org/wal.html)、[checkpoint](https://sqlite.org/pragma.html#pragma_wal_checkpoint)、[Android SQLiteDatabase](https://developer.android.com/reference/android/database/sqlite/SQLiteDatabase)：作为快照与事务依据，测试不得把仅复制主db当WAL完整备份。
+
+## 10. 历史 TXT fallbackFraction 兼容补充
+
+R1b 独立审核发现合法历史路径：v1 没有 fraction 字段，旧迁移可能把历史书签 offset200 / 当前 chars100 派生为2.0；v2/v3因此可能已存在有限但超出[0,1]的旧值。处理限于可信旧TXT持久化，不能放宽新运行时事件或EPUB：
+
+- v1字段确实缺失时，按旧公式派生后clamp[0,1]；已有v2/v3有限值原样迁移和读取，包括2.0，locator_json及对应旧值字段均不静默改写。
+- 普通LocatorCodec encode/decode及新增书签/位置写入继续严格；数据层独立internal存储兼容codec仅允许TXT fallback为有限旧值，其余结构/整数/归属校验保留。迁移为唯一宽写入口，runtime不能选择该路径。
+- 导航使用现有TxtEngine.resolve：无效范围fallback不可用，sourceOffset越界则clamp到可读位置并nearby。读取和导航不重写旧书签；用户后续实际阅读产生的新current正常持久化。
+- 退出案例：v1缺字段200/100→1；v2/v3原2.0迁移/重开仍2；旧书签可nearby恢复且row不变；同2.0若作为新增事件/书签或EPUB非法字段仍拒绝。NaN/Infinity不属于此兼容例外。
+
+此备注记录审核后的窄兼容决策；实现/独立测试状态以R1b最终验证记录为准，不扩成通用EPUB容错策略。

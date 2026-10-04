@@ -5,6 +5,7 @@ import com.localreader.app.core.*
 import com.localreader.app.data.LibraryDb.Companion.string
 import com.localreader.app.data.LibraryDb.Companion.long
 import com.localreader.app.formats.txt.TxtReadingExtent
+import com.localreader.app.formats.epub.*
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -24,17 +25,40 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
         require(content.revision == revision && locator.version == revision && locator !is Locator.Unknown) { "定位不属于当前书籍版本" }
         when(content.format) {
             ContentFormat.TXT -> { val meta = requireNotNull(db.txtMetadata(contentId));require(locator is Locator.Text && locator.sourceOffset in 0..meta.characters && locator.paragraph in 0 until meta.paragraphs && locator.character >= 0) { "无效TXT定位" } }
-            ContentFormat.EPUB -> require(locator is Locator.Epub) { "无效EPUB定位" }
+            ContentFormat.EPUB -> {
+                require(locator is Locator.Epub) { "无效EPUB定位" }
+                val section=db.epubCache(contentId).sections.getOrNull(locator.spine)
+                require(section!=null && locator.offset in 0..section.characters && (locator.elementId==null || section.elements[locator.elementId]==locator.offset)) { "无效EPUB正文坐标" }
+            }
         }
     }
-    override fun savePosition(contentId: String,revision: String,current: Locator,furthest: ReadingExtent): Unit = db.transaction { database ->
-        checkCurrent(contentId,revision,current)
-        require(current is Locator.Text && furthest is TxtReadingExtent && furthest.revision == revision) { "当前格式尚不支持位置写入" }
-        val meta = requireNotNull(db.txtMetadata(contentId));require(furthest.sourceOffset in 0..meta.characters)
-        val previous = loadSnapshot(contentId).furthest;require(previous is TxtReadingExtent)
-        val time = System.currentTimeMillis()
-        check(database.update("positions",db.positionValues(current,furthest.copy(sourceOffset=maxOf(previous.sourceOffset,furthest.sourceOffset)),meta.characters).apply { put("updated_at",time) },"content_id=?",arrayOf(contentId)) == 1)
-        check(database.update("contents",ContentValues().apply { put("last_read_at",time) },"id=? AND revision=?",arrayOf(contentId,revision)) == 1)
+    override fun savePosition(contentId: String,revision: String,current: Locator,furthest: ReadingExtent) {
+        db.transaction { database ->
+            checkCurrent(contentId,revision,current)
+            val previous=loadSnapshot(contentId).furthest
+            val values=when(current) {
+                is Locator.Text -> {
+                    require(furthest is TxtReadingExtent && previous is TxtReadingExtent && furthest.revision==revision)
+                    val meta=requireNotNull(db.txtMetadata(contentId));require(furthest.sourceOffset in 0..meta.characters)
+                    db.positionValues(current,furthest.copy(sourceOffset=maxOf(previous.sourceOffset,furthest.sourceOffset)),meta.characters)
+                }
+                is Locator.Epub -> {
+                    require(furthest is EpubReadingExtent && previous is EpubReadingExtent && furthest.revision==revision && previous.revision==revision)
+                    val sections=db.epubCache(contentId).sections
+                    require(furthest.spine in sections.indices && furthest.offset in 0..sections[furthest.spine].characters)
+                    val extent=if(previous.spine>furthest.spine || previous.spine==furthest.spine && previous.offset>furthest.offset)previous else furthest
+                    ContentValues().apply {
+                        put("locator_json",LocatorCodec.encode(current));put("furthest_json",ReadingExtentCodec.encode(extent))
+                        put("fraction",EpubCoordinates.fraction(sections,current.spine,current.offset));put("furthest_fraction",EpubCoordinates.fraction(sections,extent.spine,extent.offset))
+                    }
+                }
+                else -> error("此格式不可保存位置")
+            }
+            val time=System.currentTimeMillis();values.put("updated_at",time)
+            check(database.update("positions",values,"content_id=?",arrayOf(contentId))==1)
+            check(database.update("contents",ContentValues().apply { put("last_read_at",time) },"id=? AND revision=?",arrayOf(contentId,revision))==1)
+        }
+        db.notifyContentsChanged()
     }
     override fun bookmarks(contentId: String) = db.bookmarks(contentId).map { ReaderBookmark(it.id,it.bookId,it.locator,it.excerpt,it.created) }
     override fun addBookmark(contentId: String,revision: String,locator: Locator,excerpt: String): Boolean = db.transaction {
@@ -59,7 +83,9 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
         if(contentId != null) database.rawQuery("SELECT * FROM reading_settings WHERE content_id=?",arrayOf(contentId)).use { c -> check(c.moveToFirst())
             FIELDS.forEach { field -> val index=c.getColumnIndexOrThrow(field);if(!c.isNull(index)) { values[field]=c.getString(index);origins[field]=RuleOrigin.BOOK } }
         }
-        return EffectiveRules(ReaderRules(fontSize=values.getValue("font_size").toString().toFloat(),theme=values.getValue("theme").toString(),flow=ReaderFlow.entries.first { it.wire == values.getValue("flow") }),origins,revision,values.getValue("line_height").toString().toDouble(),values.getValue("margin").toString(),values.getValue("font_family").toString(),values.getValue("columns").toString(),values.getValue("epub_style_mode").toString(),values["fxl_zoom"]?.toString() ?: "fit-page",values["spread_pref"]?.toString() ?: "AUTO")
+        val rules=ReaderRules(fontSize=values.getValue("font_size").toString().toFloat(),theme=values.getValue("theme").toString(),flow=ReaderFlow.entries.first { it.wire==values.getValue("flow") },
+            epubStyleMode=values.getValue("epub_style_mode").toString(),lineHeight=values.getValue("line_height").toString().toDouble(),margin=values.getValue("margin").toString(),fontFamily=values.getValue("font_family").toString(),columns=values.getValue("columns").toString())
+        return EffectiveRules(rules,origins,revision,rules.lineHeight,rules.margin,rules.fontFamily,rules.columns,rules.epubStyleMode,values["fxl_zoom"]?.toString() ?: "fit-page",values["spread_pref"]?.toString() ?: "AUTO")
     }
     override fun patchRules(contentId: String?,revision: String?,format: ContentFormat,scope: RulesScope,patch: RulesPatch): EffectiveRules {
         val result = db.transaction { database ->

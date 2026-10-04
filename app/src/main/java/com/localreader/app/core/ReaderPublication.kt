@@ -5,15 +5,40 @@ interface ReaderPublication {
     val revision: String
     val kind: WebContentKind
     val sectionCount: Int
+    val protocolVersion: Int get() = 1
+    val direction: String get() = "ltr"
+    fun linkTarget(identity: String): Locator? = null
+    fun configure(rules: ReaderRules) { }
     val resourceManifest: Map<String,PackagedContentResource> get() = emptyMap()
     fun section(index: Int): ContentSection
     fun target(locator: Locator): ContentTarget
     fun locator(section: Int, blockId: String, character: Int): Locator?
+    fun locator(anchor: RendererAnchor): Locator? = when(anchor) {
+        is RendererAnchor.Block -> locator(anchor.section,anchor.blockId,anchor.character)
+        else -> null
+    }
 }
 /** Resource capabilities are owned by a content adapter, never supplied by authored HTML URLs. */
-data class PackagedContentResource(val mime: String, val assetPath: String)
+class ResourceDescriptor private constructor(val mime: String,val length: Long?,private val source: (() -> java.io.InputStream)?,val assetPath: String?) {
+    constructor(mime: String,assetPath: String): this(mime,null,null,assetPath)
+    constructor(mime: String,length: Long,open: () -> java.io.InputStream): this(mime,length,open,null)
+    fun open(asset: (String) -> java.io.InputStream): java.io.InputStream = source?.invoke() ?: asset(requireNotNull(assetPath))
+}
+typealias PackagedContentResource = ResourceDescriptor
 data class ContentSection(val index: Int, val html: String, val utf16Characters: Int)
-data class ContentTarget(val section: Int, val blockId: String, val character: Int, val nearby: Boolean = false)
+sealed interface RendererAnchor {
+    val section: Int
+    data class Block(override val section: Int,val blockId: String,val character: Int): RendererAnchor
+    data class Text(override val section: Int,val offset: Int): RendererAnchor
+    data class Element(override val section: Int,val elementId: String): RendererAnchor
+    data class Page(override val section: Int,val progression: Double): RendererAnchor
+}
+data class ContentTarget(val anchor: RendererAnchor,val nearby: Boolean = false) {
+    constructor(section: Int,blockId: String,character: Int,nearby: Boolean = false): this(RendererAnchor.Block(section,blockId,character),nearby)
+    val section get()=anchor.section
+    val blockId get()=when(val value=anchor) { is RendererAnchor.Block -> value.blockId;is RendererAnchor.Element -> value.elementId;else -> "canonical" }
+    val character get()=when(val value=anchor) { is RendererAnchor.Block -> value.character;is RendererAnchor.Text -> value.offset;else -> 0 }
+}
 
 /** Bounded resources prefer physical paragraph boundaries; extreme paragraphs retain continuation. */
 class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit = {}) : ReaderPublication {

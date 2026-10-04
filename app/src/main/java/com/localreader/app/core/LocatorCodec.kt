@@ -14,7 +14,7 @@ object LocatorCodec {
                 .put("character",locator.character).put("fallbackFraction",locator.fallbackFraction) }
             is Locator.Article -> json.put("t","article").put("blockId",locator.blockId).put("textOffset",locator.textOffset).put("element",locator.element)
             is Locator.Epub -> json.put("t","epub").put("spine",locator.spine).put("offset",locator.offset).put("quote",safePrefix(locator.quote,48))
-                .put("progression",locator.progression).put("fallbackFraction",locator.fallbackFraction)
+                .put("progression",locator.progression).put("fallbackFraction",locator.fallbackFraction).also { locator.elementId?.let { id -> it.put("elementId",id) } }
             is Locator.Page -> json.put("t","page").put("page",locator.page).put("x",locator.x).put("y",locator.y)
             is Locator.Comic -> json.put("t","comic").put("imageId",locator.imageId).put("order",locator.order).put("y",locator.y)
             is Locator.Unknown -> error("unreachable")
@@ -30,7 +30,8 @@ object LocatorCodec {
         return when (string(json,"t")) {
             "text" -> Locator.Text(version,integer(json,"sourceOffset"),int(json,"paragraph"),int(json,"character"),fraction(json,"fallbackFraction"))
             "article" -> Locator.Article(version,string(json,"blockId"),int(json,"textOffset"),boolean(json,"element"))
-            "epub" -> Locator.Epub(version,int(json,"spine"),int(json,"offset"),string(json,"quote",allowEmpty = true).also { require(it.length <= 48 && wellFormed(it)) },fraction(json,"progression"),fraction(json,"fallbackFraction"))
+            "epub" -> Locator.Epub(version,int(json,"spine"),int(json,"offset"),string(json,"quote",allowEmpty = true).also { require(it.length <= 48 && wellFormed(it)) },fraction(json,"progression"),fraction(json,"fallbackFraction"),
+                if(json.has("elementId"))string(json,"elementId").also { require(it.length<=128) } else null)
             "page" -> Locator.Page(version,int(json,"page"),fraction(json,"x"),fraction(json,"y"))
             "comic" -> Locator.Comic(version,string(json,"imageId"),int(json,"order"),fraction(json,"y"))
             else -> Locator.Unknown(version,raw)
@@ -38,7 +39,7 @@ object LocatorCodec {
     }
     fun key(locator: Locator): String = when (locator) {
         is Locator.Text -> "text|${locator.version}|${locator.sourceOffset}"
-        is Locator.Epub -> "epub|${locator.version}|${locator.spine}|${locator.offset}"
+        is Locator.Epub -> "epub|${locator.version}|${locator.spine}|${locator.offset}" + (locator.elementId?.let { "|element|$it" } ?: "")
         is Locator.Article -> "article|${locator.version}|${locator.blockId}|${locator.textOffset}|${locator.element}"
         is Locator.Page -> "page|${locator.version}|${locator.page}|${locator.x}|${locator.y}"
         is Locator.Comic -> "comic|${locator.version}|${locator.imageId}|${locator.order}|${locator.y}"
@@ -75,6 +76,7 @@ data class UnknownReadingExtent(val version: String, val raw: String) : ReadingE
 object ReadingExtentCodec {
     fun encode(extent: ReadingExtent): String = when (extent) {
         is TxtReadingExtent -> JSONObject().put("schema",1).put("t","txt-extent").put("version",extent.revision).put("sourceOffset",extent.sourceOffset).toString().also { decode(it) }
+        is com.localreader.app.formats.epub.EpubReadingExtent -> JSONObject().put("schema",1).put("t","epub-extent").put("version",extent.revision).put("spine",extent.spine).put("offset",extent.offset).toString().also { decode(it) }
         is UnknownReadingExtent -> extent.raw.also { decode(it) }
         else -> error("不支持的阅读范围类型")
     }
@@ -82,7 +84,10 @@ object ReadingExtentCodec {
         require(raw.length <= 32768)
         StrictJson(raw).validate()
         val json = JSONObject(raw); val version = LocatorCodec.string(json,"version")
-        return if (json.opt("schema") == 1 && json.opt("t") == "txt-extent") TxtReadingExtent(version,LocatorCodec.integer(json,"sourceOffset"))
+        return if(json.opt("schema")==1 && json.opt("t")=="epub-extent") {
+            val spine=LocatorCodec.integer(json,"spine");val offset=LocatorCodec.integer(json,"offset");require(spine<=Int.MAX_VALUE && offset<=Int.MAX_VALUE)
+            com.localreader.app.formats.epub.EpubReadingExtent(version,spine.toInt(),offset.toInt())
+        } else if (json.opt("schema") == 1 && json.opt("t") == "txt-extent") TxtReadingExtent(version,LocatorCodec.integer(json,"sourceOffset"))
         else UnknownReadingExtent(version,raw)
     }
 }

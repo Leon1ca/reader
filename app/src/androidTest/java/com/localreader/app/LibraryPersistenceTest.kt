@@ -392,6 +392,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
                     } }
                     activity.setContentView(adapter.view)
@@ -487,6 +488,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
                     } }
                     owner.bind(adapter)

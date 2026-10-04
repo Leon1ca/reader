@@ -3,12 +3,6 @@ package com.localreader.app.data
 import com.localreader.app.core.ContentFormat
 import com.localreader.app.core.Locator
 
-data class ContentRecord(val id: String, val format: ContentFormat, val revision: String, val title: String,
-    val author: String, val hash: String, val bytes: Long, val imported: Long, val lastRead: Long,
-    val language: String? = null, val originalName: String? = null, val coverPath: String? = null, val finishedAt: Long? = null)
-data class ContentSummary(val id: String, val format: ContentFormat, val title: String, val author: String,
-    val bytes: Long, val imported: Long, val lastRead: Long, val fraction: Double, val furthestFraction: Double,
-    val encoding: String? = null)
 data class TxtMetadata(val encoding: String, val paragraphs: Int, val characters: Long)
 /** TXT mutation projection only; it is not the general book model or a second write store. */
 data class TxtRecord(val id: String, val title: String, val author: String, val hash: String, val bytes: Long,

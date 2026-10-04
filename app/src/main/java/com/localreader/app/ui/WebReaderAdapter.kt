@@ -27,6 +27,11 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         var booted = false
         var opened = false
         var pending: JSONObject? = null
+        var intent=IntentCause.Restore
+        var intentToken=""
+        var userIntentToken=""
+        var positionValidated=false
+        val pageQueue=java.util.ArrayDeque<String>()
     }
     val runtimeTextZoom: Int get() = view.settings.textZoom
     val currentUrl: String? get() = active?.resources?.mainUrl
@@ -88,40 +93,72 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         val session = active ?: return
         try {
             val event = JSONObject(raw)
-            if (event.optInt("protocol") != 1 || event.optString("sessionId") != session.gate.sessionId || event.optString("revision") != session.publication.revision) return
+            if (event.optInt("protocol") != session.publication.protocolVersion || event.optString("sessionId") != session.gate.sessionId || event.optString("revision") != session.publication.revision) return
             if (event.optString("type") == "booted" && !session.booted) {
                 session.booted = true; session.pending?.let { dispatch(session,it) }; return
             }
             fun integer(name: String): Int? = (event.opt(name) as? Number)?.toDouble()?.let { if (it.isFinite() && it == it.toInt().toDouble()) it.toInt() else null }
             val identity = RendererIdentity(event.getString("sessionId"),event.getString("revision"),integer("layoutEpoch") ?: return,integer("commandId") ?: return)
             if (!session.gate.accepts(identity)) return
+            if(session.publication.protocolVersion==2 && event.optString("intentToken")!=session.intentToken)return
             when (event.optString("type")) {
                 "ready" -> {
                     val count = integer("activeViews") ?: return
                     if (count !in 1..8 || !session.gate.ready(identity)) return
                     session.opened = true
-                    watchdog?.cancel(); onEvent(RendererEvent.Ready(event.optString("profileId"),count,event.optBoolean("nearby")))
+                    onEvent(RendererEvent.Ready(event.optString("profileId"),count,event.optBoolean("nearby")))
                 }
                 "relocated" -> {
                     if (!session.gate.ready) return
                     val target = event.optJSONObject("target") ?: return
-                    val indexValue = (target.opt("section") as? Number)?.toDouble() ?: return
-                    val charValue = (target.opt("character") as? Number)?.toDouble() ?: return
-                    if (!indexValue.isFinite() || indexValue != indexValue.toInt().toDouble() || !charValue.isFinite() || charValue != charValue.toInt().toDouble()) return
-                    val reason = event.optString("reason", "scroll")
-                    val block = target.optString("blockId")
-                    if (block.length !in 1..128) return
+                    fun targetInteger(name: String): Int? = (target.opt(name) as? Number)?.toDouble()?.let { if(it.isFinite() && it==it.toInt().toDouble())it.toInt() else null }
+                    val section=targetInteger("section") ?: return
+                    if(section !in 0 until session.publication.sectionCount)return
+                    val anchor=if(session.publication.protocolVersion==1) {
+                        val block=target.optString("blockId");if(block.length !in 1..128)return
+                        RendererAnchor.Block(section,block,targetInteger("character") ?: return)
+                    } else when(target.optString("kind")) {
+                        "TEXT" -> RendererAnchor.Text(section,targetInteger("offset") ?: return)
+                        "ELEMENT" -> RendererAnchor.Element(section,target.optString("elementId").takeIf { it.length in 1..128 } ?: return)
+                        else -> return
+                    }
+                    var intent=session.intent
+                    val reason=if(session.publication.protocolVersion==2) {
+                        val reported=IntentCause.entries.firstOrNull { it.name==event.optString("intentCause") } ?: return
+                        if(reported!=session.intent && !(reported==IntentCause.UserNavigation && event.optBoolean("trustedInput") && session.userIntentToken.isNotEmpty() && event.optString("userIntentToken")==session.userIntentToken))return
+                        intent=reported
+                        if(reported==IntentCause.UserNavigation)event.optString("reason","scroll").takeIf { it in setOf("page","scroll") } ?: return else "anchor"
+                    } else event.optString("reason","scroll").takeIf { it in setOf("scroll","page","anchor") } ?: return
+                    if(session.publication.protocolVersion==1)intent=if(reason=="anchor")IntentCause.ProgrammaticJump else IntentCause.UserNavigation
                     val positionSerial = session.gate.beginPosition(identity) ?: return
                     scope.launch {
                         try {
-                            val locator = withContext(Dispatchers.IO) { session.publication.locator(indexValue.toInt(),block,charValue.toInt()) }
+                            val locator = withContext(Dispatchers.IO) { session.publication.locator(anchor) }
                             if (active === session && session.gate.acceptsPosition(identity,positionSerial) && locator != null) {
                                 session.locator = locator
-                                onEvent(RendererEvent.Position(locator, reason))
-                            }
-                        } catch (_: Exception) { /* closed or malformed content capability */ }
+                                session.positionValidated=true;watchdog?.cancel()
+                                onEvent(RendererEvent.Position(locator, reason,intent))
+                                if(session.pageQueue.isNotEmpty())command(session,session.pageQueue.removeFirst(),null,null)
+                            } else if(active===session && session.gate.acceptsPosition(identity,positionSerial) && locator==null)fail("正文返回了无效定位，请重新打开")
+                        } catch(e: Exception) { if(active===session && session.gate.acceptsPosition(identity,positionSerial))fail("正文定位读取失败：${e.message}") }
                     }
                 }
+                "userIntent" -> {
+                    if(session.gate.ready && event.optString("inputType") in setOf("wheel","touchmove","pointerdown","keydown")) {
+                        val token=event.optString("userIntentToken")
+                        if(token.matches(Regex("[a-zA-Z0-9-]{1,64}")))session.userIntentToken=token
+                    }
+                }
+                "linkRequested" -> {
+                    if(!session.gate.ready)return
+                    val href=event.optString("href");if(href.length !in 1..4096)return
+                    scope.launch {
+                        val locator=withContext(Dispatchers.IO) { session.publication.linkTarget(href) }
+                        if(active===session && session.gate.accepts(identity) && locator!=null)goTo(locator)
+                    }
+                }
+                "notice" -> onEvent(RendererEvent.Notice(event.optString("message").take(300)))
+                "externalRequested" -> if(session.gate.ready)onEvent(RendererEvent.Notice("外部链接不会在正文组件中打开。"))
                 "error" -> fail("正文排版失败：${event.optString("message").take(300)}")
                 "layoutInvalidated" -> if (session.gate.ready) command(session,"setRules",session.locator,session.rules)
             }
@@ -143,16 +180,28 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         if (!bridgeSupported) { fail("系统 WebView 缺少安全正文通信功能，请更新系统 WebView。"); return }
         work?.cancel(); watchdog?.cancel(); active?.resources?.close(); active = null; view.stopLoading()
         val id = UUID.randomUUID().toString()
+        document.configure(rules)
         val resources = SessionResources(id,document) { view.context.assets.open(it) }
         val session = HostSession(document,resources,RendererEventGate(id,document.revision),locator,rules)
         active = session; currentRules = rules
         command(session,"open",locator,rules)
         view.loadUrl(resources.mainUrl)
     }
-    override fun goTo(locator: Locator) { active?.let { command(it,"goTo",locator,null) } }
-    override fun setRules(rules: ReaderRules, locator: Locator) { currentRules = rules; active?.let { command(it,"setRules",locator,rules) } }
-    override fun next() { active?.let { command(it,"next",null,null) } }
-    override fun prev() { active?.let { command(it,"prev",null,null) } }
+    override fun goTo(locator: Locator) { active?.let { it.pageQueue.clear();command(it,"goTo",locator,null) } }
+    override fun setRules(rules: ReaderRules, locator: Locator) {
+        val session=active ?: return
+        if(session.publication.protocolVersion==2 && session.rules.epubStyleMode!=rules.epubStyleMode) {
+            open(session.publication,locator,rules) // revoke old HTML/resources before changing the rendering copy
+        } else { currentRules=rules;session.pageQueue.clear();command(session,"setRules",locator,rules) }
+    }
+    override fun next() = page("next")
+    override fun prev() = page("prev")
+    private fun page(type: String) {
+        val session=active ?: return
+        if(session.publication.protocolVersion==2 && !session.gate.ready) {
+            if(session.pageQueue.size<20)session.pageQueue.addLast(type)
+        } else command(session,type,null,null)
+    }
     private fun command(session: HostSession, type: String, locator: Locator?, rules: ReaderRules?) {
         if (destroyed) return
         work?.cancel(); watchdog?.cancel()
@@ -162,14 +211,25 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         val effectiveType = if (!session.opened || !session.gate.ready) "open" else type
         val targetLocator = if (effectiveType == "open") session.locator else locator
         val targetRules = if (effectiveType == "open") session.rules else rules
-        val identity = session.gate.command()
+        session.positionValidated=false
+        session.intent=when(effectiveType) { "next","prev" -> IntentCause.UserNavigation;"goTo" -> IntentCause.ProgrammaticJump;"setRules" -> IntentCause.Reflow;else -> IntentCause.Restore }
+        session.intentToken=UUID.randomUUID().toString()
+        session.userIntentToken=""
+        val identity = session.gate.command(session.publication.protocolVersion==1 || effectiveType !in setOf("next","prev"))
         onEvent(RendererEvent.Loading)
         work = scope.launch {
             try {
                 val payload = JSONObject()
                 if (targetLocator != null) {
                     val target = withContext(Dispatchers.IO) { session.publication.target(targetLocator) }
-                    payload.put("target",JSONObject().put("section",target.section).put("blockId",target.blockId).put("character",target.character).put("nearby",target.nearby))
+                    val value=JSONObject().put("section",target.section).put("nearby",target.nearby)
+                    when(val anchor=target.anchor) {
+                        is RendererAnchor.Block -> value.put("blockId",anchor.blockId).put("character",anchor.character)
+                        is RendererAnchor.Text -> value.put("kind","TEXT").put("offset",anchor.offset)
+                        is RendererAnchor.Element -> value.put("kind","ELEMENT").put("elementId",anchor.elementId)
+                        is RendererAnchor.Page -> value.put("kind","PAGE").put("progression",anchor.progression)
+                    }
+                    payload.put("target",value)
                 }
                 if (targetRules != null) {
                     val faces = withContext(Dispatchers.IO) { view.context.assets.open("fonts/readest.css").bufferedReader().use { it.readText() } }
@@ -179,13 +239,14 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                     payload.put("geometry",JSONObject().put("gap",g.gap).put("margin-top",g.marginTop).put("margin-bottom",g.marginBottom)
                         .put("margin-left",g.marginLeft).put("margin-right",g.marginRight).put("max-column-count",g.maxColumns))
                 }
-                if (effectiveType == "open") payload.put("sectionCount",session.publication.sectionCount)
-                val value = JSONObject().put("protocol",1).put("sessionId",identity.sessionId).put("revision",identity.revision)
+                if (effectiveType == "open") payload.put("sectionCount",session.publication.sectionCount).put("direction",session.publication.direction)
+                val value = JSONObject().put("protocol",session.publication.protocolVersion).put("sessionId",identity.sessionId).put("revision",identity.revision)
                     .put("layoutEpoch",identity.layoutEpoch).put("commandId",identity.commandId).put("type",effectiveType).put("payload",payload)
+                    .also { if(session.publication.protocolVersion==2)it.put("intentCause",session.intent.name).put("intentToken",session.intentToken) }
                 if (active !== session || !session.gate.accepts(identity)) return@launch
                 session.pending = value
                 if (session.booted) dispatch(session,value)
-                watchdog = scope.launch { delay(15000); if (active === session && session.gate.accepts(identity) && !session.gate.ready) fail("正文加载或重排超时，请返回书架重试。") }
+                watchdog = scope.launch { delay(15000); if (active === session && session.gate.accepts(identity) && !session.positionValidated) fail("正文加载或重排超时，请返回书架重试。") }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (active === session) fail("正文定位失败：${e.message}") }
         }
@@ -193,7 +254,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
     private fun dispatch(session: HostSession, value: JSONObject) {
         if (active === session && !destroyed) view.evaluateJavascript("window.readerHost?.command($value);void 0",null)
     }
-    private fun fail(message: String) { if (!destroyed) { active?.gate?.fail(); watchdog?.cancel(); onEvent(RendererEvent.Error(message)) } }
+    private fun fail(message: String) { if (!destroyed) { active?.gate?.fail(); active?.pageQueue?.clear();watchdog?.cancel(); onEvent(RendererEvent.Error(message)) } }
     override fun close() {
         if (destroyed) return
         destroyed = true; active?.resources?.close(); active = null; work?.cancel(); watchdog?.cancel(); scope.cancel()

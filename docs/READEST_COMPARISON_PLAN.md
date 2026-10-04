@@ -152,3 +152,34 @@ Readest style.ts移动声明为设置字号×1.25×zoom，声明 `text-size-adju
 已完成：固定官方源码与浏览核验；8组TXT原函数行为执行；FXL纯helper的5类尺寸/预算反例；source-display映射、AUTHOR/文章比较分工和成对测量规格；搜索上限计划笔误由500修为PRD的200，未改产品行为。
 
 尚未完成：完整上游EPUB生成包/浏览器transform运行、生产Readest此次成对截图、真实FXL运行/MAX4/PageTarget/用户意图测量、全部语种和>8MiB转换路径。所有“必须”是后续里程碑验收，不是已通过。R1b存储工作不因本研究改动旧TXT显示；R6必须真正消除普通TXT与默认文章的已知差异，独立审核后再报告结果。
+
+
+## 8. 2026-10-05 补充：生产 Readest 的 TXT 字体及短章节黑盒基准
+
+本节仅补充第7节之后新增的生产端参考证据：已取得下列原创输入的实机截图及可访问性文本，尚未因此完成本项目与 Readest 的严格成对验收。没有生产 Readest 的 CDP/font-file 直读，不能把候选 CSS 字族或视觉外观写成实际字体文件鉴定。
+
+### 8.1 版本、输入和证据绑定
+
+三组均使用手机已安装的 `com.bilingify.readest` **0.12.10 / 12009**，`font_scale=0.9`、物理屏幕 **1200×2670 / density 520dpi**，参考设置未修改。屏幕分辨率不是正文 viewport；后续成对比较仍须按第5节另行匹配正文内容区域、字号与平台缩放。下表路径相对于会话工作目录 `/Users/leon1ca/Documents/Codex/2026-10-04/ji-y`。
+
+| 输入 / SHA-256 | 生产参考证据 | 有效范围 |
+|---|---|---|
+| `work/r2-qa-fixtures/QA 原创TXT字体对照.txt`；**275 bytes**、163 UTF-16 units；`d296119dcf2a5bc90ce36b85a65fe336712b298700e003646c062942b823b534` | `work/full-stage-readest-baseline/qa-txt-font-fingerprint-baseline.json`、`qa-txt-font-fingerprint.png`、`qa-txt-font-open.xml` | 原始物理 TXT 经原生选择器导入后的实际转换及默认显示；已重新核对源文件字节数和 SHA |
+| 原创无显式作者字体的 `qa-epub3-font-fingerprint.epub`；`dc1c17e6835a8d4964d6ebf3ab12f26be85acdbfd0342ba3f3ca13a8b8936274` | 同目录 `qa-font-fingerprint-baseline.json`、`qa-font-fingerprint.png`、`qa-font-fingerprint.xml`、`qa-font-fingerprint-accessibility.json` | 同组 Latin/ASCII 数字/全角数字/汉字的 EPUB 默认显示，不能替代物理 TXT 转换参考 |
+| 原创受控文章 `qa-article-reference.epub`；`4b4bc21d1d366f55ea92f5e70eb1267fe676290a2352a063f08eca5a6d9c4ca9` | 同目录 `qa-article-baseline.json`、`qa-article-body.png`、`qa-article-open.xml`；来源绑定 `work/readest-oracle/article-reference/provenance.json` | 原创 ArticleSample 等价结构，按固定 builder 的参考 CSS 独立装成 EPUB 后由生产应用显示；不是生产文章采集/Readability 转换管线的完整测试 |
+
+三张截图 SHA-256 依次为 `4c3f76921b8f8744cc94d2f672bab87ffce9cae1c73419d0b9203cd80c2d0487`、`b85e8a7ba1e83bc32cb0b1560ab36074bc18b3a273a3b6eb8774e4dcab50500f`、`3b921f50c8228ce162258af0d999dd669950f0fff31b4313484c888debfdceef`。文章可访问性证据采用 `qa-article-open.xml`；同目录 `qa-article-stable.xml` 实际是系统桌面快照，不能用于文章排版结论。`work/readest-qa-created-books.json` 单独登记新增的4本 QA 书，用户原有3本未操作。
+
+### 8.2 观察与字体链推断分开
+
+- **生产截图观察：** TXT 的“春风阅读中文数字”“清晨书页天地山水”呈系统无衬线外观（接近该手机 MiSans 外观），与无作者字体 EPUB 及受控文章中的文楷外观明显不同；全角数字也存在形状差异。截图支持“这两条默认显示路径不能直接统一”的判断，不支持宣称已确认 MiSans/LXGW 的具体字体文件、版本或各 glyph 的实际 face。英文与 ASCII 数字同样保留原始截图作为后续逐字形、字宽和行断对照，不能仅凭看似接近认定相同。
+- **设置事实：** `qa-epub-default-font-settings.*` / `qa-epub-default-layout-settings.*` 记录默认字号16、最小8、字重400，默认字体“无衬线字体”、中文“霞鹜文楷”，覆盖书籍字体/覆盖版面布局/使用书籍排版均关闭，段距1、行高1.6、字距0、缩进2、两端对齐开启。这是设置证据；“中文=霞鹜文楷”菜单不能推导所有 TXT 汉字实际使用该字体。
+- **固定源码支持的候选解释（推断）：** `8a56831af61841175b49cc2740bffcde57b470b0` 的 TXT 生成样式在作者 `body` 上声明 `Arial, sans-serif`；继承自 `html` 的默认 Roboto/LXGW 变量栈不能压过该显式声明。Android 上 Arial 的解析及后续系统回退可能命中覆盖汉字的系统无衬线字体，与此次外观一致。无显式作者字体的 EPUB，以及带其自身 builder 栈的受控文章，会走不同的有效级联，中文外观与 LXGW 候选一致。这一归因仍是固定源码加黑盒外观的解释，不是生产 CSSOM、实际 font-file 或所有字符覆盖测量。
+
+因此 R6 保留 TXT 与文章独立默认 profile；不得为了统一实现而把 TXT 强制改为 Roboto/LXGW，也不得把正文默认与用户已确认的 EPUB AUTHOR 模式混为一谈。AUTHOR 模式继续保留安全作者样式/包内字体；Readest 本次“使用书籍排版”关闭的截图，不构成抹除任意 EPUB 作者排版的授权。
+
+### 8.3 短 TXT 的实际标题语义
+
+此275字节原文以 `第一章 字体对照` 开头，后有 `第二章 测试尾部`。生产截图及 `qa-txt-font-open.xml` 显示生成的数字标题 **“1”**，原首行“第一章 字体对照”以正文段落样式出现；第二章文本也在同一内容树中而未形成独立显示章节。可访问性 XML 将这些节点统一暴露为 `android.widget.TextView`，自身不证明 HTML 标签；结合固定转换器未识别章节时的生成规则，语义对应 **generated h2“1” + 原标题普通 p**。不得声称已从生产 DOM 直接读取 h2/p 标签。
+
+这是该短混合语言样本的实测行为，不应外推为所有“第一章”标题永远不识别；先前强制中文语言条件的 scratch oracle 与此实际导入环境也不能互相替代。R6 的源到显示映射须记录 generated 标题与原 source range 的区别，不能把现有 `parser.heading` 自动等同于 Readest 的显示 heading，更不能改写原 UTF-16 持久锚点来迁就标题显示。将此原始275字节输入加入成对回归，分别断言显示段落/标题、源定位可恢复以及 TXT 独立字体路径；本节只增加参考事实，没有将上述回归标为已通过。

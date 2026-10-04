@@ -7,11 +7,13 @@ android {
     compileSdk { version = release(37) { minorApiLevel = 0 } }
     defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 4; versionName = "0.2.2-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildFeatures { compose = true; buildConfig = true }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     lint { warningsAsErrors = true }
 }
 kotlin { compilerOptions { allWarningsAsErrors.set(true) } }
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    implementation("org.jsoup:jsoup:1.23.2")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")

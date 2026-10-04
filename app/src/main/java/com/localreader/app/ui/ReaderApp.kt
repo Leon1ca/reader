@@ -31,7 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.content.edit
 import com.localreader.app.core.*
-import com.localreader.app.data.ContentSummary
+import com.localreader.app.core.ContentSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -102,7 +102,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
         }
     }
     Scaffold(topBar = { TopAppBar(title = { Text(listOf("书架", "稍后阅读", "RSS", "设置")[tab]) }, actions = {
-        if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy && !state.loading && state.libraryReady) { Text("导入 TXT") }
+        if (tab == 0) TextButton(onClick = { import.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream")) }, enabled = !state.busy && !state.loading && state.libraryReady) { Text("导入图书") }
     }) }, bottomBar = {
         NavigationBar { listOf("书架", "稍后阅读", "RSS", "设置").forEachIndexed { index, label ->
             NavigationBarItem(selected = tab == index, onClick = { tab = index; model.preferences.edit { putInt("tab", index) } },
@@ -121,7 +121,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                 0 -> {
                     OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索标题或作者") }, singleLine = true)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${books.size} 本 · TXT", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.labelLarge)
+                        Text("${books.size} 本", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.labelLarge)
                         Box {
                             TextButton(onClick = { sortMenu = true }) { Text("排序：$sort") }
                             DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
@@ -136,15 +136,15 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                     else if (books.isEmpty()) {
                         Spacer(Modifier.height(48.dp))
                         Text(if (query.isNotEmpty()) "没有匹配的图书" else "把一本书，留在这里。", style = MaterialTheme.typography.headlineSmall)
-                        Text(if (query.isNotEmpty()) "试试其他标题或作者。" else "通过系统文件选择器导入 TXT。副本保存在本机，原文件不会被修改。", Modifier.padding(vertical = 16.dp))
-                        if (query.isEmpty()) Button(onClick = { import.launch(arrayOf("text/plain", "application/octet-stream")) }, enabled = !state.busy) { Text("导入图书") }
+                        Text(if (query.isNotEmpty()) "试试其他标题或作者。" else "通过系统文件选择器导入 TXT 或 EPUB。副本保存在本机，原文件不会被修改。", Modifier.padding(vertical = 16.dp))
+                        if (query.isEmpty()) Button(onClick = { import.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream")) }, enabled = !state.busy) { Text("导入图书") }
                     } else LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                         items(books, key = { it.id }) { book -> Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.fillMaxWidth().clickable(enabled = !state.busy) { model.open(book.id) }.padding(16.dp)) {
                                 Text(book.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                 Text(book.author, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium)
                                 val percentage = fractionPercent(book.fraction)
-                                Text("TXT · ${book.encoding} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
+                                Text("${book.format.name} · ${book.encoding ?: "可重排"} · ${formatBytes(book.bytes)}", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium)
                                 Text("当前位置 $percentage% · 最远 ${fractionPercent(book.furthestFraction)}%", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = { edit = book }, enabled = !state.busy) { Text("信息") }
@@ -159,13 +159,13 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
                     Spacer(Modifier.height(48.dp))
                     Text("开发中", style = MaterialTheme.typography.headlineMedium)
                     Text(if (tab == 1) "链接保存、网页正文和图片离线尚未实现。" else "RSS / Atom 订阅和更新尚未实现。", Modifier.padding(top = 16.dp))
-                    Text("当前可用：TXT 本地书架与阅读。", Modifier.padding(top = 16.dp))
+                    Text("当前可用：TXT 与可重排 EPUB 本地书架与阅读。", Modifier.padding(top = 16.dp))
                 }
                 3 -> {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 24.dp)) {
                         item { Text("本地优先", style = MaterialTheme.typography.headlineSmall); Text("没有网络权限、账号或远程分析。文件仅通过系统选择器读取；不会请求全盘存储权限。", Modifier.padding(top = 8.dp)) }
                         item { Text("当前版本 ${com.localreader.app.BuildConfig.VERSION_NAME} · 阅读内核增量", style = MaterialTheme.typography.titleMedium); Text("UTF-8、带 BOM 的 UTF-16、GB18030；分页与连续滚动、章节、字号、主题、书签与位置恢复。", Modifier.padding(top = 8.dp)) }
-                        item { Text("兼容范围", style = MaterialTheme.typography.titleMedium); Text("EPUB、MOBI、PDF、漫画、网页剪藏与 RSS 尚未实现。分类、字体导入和手动备份仍待开发。", Modifier.padding(top = 8.dp)) }
+                        item { Text("兼容范围", style = MaterialTheme.typography.titleMedium); Text("固定版式 EPUB、MOBI、PDF、漫画、网页剪藏与 RSS 尚未实现。分类、字体导入和手动备份仍待开发。", Modifier.padding(top = 8.dp)) }
                         if (com.localreader.app.BuildConfig.DEBUG) item { TextButton(onClick = onArticlePreview) { Text("开发预览：结构化文章样本") }; Text("本地自建样本，不是网页导入或 RSS 管线。") }
                         item { Text("数据保留", style = MaterialTheme.typography.titleMedium); Text("书库不参加自动云备份或设备迁移。本增量尚无手动备份；卸载或清除应用数据会删除书库、进度与书签。", Modifier.padding(top = 8.dp)) }
                         item { Text("全局阅读默认", style = MaterialTheme.typography.titleMedium)
@@ -195,7 +195,7 @@ private fun LibraryScreen(model: ReaderViewModel, state: UiState, onArticlePrevi
     AlertDialog(onDismissRequest = onDismiss, title = { Text("图书信息") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(title, { title = it.take(250) }, label = { Text("标题") })
         OutlinedTextField(author, { author = it.take(250) }, label = { Text("作者") })
-        Text("${book.encoding} · ${formatBytes(book.bytes)}\n内容校验：SHA-256\n标题和作者不会改变文件内容。")
+        Text("${book.encoding ?: book.format.name} · ${formatBytes(book.bytes)}\n内容校验：SHA-256\n标题和作者不会改变文件内容。")
     } }, confirmButton = { TextButton(onClick = { onSave(title, author) }) { Text("保存") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
@@ -214,17 +214,21 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     var crashes by remember(session.generation) { mutableIntStateOf(0) }
     var failed by remember(session.generation) { mutableStateOf(false) }
     val context = LocalContext.current
-    val adapter = remember(session.document, attempt) { WebReaderAdapter(context) { event -> if (model.rendererEvent(session.generation,event)) when (event) {
-        RendererEvent.Loading -> restored = false
-        is RendererEvent.Ready -> { crashes = 0; failed = false; localNotice = if (event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
-        is RendererEvent.Position -> restored = true
-        is RendererEvent.Error -> { restored = false; failed = true; localNotice = event.message }
-        is RendererEvent.Crashed -> {
-            restored = false
-            if (crashes < 2) { crashes++; attempt++ } else { failed = true; localNotice = "自动恢复失败，请点击重试。" }
-        }
-    } } }
-    DisposableEffect(adapter) { val unbind = model.bindRenderer(session.generation,adapter); onDispose { unbind() } }
+    val controller=remember(session.generation) { model.readerController(session.generation) }
+    val rendererState by controller.state.collectAsStateWithLifecycle()
+    DisposableEffect(controller) {
+        val stop=controller.observe { event -> when(event) {
+            is RendererEvent.Notice -> localNotice=event.message
+            RendererEvent.Loading -> restored=false
+            is RendererEvent.Ready -> { crashes=0;failed=false;localNotice=if(event.nearby) "已恢复至附近文本位置；原锚点仍保留。" else null }
+            is RendererEvent.Position -> restored=true
+            is RendererEvent.Error -> { restored=false;failed=true;localNotice=event.message }
+            is RendererEvent.Crashed -> { restored=false;if(crashes<2) { crashes++;attempt++ } else { failed=true;localNotice="自动恢复失败，请点击重试。" } }
+        } }
+        onDispose { stop() }
+    }
+    val surface=remember(session.generation) { ReaderSurface(context).apply { bind(controller) } }
+    DisposableEffect(surface) { onDispose { surface.close() } }
     val background = when (session.snapshot.rules.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
     BackHandler { if (encoding != null) encoding = null else if (panel != null) panel = null else if (!busy) model.closeReader() }
 
@@ -234,11 +238,11 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
         bottomBar = { Surface { Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { panel = "书签" }, enabled = !busy) { Text("书签 ${session.snapshot.bookmarks.size}") }
-                TextButton(onClick = model::addBookmark, enabled = !busy && restored) { Text("添加书签") }
+                TextButton(onClick = model::addBookmark, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("添加书签") }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = adapter::prev, enabled = !busy && restored) { Text("上一页") }
-                TextButton(onClick = adapter::next, enabled = !busy && restored) { Text("下一页") }
+                TextButton(onClick = controller::prev, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("上一页") }
+                TextButton(onClick = controller::next, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("下一页") }
             }
             Text("当前位置 ${(session.currentFraction * 100).roundToInt()}% · 最远 ${(session.furthestFraction * 100).roundToInt()}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
         } } }) { padding -> Column(Modifier.padding(padding).fillMaxSize()) {
@@ -246,9 +250,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             val notice = localNotice ?: session.notice
             if (notice != null) Text(notice, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
             if (failed) TextButton(onClick = { failed = false; localNotice = null; attempt++ }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
-            key(session.generation, attempt) { AndroidView(factory = { adapter.view }, modifier = Modifier.weight(1f).fillMaxWidth(), update = {
-                adapter.render(session.document,session.jump,session.jumpSerial,session.snapshot.rules)
-            }) }
+            key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,attempt) }) }
         } }
     panel?.let { selected -> ModalBottomSheet(onDismissRequest = { panel = null }) {
         SystemBarAppearance(session.snapshot.rules.theme == "dark")
@@ -277,6 +279,11 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                     Text("本书字号：${session.snapshot.rules.fontSize.toInt()}（Readest 设置单位）", Modifier.padding(top = 16.dp))
                     Row { TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize - 2).coerceAtLeast(12f)) }) { Text("减小") }; TextButton(onClick = { model.fontSize((session.snapshot.rules.fontSize + 2).coerceAtMost(36f)) }) { Text("增大") } }
                     Row { listOf("paper" to "纸色", "white" to "浅色", "dark" to "深色").forEach { (theme, label) -> TextButton(onClick = { model.theme(theme) }) { Text(label) } } }
+                    if(session.document.kind==WebContentKind.EPUB) {
+                        Text("EPUB 样式：${session.snapshot.rules.epubStyleMode}")
+                        Row { TextButton(onClick={model.epubStyleMode("AUTHOR")}) { Text("作者样式") };TextButton(onClick={model.epubStyleMode("CUSTOM")}) { Text("自定义排版") } }
+                        Text("作者模式保留安全包内字体与样式；自定义模式使用阅读设置。")
+                    }
                     session.textControls?.let { controls ->
                         Text("当前编码：${controls.encoding}", Modifier.padding(top = 16.dp))
                         Text("显示乱码时可手动纠正。新索引成功后才切换；旧索引与原定位备份会保留。", Modifier.padding(vertical = 8.dp))
@@ -301,6 +308,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val adapter = remember(document) { WebReaderAdapter(context) { event -> when(event) {
+        is RendererEvent.Notice -> error = event.message
         RendererEvent.Loading -> ready = false
         is RendererEvent.Ready -> { ready = true; error = null }
         is RendererEvent.Position -> anchor = event.locator

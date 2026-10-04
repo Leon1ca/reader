@@ -6,8 +6,11 @@ import com.localreader.app.core.ReaderFlow
 import android.webkit.WebView
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
@@ -50,6 +53,14 @@ class ReadingUiTest {
                 }
             } })
         } }
+    private fun openFromShelf(title: String) {
+        // Existing read books precede a fresh unread fixture. Use the production
+        // search field so the real card can be clicked even in a populated library.
+        compose.onNodeWithText("搜索标题或作者").performTextReplacement(title)
+        val card=hasText(title) and !hasSetTextAction()
+        waitFor { try { compose.onNode(card).assertExists();true } catch(_: AssertionError) { false } }
+        compose.onNode(card).performClick()
+    }
     private fun ready() {
         waitFor { var exists = false; compose.runOnUiThread { exists = webView(compose.activity.window.decorView) != null }; exists }
         waitFor { evaluate("Boolean(window.readerHost?.diagnostics().loaded && window.readerHost?.diagnostics().anchorGeometry?.visible)") == "true" }
@@ -75,7 +86,7 @@ class ReadingUiTest {
             id = requireNotNull(model().state.value.results.single().bookId)
             val imported = requireNotNull(repository.db.txt(requireNotNull(id)))
             compose.onNodeWithText("完成").performClick()
-            compose.onNodeWithText(imported.title).performClick()
+            openFromShelf(imported.title)
             waitFor { model().state.value.reader?.contentId == id }
             ready()
             val firstGeneration = requireNotNull(model().state.value.reader).generation
@@ -111,7 +122,7 @@ class ReadingUiTest {
             val bookmark = requireNotNull(model().state.value.reader).snapshot.bookmarks.single()
             compose.onNodeWithText("返回").performClick()
             waitFor { model().state.value.reader == null }
-            compose.onNodeWithText(imported.title).performClick()
+            openFromShelf(imported.title)
             waitFor { model().state.value.reader != null && !model().state.value.busy }
             ready()
             val reopened = requireNotNull(model().state.value.reader)

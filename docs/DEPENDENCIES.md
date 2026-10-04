@@ -18,9 +18,13 @@
 | AndroidX Test ext JUnit | 1.3.0 | JUnit 设备入口 | Apache-2.0 |
 | AndroidX Espresso core | 3.7.0 | 仅 androidTest：API 37 兼容的界面输入（系统服务代替旧反射） | Apache-2.0 |
 | JUnit | 4.13.2 | 核心解析测试 | EPL-1.0 |
+| jsoup | 1.23.2 | EPUB HTML 解析与净化 | MIT |
+| desugar_jdk_libs_nio | 2.1.5 | jsoup 在 API 29 等旧平台的 NIO API 兼容 | GPL-2.0 with Classpath Exception |
 
 SQLite 使用 Android 平台提供的 SQLiteOpenHelper，不额外接入 Room 或远程数据库。正文使用固定官方 OFL 字体，来源、哈希及比较范围见 FONTS.md / FONTS_MANIFEST.json；文章开发样本中的山景 SVG 为本项目自建，未使用外部图像资产。WebView 使用系统组件，字体、CSS 和正文资源均离线。此表是直接依赖登记，尚不代表发布所需的完整传递依赖许可清单或最终项目许可决议；升级须固定新版本并回归编码、定位和数据库可靠性样本。
 
 MIT 上游许可、源 / 打包 / patch 哈希与重放补丁位于 `app/src/main/assets/reader/vendor/foliate/`。仅打包 paginator.js，四项必要补丁为禁正文脚本、全局 view 上限及补偿淘汰、释放 view 的 observer / iframe、关闭 paginator 的 container observer；更新必须跑浏览器与真机定位 / 资源回归。Playwright / Chromium 只用于外部开发测试，不是 APK 运行依赖。
 
 R1b adds `org.json:json:20260814` for JVM tests only. Production uses Android platform `org.json`; no Room/KSP dependency is added. The official Maven Central POM was retrieved through the existing macOS proxy and retained in the task work directory.
+
+R2 fixes jsoup 1.23.2 and the NIO desugaring specification 2.1.5. Their official POMs were retrieved from Maven Central and Google Maven; jsoup's Java 8 classfiles and HTML/progressive parser were checked in an isolated JVM probe. Android compatibility and the full EPUB consumer pipeline require the R2 device gate; dependency installation alone does not indicate EPUB support.

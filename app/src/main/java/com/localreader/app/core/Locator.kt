@@ -8,7 +8,7 @@ sealed interface Locator {
     /** Unknown JSON is retained exactly; a reader must not reinterpret it as a TXT anchor. */
     data class Unknown(override val version: String, val raw: String) : Locator
     data class Epub(override val version: String, val spine: Int, val offset: Int, val quote: String = "",
-                    val progression: Double = 0.0, val fallbackFraction: Double = 0.0) : Locator
+                    val progression: Double = 0.0, val fallbackFraction: Double = 0.0, val elementId: String? = null) : Locator
     data class Page(override val version: String, val page: Int, val x: Double, val y: Double) : Locator
     data class Comic(override val version: String, val imageId: String, val order: Int, val y: Double) : Locator
     /** Structured content uses authored block IDs; never a TXT offset or renderer page number. */

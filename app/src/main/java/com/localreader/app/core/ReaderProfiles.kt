@@ -1,6 +1,6 @@
 package com.localreader.app.core
 
-enum class WebContentKind { TXT, ARTICLE }
+enum class WebContentKind { TXT, ARTICLE, EPUB }
 data class WebTypographyProfile(val id: String, val kind: WebContentKind, val fontFamily: String,
                                 val mobileScale: Float = 1.25f, val lineHeight: Float = 1.6f,
                                 val paragraphMarginEm: Float = 1f, val indentEm: Float = 2f,

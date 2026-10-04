@@ -11,6 +11,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class UiState(val loading: Boolean = true, val books: List<ContentSummary> = emptyList(), val reader: ReadingSession? = null,
@@ -20,10 +23,16 @@ class ReaderViewModel internal constructor(application: Application, private val
     constructor(application: Application) : this(application,(application as ReaderApplication).readingStore)
     private val app = application as ReaderApplication
     private val repository = app.repository
+    private val contents: ContentRepository = repository
     private val factory: OpenedBookFactory = app.openedBooks
     private val reencoder: TextReencoder = app.openedBooks
     @Volatile private var owner: ReadingSessionOwner? = null
     private var generation = 0L
+    private var controller: ReaderController?=null
+    fun readerController(sessionGeneration: Long): ReaderController {
+        check(owner?.generation==sessionGeneration)
+        return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) }).also { controller=it }
+    }
     private val retryOwners = java.util.concurrent.CopyOnWriteArrayList<ReadingSessionOwner>()
     val preferences = application.getSharedPreferences("ui", 0)
     private val mutable = MutableStateFlow(UiState())
@@ -37,12 +46,23 @@ class ReaderViewModel internal constructor(application: Application, private val
     init { retryLibrary() }
     fun retryLibrary() {
         viewModelScope.launch { try {
-            val books = withContext(dbWriter) { repository.recover(); repository.db.contents() }
+            val books = withContext(dbWriter) { repository.recover(); contents.summaries() }
             val defaults = withContext(dbWriter) { readingPreferences.defaults().rules }
             mutable.update { it.copy(loading = false,books = books,defaults = defaults,error = null,libraryReady = true) }
             refreshRules()
         } catch(cancel: CancellationException) { throw cancel }
         catch(e: Exception) { mutable.update { it.copy(loading = false,error = e.message ?: "无法读取书库；原数据已保留") } } }
+    }
+    init {
+        viewModelScope.launch {
+            state.map { it.libraryReady }.distinctUntilChanged().collectLatest { ready ->
+                if(ready) {
+                    try { contents.observeAll().collect { books -> mutable.update { it.copy(books=books) } } }
+                    catch(cancel: CancellationException) { throw cancel }
+                    catch(e: Exception) { mutable.update { it.copy(error="书架更新失败：${e.message}") } }
+                }
+            }
+        }
     }
     init {
         viewModelScope.launch {
@@ -74,7 +94,7 @@ class ReaderViewModel internal constructor(application: Application, private val
                 uris.forEachIndexed { index, uri ->
                     mutable.update { it.copy(operation = "正在导入 ${index + 1}/${uris.size}") }
                     val result = withContext(Dispatchers.IO) { repository.import(uri) { cancelled.get() } }
-                    val books = withContext(Dispatchers.IO) { repository.db.contents() }
+                    val books = withContext(Dispatchers.IO) { contents.summaries() }
                     mutable.update { it.copy(books = books, results = it.results + result) }
                 }
             } finally { mutable.update { it.copy(busy = false, operation = "") } }
@@ -106,7 +126,7 @@ class ReaderViewModel internal constructor(application: Application, private val
                 check(handle.revision == snapshot.current.version) { "书籍版本在打开期间改变" }
                 val next = ReadingSessionOwner(handle,request,readingStore,snapshot)
                 val screen = withContext(Dispatchers.IO) { next.state() }
-                if (request == generation) { owner = next; opened = null; mutable.update { it.copy(reader = screen) } }
+                if (request == generation) { controller?.detach();controller=null;owner = next; opened = null; mutable.update { it.copy(reader = screen) } }
             } catch (cancel: CancellationException) { throw cancel }
             catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "正文无法打开") } }
             finally { opened?.close(); mutable.update { it.copy(busy = false, operation = "") } }
@@ -119,7 +139,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     }
     fun rendererEvent(sessionGeneration: Long, event: RendererEvent): Boolean {
         if (owner?.generation != sessionGeneration) return false
-        return if (event is RendererEvent.Position) position(event.locator,event.reason != "anchor") else true
+        return if (event is RendererEvent.Position) position(event.locator,event.intent==IntentCause.UserNavigation) else true
     }
     /** Anchor restores update current without raising the accumulated furthest-read position. */
     fun position(locator: Locator, advanceFurthest: Boolean = true): Boolean {
@@ -149,10 +169,10 @@ class ReaderViewModel internal constructor(application: Application, private val
         old?.revokeRenderers() // main thread: resource capability and position callbacks are gone before source close
         old?.closeSource() // bounded handle closure cannot be cancelled by an immediately cleared ViewModel
         if (old?.hasPending == true) retryOwners.addIfAbsent(old)
-        owner = null; ++generation
+        controller?.detach();controller=null;owner = null; ++generation
         mutable.update { it.copy(reader = null) }
         viewModelScope.launch { withContext(Dispatchers.IO) {
-            val books = repository.db.contents(); mutable.update { it.copy(books = books) }
+            val books = contents.summaries(); mutable.update { it.copy(books = books) }
         } }
     }
     fun jump(locator: Locator) {
@@ -169,6 +189,8 @@ class ReaderViewModel internal constructor(application: Application, private val
             theme = if(theme != old.theme) FieldUpdate.Set(theme) else FieldUpdate.Keep)
         patchBook(patch)
     }
+    fun epubStyleMode(mode: String) = patchBook(RulesPatch(epubStyleMode=FieldUpdate.Set(mode)))
+    fun lineHeight(height: Double) = patchBook(RulesPatch(lineHeight=FieldUpdate.Set(height)))
     fun fontSize(font: Float) = patchBook(RulesPatch(fontSize = FieldUpdate.Set(font)))
     fun flow(flow: ReaderFlow) = globalRules(RulesPatch(flow = FieldUpdate.Set(flow)))
     fun theme(theme: String) = globalRules(RulesPatch(theme = FieldUpdate.Set(theme)))
@@ -239,7 +261,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         retryOwners.removeAll { it.opened.contentId == book.id }
     }
     fun metadata(book: ContentSummary, title: String, author: String) = operation("正在保存信息") {
-        repository.db.setMetadata(book.id, title.trim().ifBlank { book.title }, author.trim().ifBlank { "作者未知" })
+        contents.updateMetadata(book.id, title.trim().ifBlank { book.title }, author.trim().ifBlank { "作者未知" })
     }
     fun reencode(encoding: String) {
         val active = owner ?: return
@@ -259,11 +281,11 @@ class ReaderViewModel internal constructor(application: Application, private val
                 val next = ReadingSessionOwner(prepared.opened,++generation,readingStore,prepared.snapshot)
                 val screen = next.state(notice = "编码已更改，已恢复至附近文本位置。旧索引、进度和书签备份仍保留。",presentation = prepared.presentation)
                 active.revokeRenderers()
-                owner = next; replacement = null
+                controller?.detach();controller=null;owner = next; replacement = null
                 installed = true
                 mutable.update { it.copy(reader = screen,busy = false,operation = "") }
                 active.closeSource() // no cancellable suspension after ownership leaves the old session
-                val books = withContext(Dispatchers.IO) { repository.db.contents() }
+                val books = withContext(Dispatchers.IO) { contents.summaries() }
                 mutable.update { it.copy(books = books) }
             } catch (cancel: CancellationException) { throw cancel }
             catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "编码切换失败；原正文仍保留") } }
@@ -276,11 +298,11 @@ class ReaderViewModel internal constructor(application: Application, private val
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { work() }
-                val books = withContext(Dispatchers.IO) { repository.db.contents() }
+                val books = withContext(Dispatchers.IO) { contents.summaries() }
                 mutable.update { it.copy(books = books) }
             } catch (e: Exception) { mutable.update { it.copy(error = e.message ?: "操作失败，已有数据已保留") } }
             finally { mutable.update { it.copy(busy = false, operation = "") } }
         }
     }
-    override fun onCleared() { saveJob?.cancel(); flushPosition(); owner?.let { it.revokeRenderers(); it.closeSource() }; owner = null; ++generation }
+    override fun onCleared() { saveJob?.cancel(); flushPosition(); owner?.let { it.revokeRenderers(); it.closeSource() };controller?.detach();controller=null; owner = null; ++generation }
 }

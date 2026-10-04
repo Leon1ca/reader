@@ -6,6 +6,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import com.localreader.app.formats.txt.TxtOpenedBook
+import com.localreader.app.formats.epub.*
 
 class LibraryOpenedBookFactory(private val repository: LibraryRepository) : OpenedBookFactory, TextReencoder {
     private suspend fun create(work: suspend () -> OpenedBook): OpenedBook {
@@ -15,7 +16,12 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
     }
     override suspend fun open(contentId: String): OpenedBook = create {
         val book = requireNotNull(repository.db.content(contentId)) { "书籍不存在" }
-        require(book.format == ContentFormat.TXT) { "此格式的阅读引擎尚未接入" }
+        if(book.format==ContentFormat.EPUB) {
+            val cache=repository.db.epubCache(book.id)
+            val source=EpubSource(repository.directory(book),cache)
+            try { return@create EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source) }
+            catch(error: Throwable) { source.close();throw error }
+        }
         val source = repository.engine(requireNotNull(repository.db.txt(book.id)))
         try {
             val coroutine = currentCoroutineContext()

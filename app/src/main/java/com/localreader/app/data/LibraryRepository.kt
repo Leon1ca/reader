@@ -5,15 +5,20 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.os.StatFs
 import com.localreader.app.core.*
+import com.localreader.app.formats.epub.*
+import com.localreader.app.data.importer.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-data class ImportResult(val name: String, val status: String, val bookId: String? = null)
 class ImportCancelled : Exception("导入已取消")
 
-class LibraryRepository(private val context: Context) {
+class LibraryRepository(private val context: Context) : ContentRepository {
     val db = LibraryDb(context)
     private val library = File(context.filesDir, "library").apply { mkdirs() }
     private val staging = File(context.filesDir, "import-staging").apply { mkdirs() }
@@ -39,88 +44,115 @@ class LibraryRepository(private val context: Context) {
         // Old index versions are retained as locator backups; active books are never auto-deleted.
         recovered = true
     }
+    override fun observeAll() = db.contentsRevision.map { summaries() }.distinctUntilChanged().flowOn(Dispatchers.IO)
+    override fun summaries() = db.contents()
+    override fun content(id: String) = db.content(id)
+    override fun updateMetadata(id: String,title: String,author: String) { db.setMetadata(id,title,author);db.notifyContentsChanged() }
+    fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}")
     fun directory(book: TxtRecord) = File(File(library, book.id), "versions/${book.version}")
     fun engine(book: TxtRecord) = TxtEngine(directory(book), book.version)
 
-    fun import(uri: Uri, cancelled: () -> Boolean = { false }): ImportResult = mutate { importLocked(uri,cancelled) }
-    private fun importLocked(uri: Uri, cancelled: () -> Boolean): ImportResult {
-        var name = "所选文件"
-        val task = File(staging, UUID.randomUUID().toString()).apply { mkdirs() }
-        var committed: File? = null
-        try {
-            db.writableDatabase // initialization must succeed before reading external content
-            var declaredSize: Long? = null
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
-                if (c.moveToFirst()) {
-                    val nameColumn = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameColumn >= 0) name = c.getString(nameColumn) ?: name
-                    val sizeColumn = c.getColumnIndex(OpenableColumns.SIZE)
-                    if (sizeColumn >= 0 && !c.isNull(sizeColumn)) declaredSize = c.getLong(sizeColumn)
+    /** The Android facade never retains permission or mutates the provider's original file. */
+    fun import(uri: Uri,cancelled: () -> Boolean = { false }): ImportResult {
+        var name="所选文件";var size: Long?=null
+        return try {
+            context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE),null,null,null)?.use { c ->
+                if(c.moveToFirst()) {
+                    val n=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(n>=0)name=c.getString(n) ?: name
+                    val z=c.getColumnIndex(OpenableColumns.SIZE);if(z>=0 && !c.isNull(z))size=c.getLong(z)
                 }
             }
-            val mime = context.contentResolver.getType(uri).orEmpty()
-            val extension = name.substringAfterLast('.', "").lowercase()
-            require(extension == "txt" || mime == "text/plain" || (extension.isEmpty() && mime.startsWith("text/"))) { "当前增量只支持 TXT；EPUB、MOBI、PDF 和漫画尚未实现" }
-            require((declaredSize ?: 1) <= TxtParser.MAX_BYTES) { "文件超过 128 MB 限制" }
-            val available = StatFs(staging.absolutePath).availableBytes
-            // Original copy + UTF-8 text (<= ~1.5x) + index; pathological blank-line files are stopped by the paragraph cap
-            // and by the streaming free-space checks, so a flat multiple is enough up front.
-            val needed = (declaredSize?.coerceAtLeast(0) ?: 1024 * 1024) * 4 + 8 * 1024 * 1024
-            require(available > needed) { "空间不足：预计需 ${needed / 1048576} MB，可用 ${available / 1048576} MB" }
-            val original = File(task, "original.txt")
-            val digest = MessageDigest.getInstance("SHA-256")
-            var copied = 0L
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(original).use { output ->
-                    val buffer = ByteArray(65536)
-                    while (true) {
-                        if (cancelled()) throw ImportCancelled()
-                        val count = input.read(buffer); if (count < 0) break
-                        copied += count
-                        require(copied <= TxtParser.MAX_BYTES) { "文件超过 128 MB 限制" }
-                        if (copied % (1024 * 1024) < buffer.size) require(StatFs(staging.absolutePath).availableBytes > copied * 4 + 8 * 1024 * 1024) { "空间不足，导入已停止" }
-                        digest.update(buffer, 0, count); output.write(buffer, 0, count)
-                    }
-                    output.fd.sync()
+            import(ImportSource(name,context.contentResolver.getType(uri).orEmpty(),size) {
+                context.contentResolver.openInputStream(uri) ?: error("文件不可读取，请通过系统文件选择器重新选择")
+            },cancelled)
+        } catch(e: Exception) { ImportResult(name,e.message?.take(180) ?: "文件不可读取") }
+    }
+    override fun import(source: ImportSource,cancelled: () -> Boolean): ImportResult = mutate { importLocked(source,cancelled) }
+    private fun importLocked(source: ImportSource,cancelled: () -> Boolean): ImportResult {
+        val name=source.name
+        val task=File(staging,UUID.randomUUID().toString()).apply { mkdirs() }
+        var committed: File?=null
+        try {
+            db.writableDatabase
+            val extension=name.substringAfterLast('.',"").lowercase()
+            val declaredEpub=extension=="epub" || source.mime=="application/epub+zip"
+            val limit=EpubLimits.FILE_BYTES
+            require((source.declaredBytes ?: 1)<=limit) { "文件超过 ${limit/1048576} MB 限制" }
+            val available=StatFs(staging.absolutePath).availableBytes
+            val needed=(source.declaredBytes?.coerceAtLeast(0) ?: 1024*1024)*4+8*1024*1024
+            require(available>needed) { "空间不足：预计需 ${needed/1048576} MB，可用 ${available/1048576} MB" }
+            var original=File(task,"original.pending")
+            val digest=MessageDigest.getInstance("SHA-256");var copied=0L
+            source.open().use { input -> FileOutputStream(original).use { output ->
+                val buffer=ByteArray(65536)
+                while(true) {
+                    if(cancelled())throw ImportCancelled()
+                    val count=input.read(buffer);if(count<0)break
+                    copied+=count;require(copied<=limit) { "文件超过 ${limit/1048576} MB 限制" }
+                    if(copied%(1024*1024)<buffer.size)require(StatFs(staging.absolutePath).availableBytes>copied*4+8*1024*1024) { "空间不足，导入已停止" }
+                    digest.update(buffer,0,count);output.write(buffer,0,count)
                 }
-            } ?: error("文件不可读取，请通过系统文件选择器重新选择")
-            require(copied > 0) { "文件为空" }
-            val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            db.byHash(hash)?.let { return ImportResult(name, "重复内容，已保留原进度与书签", it.id) }
-            val version = UUID.randomUUID().toString()
-            val guard: () -> Unit = {
-                if (cancelled()) throw ImportCancelled()
-                require(StatFs(staging.absolutePath).availableBytes > 8 * 1024 * 1024) { "空间不足，导入已停止" }
+                output.fd.sync()
+            } }
+            require(copied>0) { "文件为空" }
+            val hash=digest.digest().joinToString("") { "%02x".format(it) }
+            db.byHash(hash)?.let { return ImportResult(name,"重复内容，已保留原进度与书签",it.id) }
+            val guard: () -> Unit={
+                if(cancelled())throw ImportCancelled()
+                require(StatFs(staging.absolutePath).availableBytes>8*1024*1024) { "空间不足，导入已停止" }
             }
             guard()
-            val detected = TxtParser.detect(original, guard)
-            val parsed = TxtParser.build(original, File(task, "versions/$version"), detected, guard)
-            if (cancelled()) throw ImportCancelled()
-            val id = UUID.randomUUID().toString()
-            val book = TxtRecord(id, name.substringBeforeLast('.', name), "作者未知", hash, copied, System.currentTimeMillis(), 0,
-                parsed.encoding, version, parsed.paragraphs, parsed.totalCharacters, Locator.Text(version, 0, 0), 0, 16f, "white")
-            val destination = File(library, id)
-            check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" }; committed = destination
-            db.insert(book,originalName = name)
-            committed = null
-            return ImportResult(name, "导入成功 · ${parsed.encoding}", id)
-        } catch (e: Exception) {
-            val reason = when (e) {
+            val header=original.inputStream().use { input -> ByteArray(4).also { bytes -> var count=0;while(count<bytes.size) { val read=input.read(bytes,count,bytes.size-count);if(read<0)break;count+=read } } }
+            val epub=EpubImporter();val txt=TxtImporter()
+            val importer=when {
+                epub.accepts(name,source.mime,header) -> epub // magic wins over filename/MIME
+                !declaredEpub && txt.accepts(name,source.mime,header) -> txt
+                else -> error("请选择有效 TXT 或 EPUB 文件")
+            }
+            val renamed=File(task,if(importer is EpubImporter)"original.epub" else "original.txt")
+            check(original.renameTo(renamed));original=renamed
+            val prepared=importer.prepare(ImportTask(original,File(task,"versions"),hash,guard))
+            val id=UUID.randomUUID().toString()
+            val destination=File(library,id)
+            val result: String
+            when(prepared) {
+                is PreparedContent.Epub -> {
+                    val cache=prepared.cache
+                    guard();check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination
+                    val record=ContentRecord(id,ContentFormat.EPUB,cache.revision,cache.title,cache.author,hash,copied,System.currentTimeMillis(),0,cache.language,name)
+                    db.insertEpub(record,cache)
+                    result=if(cache.warnings.isEmpty())"导入成功 · EPUB" else "导入成功 · EPUB，${cache.warnings.size} 项资源已安全降级"
+                }
+                is PreparedContent.Text -> {
+                    val version=prepared.revision;val parsed=prepared.index
+                    guard()
+                    val book=TxtRecord(id,name.substringBeforeLast('.',name),"作者未知",hash,copied,System.currentTimeMillis(),0,
+                        parsed.encoding,version,parsed.paragraphs,parsed.totalCharacters,Locator.Text(version,0,0),0,16f,"white")
+                    check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination
+                    db.insert(book,originalName=name)
+                    result="导入成功 · ${parsed.encoding}"
+                }
+            }
+            committed=null;db.notifyContentsChanged()
+            return ImportResult(name,result,id)
+        } catch(e: Exception) {
+            val reason=when(e) {
                 is ImportCancelled -> "已取消"
                 is java.nio.charset.CharacterCodingException -> "文本编码无法识别；请先用文本编辑器另存为 UTF-8 后重试"
                 else -> e.message?.take(180) ?: "导入失败，请重新选择文件"
             }
-            return ImportResult(name, reason)
-        } finally { task.deleteRecursively(); committed?.deleteRecursively() }
+            return ImportResult(name,reason)
+        } finally { task.deleteRecursively();committed?.deleteRecursively() }
     }
 
     fun delete(book: ContentSummary) { delete(requireNotNull(db.content(book.id))) }
     fun delete(book: TxtRecord) { delete(requireNotNull(db.content(book.id))) }
-    fun delete(book: ContentRecord) = mutate { deleteLocked(book) }
+    override fun delete(book: ContentRecord) = mutate { deleteLocked(book) }
     private fun deleteLocked(book: ContentRecord) {
         // Delete metadata first: a failed file removal is an orphan cleaned on next startup, never a ghost book.
         db.delete(book.id)
         File(library, book.id).deleteRecursively()
+        db.notifyContentsChanged()
     }
     fun reencode(book: TxtRecord, encoding: String) { reencodePrepared(book, encoding) { Unit } }
     /** Validate/open the new source before the database switches; failure keeps the previous version active. */

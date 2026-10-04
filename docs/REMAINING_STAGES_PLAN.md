@@ -206,3 +206,6 @@ R2开始建立自建可共享对照集，R5完成后全量复跑。固定本机R
 - [ph-css官方项目/Apache2.0](https://github.com/phax/ph-css)：只作CSS parser替代评估，尚未纳入依赖。
 - [EPUB3.3字体混淆及包规范](https://www.w3.org/TR/epub-33/#sec-font-obfuscation)、[固定foliate FXL源码](https://raw.githubusercontent.com/readest/foliate-js/341dc63cda7ad26b31ada4ee905e40b5020da88a/fixed-layout.js)。
 - [Readest固定TXT转换参考](https://github.com/readest/readest/blob/8a56831af61841175b49cc2740bffcde57b470b0/apps/readest-app/src/utils/txt.ts#L899)、[本项目已锁定默认规则与许可](READEST_PARITY.md)、[字体证据](FONTS.md)。上游应用只读行为参考，原创适配/规则实现与MIT/OFL复用边界保留。
+
+
+R5实施细化：见 [R5_UI_IMPLEMENTATION_MAP.md](R5_UI_IMPLEMENTATION_MAP.md) 的76画板/UD/窗口档映射，以及 [R5_BACKDROP_SPEC.md](R5_BACKDROP_SPEC.md) 的父Window采样与Popup背景分层。静态覆盖和状态机已有scratch证据；Android真毛玻璃仍须前置native spike，不能以Modifier.blur替代。

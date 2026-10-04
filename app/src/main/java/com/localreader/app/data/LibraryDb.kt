@@ -7,10 +7,15 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.localreader.app.core.*
 import com.localreader.app.formats.txt.TxtReadingExtent
+import com.localreader.app.formats.epub.*
+import kotlinx.coroutines.flow.update
 
 /** One schema and one write path for every format. Bootstrap precedes Helper's automatic upgrade. */
 class LibraryDb(private val context: Context, private val migrationCheckpoint: (String) -> Unit = {}) : SQLiteOpenHelper(context,"library.db",null,4,LibraryBootstrap.preserveCorruption) {
     val preferencesRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val contentsRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    internal fun notifyContentsChanged() { contentsRevision.update { it+1 } }
+    private val epubPackages=object: LinkedHashMap<String,EpubCacheRecord>(3,0.75f,true) { override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String,EpubCacheRecord>)=size>2 }
     @Volatile private var initialized = false
     override fun getWritableDatabase(): SQLiteDatabase = open { super.getWritableDatabase() }
     override fun getReadableDatabase(): SQLiteDatabase = open { super.getReadableDatabase() }
@@ -81,6 +86,19 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     fun txtMetadata(id: String): TxtMetadata? = readableDatabase.rawQuery("SELECT * FROM txt_meta WHERE content_id=?",arrayOf(id)).use { if(it.moveToFirst()) TxtMetadata(it.string("encoding"),it.int("paragraphs"),it.long("characters")) else null }
     fun contents(): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id",null).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"))) } }
     fun byHash(hash: String): ContentRecord? = readableDatabase.rawQuery("SELECT * FROM contents WHERE hash=?",arrayOf(hash)).use { if(it.moveToFirst()) it.content() else null }
+    internal fun epubCache(id: String): EpubCacheRecord {
+        val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB)
+        val key="$id:${content.revision}"
+        return synchronized(epubPackages) { epubPackages[key] ?: EpubCache.read(java.io.File(context.filesDir,"library/$id/versions/${content.revision}")).also { check(it.revision==content.revision);epubPackages[key]=it } }
+    }
+    fun insertEpub(record: ContentRecord,cache: EpubCacheRecord) = transaction { db ->
+        require(record.format==ContentFormat.EPUB && record.revision==cache.revision)
+        db.insertOrThrow("contents",null,ContentValues().apply { put("id",record.id);put("format","epub");put("revision",record.revision);put("title",record.title);put("author",record.author);put("hash",record.hash);put("bytes",record.bytes);put("imported_at",record.imported);put("last_read_at",0);put("original_name",record.originalName);put("language",cache.language);put("cover_path",cache.coverFile?.let { "versions/${cache.revision}/$it" }) })
+        db.insertOrThrow("epub_meta",null,ContentValues().apply { put("content_id",record.id);put("spine_count",cache.sections.size);put("package_revision",cache.revision);put("sanitizer_version",EpubSanitizer.VERSION);put("layout",cache.layout) })
+        val first=cache.sections.first();val locator=Locator.Epub(cache.revision,0,0,elementId=if(first.characters==0)first.elements.keys.firstOrNull() else null)
+        db.insertOrThrow("positions",null,ContentValues().apply { put("content_id",record.id);put("locator_json",LocatorCodec.encode(locator));put("fraction",0.0);put("furthest_json",ReadingExtentCodec.encode(EpubReadingExtent(cache.revision,0,0)));put("furthest_fraction",0.0);put("updated_at",0) })
+        db.insertOrThrow("reading_settings",null,ContentValues().apply { put("content_id",record.id) })
+    }
     fun retainedVersions(id: String): Set<String> = readableDatabase.rawQuery("SELECT version FROM locator_backups WHERE content_id=?",arrayOf(id)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     /** Explicit TXT projection for the encoding/import pipeline; general consumers use content/contents. */
     fun txt(id: String): TxtRecord? = transaction { db ->
@@ -108,7 +126,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         put("fraction",(current.sourceOffset.toDouble()/(chars-1).coerceAtLeast(1)).coerceIn(0.0,1.0));put("furthest_fraction",(extent.sourceOffset.toDouble()/(chars-1).coerceAtLeast(1)).coerceIn(0.0,1.0))
     }
     fun delete(id: String) = transaction { it.delete("contents","id=?",arrayOf(id)) }
-    fun setMetadata(id: String,title: String,author: String) { writableDatabase.update("contents",ContentValues().apply { put("title",title);put("author",author) },"id=?",arrayOf(id)) }
+    fun setMetadata(id: String,title: String,author: String) = transaction { it.update("contents",ContentValues().apply { put("title",title);put("author",author) },"id=?",arrayOf(id));Unit }
     fun savePosition(id: String,locator: Locator.Text,furthest: Long = locator.sourceOffset,time: Long = System.currentTimeMillis()) = transaction { db ->
         val meta = requireNotNull(txtMetadata(id)); check(content(id)?.revision == locator.version)
         val old = txt(id) ?: error("书籍不存在")
@@ -118,7 +136,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     fun setStyle(id: String,font: Float,theme: String) { SqliteReadingStore(this).patchRules(id,requireNotNull(content(id)).revision,ContentFormat.TXT,RulesScope.BOOK,RulesPatch(fontSize=FieldUpdate.Set(font),theme=FieldUpdate.Set(theme))) }
     fun setFlow(id: String,flow: String) { SqliteReadingStore(this).patchRules(id,requireNotNull(content(id)).revision,ContentFormat.TXT,RulesScope.BOOK,RulesPatch(flow=FieldUpdate.Set(ReaderFlow.entries.first { it.wire == flow }))) }
     fun bookmarks(id: String): List<Bookmark> = readableDatabase.rawQuery("SELECT * FROM bookmarks WHERE content_id=? ORDER BY created DESC,id DESC",arrayOf(id)).use { c -> buildList { while(c.moveToNext()) add(Bookmark(c.long("id"),id,StoredLocatorCodec.decode(c.string("locator_json")),c.string("excerpt"),c.long("created"))) } }
-    fun addBookmark(id: String,locator: Locator,excerpt: String): Boolean = writableDatabase.insertWithOnConflict("bookmarks",null,ContentValues().apply { put("content_id",id);put("locator_json",LocatorCodec.encode(locator));put("locator_key",LocatorCodec.key(locator));put("fallback_fraction",if(locator is Locator.Text) locator.fallbackFraction else 0.0);put("excerpt",LocatorCodec.safePrefix(excerpt,120));put("created",System.currentTimeMillis()) },SQLiteDatabase.CONFLICT_IGNORE) != -1L
+    fun addBookmark(id: String,locator: Locator,excerpt: String): Boolean = writableDatabase.insertWithOnConflict("bookmarks",null,ContentValues().apply { put("content_id",id);put("locator_json",LocatorCodec.encode(locator));put("locator_key",LocatorCodec.key(locator));put("fallback_fraction",when(locator) { is Locator.Text -> locator.fallbackFraction;is Locator.Epub -> locator.fallbackFraction;else -> 0.0 });put("excerpt",LocatorCodec.safePrefix(excerpt,120));put("created",System.currentTimeMillis()) },SQLiteDatabase.CONFLICT_IGNORE) != -1L
     fun deleteBookmark(id: Long,contentId: String) { writableDatabase.delete("bookmarks","id=? AND content_id=?",arrayOf(id.toString(),contentId)) }
     fun reindex(id: String,encoding: String,version: String,paragraphs: Int,characters: Long) = transaction { db ->
         val old = requireNotNull(txt(id)); val anchors = bookmarks(id)

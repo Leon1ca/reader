@@ -92,4 +92,13 @@ class CoreContractTest {
         assertTrue(image.element);assertEquals("image-1",publication.target(image).blockId)
         assertTrue(publication.section(0).html.contains("<table>"));assertTrue(publication.section(0).html.contains("<figcaption>"))
     }
+    @Test fun pageCommandAckChangesCommandIdentityWithoutChangingLayoutEpoch() {
+        val gate=RendererEventGate("epub","revision")
+        val opened=gate.command();assertTrue(gate.ready(opened))
+        val page=gate.command(reflow=false)
+        assertEquals(opened.layoutEpoch,page.layoutEpoch);assertEquals(opened.commandId+1,page.commandId)
+        assertFalse(gate.ready(opened));assertTrue(gate.ready(page))
+        assertEquals(page.layoutEpoch+1,gate.command().layoutEpoch)
+    }
+
 }
