@@ -61,10 +61,11 @@ class ReadingUiTest {
         waitFor { try { compose.onNode(card).assertExists();true } catch(_: AssertionError) { false } }
         compose.onNode(card).performClick()
     }
-    private fun ready() {
+    private fun ready(dismissEnd: Boolean=true) {
         waitFor { var exists = false; compose.runOnUiThread { exists = webView(compose.activity.window.decorView) != null }; exists }
         waitFor { evaluate("Boolean(window.readerHost?.diagnostics().loaded && window.readerHost?.diagnostics().anchorGeometry?.visible)") == "true" }
         waitFor { try { compose.onNodeWithText("添加书签").assertIsEnabled(); true } catch (_: AssertionError) { false } }
+        if(dismissEnd)try { compose.onNodeWithText("已到本书末尾").assertExists();compose.onNodeWithText("继续阅读").performClick() } catch(_: AssertionError) { /* This workflow may be on a non-final page. */ }
     }
     @Test fun existingBookDirectoryStyleBookmarkCloseReopenAndEncodingUseProductionChain() {
         compose.runOnUiThread { readerModel = ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
@@ -200,6 +201,39 @@ class ReadingUiTest {
             id?.let { repository.content(it)?.let(repository::delete) }
             target.contentResolver.delete(uri,null,null)
         }
+    }
+
+    @Test fun actualEndPromptOnlyExplicitConfirmationFinishesAndUndoRestoresContinueReading() {
+        compose.runOnUiThread { readerModel=ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
+        val target=InstrumentationRegistry.getInstrumentation().targetContext
+        val repository=(target.applicationContext as ReaderApplication).repository
+        val nonce=UUID.randomUUID().toString();val uri=Uri.parse("content://com.localreader.app.test.fixtures/end-ui-$nonce.txt")
+        target.contentResolver.openOutputStream(uri,"wt")!!.use { it.write("Only one visible paragraph $nonce.".toByteArray()) }
+        var id: String?=null
+        try {
+            waitFor { !model().state.value.loading };compose.runOnUiThread { model().importFiles(listOf(uri)) }
+            waitFor { !model().state.value.busy && model().state.value.results.isNotEmpty() };id=requireNotNull(model().state.value.results.single().bookId)
+            val record=requireNotNull(repository.content(requireNotNull(id)));compose.onNodeWithText("完成").performClick();openFromShelf(record.title);ready(false)
+            waitFor { try { compose.onNodeWithText("已到本书末尾").assertExists();true } catch(_: AssertionError) { false } }
+            assertNull(repository.content(record.id)!!.finishedAt)
+            val saved=requireNotNull(model().state.value.reader).snapshot.current
+            val extent=requireNotNull(model().state.value.reader).snapshot.furthest
+            compose.onNodeWithText("继续阅读").performClick()
+            compose.onNodeWithText("设置").performClick();compose.onNodeWithText("增大").performClick();compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() };ready(false)
+            compose.onNodeWithText("已到本书末尾").assertDoesNotExist();assertNull(repository.content(record.id)!!.finishedAt)
+            assertEquals(saved,requireNotNull(model().state.value.reader).snapshot.current);assertEquals(extent,requireNotNull(model().state.value.reader).snapshot.furthest)
+            compose.onNodeWithText("返回").performClick();waitFor { model().state.value.reader==null };openFromShelf(record.title);ready(false)
+            waitFor { try { compose.onNodeWithText("已到本书末尾").assertExists();true } catch(_: AssertionError) { false } }
+            compose.onNodeWithText("标记读完").performClick();waitFor { repository.content(record.id)!!.finishedAt!=null }
+            assertEquals(saved,requireNotNull(model().state.value.reader).snapshot.current);assertEquals(extent,requireNotNull(model().state.value.reader).snapshot.furthest)
+            compose.onNodeWithText("返回").performClick();waitFor { model().state.value.reader==null }
+            waitFor { model().shelfController.state.value.continueReading.none { it.id==record.id } }
+            openFromShelf(record.title);ready(false);compose.onNodeWithText("已到本书末尾").assertDoesNotExist()
+            compose.onNodeWithText("设置").performClick();compose.onNodeWithText("撤销读完").performClick()
+            waitFor { repository.content(record.id)!!.finishedAt==null };compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithText("返回").performClick();waitFor { model().state.value.reader==null }
+            waitFor { model().shelfController.state.value.continueReading.any { it.id==record.id } }
+        } finally { compose.runOnUiThread { model().closeReader() };id?.let { repository.content(it)?.let(repository::delete) };target.contentResolver.delete(uri,null,null) }
     }
 
 }

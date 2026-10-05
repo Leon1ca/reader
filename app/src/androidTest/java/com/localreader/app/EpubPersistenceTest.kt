@@ -55,7 +55,7 @@ class EpubPersistenceTest {
         val result=repository.import(fixture(bytes,suffix));assertNotNull(result.status,result.bookId);return requireNotNull(result.bookId)
     }
     private fun xml(body: String)="<?xml version='1.0' encoding='UTF-8'?><html xmlns='http://www.w3.org/1999/xhtml'><head><link rel='stylesheet' href='book.css'/></head><body>$body</body></html>"
-    private fun epub(font: ByteArray?=null,algorithm: String?=null,ncx: Boolean=false,nav: Boolean=true): ByteArray {
+    private fun epub(font: ByteArray?=null,algorithm: String?=null,ncx: Boolean=false,nav: Boolean=true,gallery: Int=0): ByteArray {
         val identifier=if(algorithm?.contains("adobe")==true)"urn:uuid:12345678-1234-5678-1234-567812345678" else "\u00a0 urn:test: raw-key \u00a0"
         val output=ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
@@ -69,7 +69,7 @@ class EpubPersistenceTest {
             text("OPS/book.opf","""<package xmlns="http://www.idpf.org/2007/opf" version="${if(ncx)"2.0" else "3.0"}" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">$identifier</dc:identifier><dc:title>原创 EPUB 闭环</dc:title><dc:creator>测试作者</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest><item id="a" href="first.xhtml" media-type="application/xhtml+xml"/><item id="b" href="second.xhtml" media-type="application/xhtml+xml"/><item id="c" href="images.xhtml" media-type="application/xhtml+xml"/><item id="css" href="book.css" media-type="text/css"/><item id="image" href="image.svg" media-type="image/svg+xml" properties="cover-image"/>${if(nav)"<item id='nav' href='nav.xhtml' media-type='application/xhtml+xml' properties='nav'/>" else ""}${if(ncx)"<item id='ncx' href='toc.ncx' media-type='application/x-dtbncx+xml'/>" else ""}${if(font!=null)"<item id='font' href='font.ttf' media-type='font/ttf'/>" else ""}</manifest><spine ${if(ncx)"toc='ncx'" else ""}><itemref idref="a"/><itemref idref="b"/><itemref idref="c"/></spine></package>""")
             text("OPS/first.xhtml",xml("\n    <p id='same'>中文😀 English 123 <em>italic</em>&#160;尾</p>\n    <p>正文第一章。</p><script src='evil'/><p id='after'>自闭合之后的安全正文</p>"))
             text("OPS/second.xhtml",xml("<h1 id='same'>第二章</h1><p class='semantic-font'>语义<span class='reset-font'>默认</span><span class='angled-font'>倾斜</span><span class='priority-font' style='font:italic 700 18px PackageFont!important;font-weight:400'>重要</span></p>"+"<p>可重排正文 English 123 汉字段落😀。</p>".repeat(80)+"<table><tr><td id='cell'>Table cell</td></tr></table>"))
-            text("OPS/images.xhtml",xml("<img id='one' src='image.svg'/><img id='two' src='image.svg'/><a href='second.xhtml#same'>章节链接</a>"))
+            text("OPS/images.xhtml",xml(if(gallery>0)(0 until gallery).joinToString("") { "<img id='gallery-$it' src='image.svg' style='width:12px;height:12px'/>" } else "<img id='one' src='image.svg'/><img id='two' src='image.svg'/><a href='second.xhtml#same'>章节链接</a>"))
             text("OPS/image.svg","<s:svg xmlns:s='http://www.w3.org/2000/svg' xmlns:l='http://www.w3.org/1999/xlink' viewBox='0 0 480 240'><s:defs><s:rect id='tile' width='480' height='240' fill='#66a'/></s:defs><s:use l:href='#tile'/><s:text x='20' y='100'>LOCAL IMAGE</s:text></s:svg>")
             text("OPS/book.css",(if(font!=null)"@font-face{font-family:PackageFont;src:local('NoExternal'),url('font.ttf')}body{font-family:PackageFont}" else "")+"p{color:rgb(255 0 0);width:calc(100% - 2em);margin:1em 0}em{font-style:italic}.semantic-font{font:italic 700 18px/1.4 PackageFont}.reset-font{font:18px PackageFont}.angled-font{font:oblique 10deg 600 18px/1.4 PackageFont}")
             if(nav)text("OPS/nav.xhtml","<html xmlns='http://www.w3.org/1999/xhtml' xmlns:ops='http://www.idpf.org/2007/ops'><body><nav ops:type='toc'><ol><li><a href='first.xhtml#same'>第一章</a><ol><li><a href='second.xhtml#same'>第二章</a><ol><li><a href='second.xhtml#cell'>表格</a></li></ol></li></ol></li><li><a href='images.xhtml#one'>图片</a></li></ol></nav></body></html>")
@@ -202,6 +202,66 @@ class EpubPersistenceTest {
             } finally { scenario.onActivity { if(created)adapter.close();controller.detach() };book.close() }
         }
     }
+    @Test fun textViewportMapsVisibleOriginalBlocksEmptyCaretAndLastPageWithoutAdvancingExtent() {
+        val text="Chapter 1 Start\n"+"Original English paragraph 中文😀 ends.\n".repeat(100)+"Chapter 2 End\nLast paragraph.\n\n"
+        val id=import(text.toByteArray(),"txt");val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) };val store=SqliteReadingStore(repository.db)
+        val snapshot=store.loadSnapshot(id);val owner=ReadingSessionOwner(book,1,store,snapshot)
+        val controller=ReaderController(1,{ owner.bind(it) },{ event -> if(event is RendererEvent.Position)owner.position(event.locator,event.intent==IntentCause.UserNavigation,System.currentTimeMillis()) else true },chapterEnd=book::paginationChapterEnd)
+        lateinit var surface: ReaderSurface
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            fun located() { waitUntil { controller.state.value.phase in listOf(ReaderPhase.READY,ReaderPhase.FAILED) };assertEquals(controller.state.value.message,ReaderPhase.READY,controller.state.value.phase) }
+            try {
+                val initial=owner.state()
+                scenario.onActivity { surface=ReaderSurface(it);surface.bind(controller);it.setContentView(surface);surface.present(initial) };located()
+                val viewport=requireNotNull(controller.state.value.viewport);val position=requireNotNull(controller.state.value.position)
+                assertTrue(viewport.contains(position));assertFalse(viewport.atEnd);assertTrue(viewport.visibleRanges.any { it.start is Locator.Text });assertTrue(requireNotNull(controller.state.value.progress).pagesEstimated)
+                assertTrue(store.addBookmark(id,book.revision,position,"visible original position"));owner.bookmarks(store.bookmarks(id));val withBookmark=owner.state();scenario.onActivity { surface.present(withBookmark) }
+                assertEquals(1,controller.state.value.currentPageBookmarks.size)
+                val chapter=book.toc().last();val target=requireNotNull(book.locatorForToc(chapter.id));val jump=owner.state(target,1)
+                scenario.onActivity { surface.present(jump) };located()
+                assertTrue(requireNotNull(controller.state.value.viewport).atEnd);assertTrue(controller.state.value.endPrompt)
+                assertEquals(snapshot.furthest,owner.snapshot.furthest);assertTrue(book.fractionOf(controller.state.value.position!!)<1.0)
+                assertTrue(controller.state.value.currentPageBookmarks.isEmpty());controller.dismissEnd()
+                owner.rules(owner.snapshot.rules.copy(fontSize=24f,flow=ReaderFlow.SCROLLED));val reflow=owner.state(target,1)
+                scenario.onActivity { surface.present(reflow) };located()
+                val end=requireNotNull(controller.state.value.viewport);assertTrue(end.atEnd);assertFalse(controller.state.value.endPrompt);assertNotEquals(viewport.layoutSig,end.layoutSig);assertTrue(requireNotNull(controller.state.value.progress).pagesEstimated)
+                assertTrue(end.visiblePoints.isNotEmpty());assertTrue(end.visiblePoints.all { end.contains(it) });owner.flush();assertNull(repository.content(id)!!.finishedAt)
+            } finally { scenario.onActivity { surface.close();controller.detach();owner.revokeRenderers();owner.closeSource() } }
+        }
+    }
+    @Test fun denseRubyAndHiddenInlineRunsPublishExactCurrentPageMembership() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            for(ruby in listOf(true,false)) {
+                val unit=if(ruby)"<ruby><span>字</span><rt><span>zi</span></rt></ruby>" else "<span>A</span><span style='display:none'>H</span><span>B</span>"
+                val id=import(searchEpub(listOf("<p style='font:8px serif!important;line-height:2'>${unit.repeat(600)}</p>")))
+                val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) }
+                val viewport=AtomicReference<ReadingViewport?>();val error=AtomicReference<String?>();lateinit var adapter: WebReaderAdapter
+                try {
+                    scenario.onActivity { activity -> adapter=WebReaderAdapter(activity) { event -> when(event) { is RendererEvent.Position -> viewport.set(event.viewport);is RendererEvent.Error -> error.set(event.message);else -> Unit } };activity.setContentView(adapter.view);adapter.open(book.publication,Locator.Epub(book.revision,0,0),ReaderRules()) }
+                    waitUntil { viewport.get()!=null || error.get()!=null };assertNull(error.get())
+                    val actual=requireNotNull(viewport.get())
+                    for(offset in 0 until 1800)assertEquals("ruby=$ruby source offset=$offset",ruby || offset%3!=1,actual.contains(Locator.Epub(book.revision,0,offset)))
+                    if(!ruby)assertTrue(actual.visibleRanges.size>256)
+                } finally { scenario.onActivity { adapter.close() };book.close() }
+            }
+        }
+    }
+    @Test fun denseImageOnlyPageRetainsEveryDistinctElementBookmark() {
+        val id=import(epub(gallery=300));val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) }
+        val elements=repository.db.epubCache(id).sections[2].elements.keys.map { requireNotNull(book.publication.locator(RendererAnchor.Element(2,it))) }
+        assertEquals(300,elements.size)
+        val viewport=AtomicReference<ReadingViewport?>();val error=AtomicReference<String?>();lateinit var adapter: WebReaderAdapter
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity -> adapter=WebReaderAdapter(activity) { event -> when(event) { is RendererEvent.Position -> viewport.set(event.viewport);is RendererEvent.Error -> error.set(event.message);else -> Unit } };activity.setContentView(adapter.view);adapter.open(book.publication,elements.first(),ReaderRules()) }
+                waitUntil { viewport.get()!=null || error.get()!=null };assertNull(error.get())
+                val actual=requireNotNull(viewport.get());assertEquals(300,actual.visibleElements.size);assertTrue(elements.all(actual::contains))
+                val store=SqliteReadingStore(repository.db)
+                for((index,element) in elements.withIndex())assertTrue(store.addBookmark(id,book.revision,element,"图片 $index"))
+                assertEquals(300,store.bookmarks(id).size);assertTrue(store.bookmarks(id).all { actual.contains(it.locator) })
+            } finally { scenario.onActivity { adapter.close() };book.close() }
+        }
+    }
     private fun waitUntil(timeout: Long=16000,predicate: () -> Boolean) {
         val end=System.currentTimeMillis()+timeout
         while(!predicate()) { if(System.currentTimeMillis()>end)throw AssertionError("EPUB runtime condition timed out");Thread.sleep(30) }
@@ -218,7 +278,9 @@ class EpubPersistenceTest {
             }
             try {
                 scenario.onActivity { activity -> adapter=WebReaderAdapter(activity) { event -> when(event) {
-                    is RendererEvent.Position -> { position.set(event);positionCount.incrementAndGet() }
+                    is RendererEvent.Position -> {
+                        position.set(event);positionCount.incrementAndGet()
+                    }
                     is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> notice.set(event.message)
                     is RendererEvent.Error -> error.set(event.message)
@@ -230,13 +292,18 @@ class EpubPersistenceTest {
                 val target=Locator.Epub(book.revision,1,3)
                 position.set(null);scenario.onActivity { adapter.goTo(target) };waitUntil { (position.get()?.locator as? Locator.Epub)?.spine==1 || error.get()!=null };assertNull(error.get());assertEquals(3,(position.get()!!.locator as Locator.Epub).offset);assertSemanticFont()
                 val epoch=diagnostics().getInt("layoutEpoch")
-                val beforePages=positionCount.get();position.set(null);scenario.onActivity { adapter.next();adapter.next();adapter.prev() };waitUntil { positionCount.get()>=beforePages+3 && diagnostics().getInt("commandId")>=5 || error.get()!=null };assertNull(error.get());assertEquals(epoch,diagnostics().getInt("layoutEpoch"));assertEquals(IntentCause.UserNavigation,position.get()!!.intent);assertTrue(diagnostics().getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(diagnostics().getJSONObject("anchorGeometry").getDouble("width")>0.1)
+                val beforePages=positionCount.get();position.set(null);scenario.onActivity { adapter.next();adapter.next();adapter.prev() };waitUntil { positionCount.get()>=beforePages+3 && diagnostics().getInt("commandId")>=5 || error.get()!=null };assertNull(error.get());assertEquals(epoch,diagnostics().getInt("layoutEpoch"));assertEquals(IntentCause.UserNavigation,position.get()!!.intent)
+                val pagedViewport=requireNotNull(position.get()!!.viewport);assertEquals(book.revision,pagedViewport.sourceRevision);assertTrue(pagedViewport.contains(position.get()!!.locator));assertTrue(pagedViewport.samples.isNotEmpty());assertTrue(pagedViewport.visibleRanges.isNotEmpty());assertTrue(pagedViewport.samples.all { it.page in 1..it.pages })
+                assertTrue(diagnostics().getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(diagnostics().getJSONObject("anchorGeometry").getDouble("width")>0.1)
                 position.set(null);scenario.onActivity { adapter.setRules(ReaderRules(fontSize=24f,flow=ReaderFlow.PAGINATED),target) };waitUntil { position.get()!=null || error.get()!=null };assertNull(error.get());assertTrue(diagnostics().getJSONObject("anchorGeometry").getBoolean("visible"));assertEquals(IntentCause.Reflow,position.get()!!.intent)
+                val beforeCustom=requireNotNull(position.get()!!.viewport);assertTrue(beforeCustom.contains(position.get()!!.locator));assertTrue(beforeCustom.samples.all { !it.estimated })
                 val oldUrl=adapter.currentUrl
                 position.set(null);scenario.onActivity { adapter.setRules(ReaderRules(fontSize=24f,flow=ReaderFlow.PAGINATED,epubStyleMode="CUSTOM"),target) };waitUntil { position.get()!=null || error.get()!=null };assertNull(error.get());assertNotEquals(oldUrl,adapter.currentUrl);assertSemanticFont()
+                assertNotEquals(beforeCustom.layoutSig,requireNotNull(position.get()!!.viewport).layoutSig)
                 assertEquals("\"rgb(39, 44, 40)\"",evaluate("getComputedStyle(document.getElementById('renderer').getContents().find(x=>x.index===1).doc.querySelector('p')).color"))
                 val image=(book.publication as EpubPublication).record.sections[2].elements.keys.first()
                 position.set(null);scenario.onActivity { adapter.goTo(Locator.Epub(book.revision,2,0,elementId=image)) };waitUntil { (position.get()?.locator as? Locator.Epub)?.elementId==image || error.get()!=null };assertNull(error.get());assertTrue(diagnostics().getJSONObject("anchorGeometry").getBoolean("visible"))
+                assertTrue(requireNotNull(position.get()!!.viewport).contains(position.get()!!.locator));assertTrue(requireNotNull(position.get()!!.viewport).visibleElements.any { (it as? Locator.Epub)?.elementId==image })
                 assertTrue(adapter.cachedResourceBytes<=4*1024*1024)
                 val badId=import(epub(byteArrayOf(0,1,0,0,0,0,0,0,0,0,0,0)))
                 val bad=runBlocking { LibraryOpenedBookFactory(repository).open(badId) };badFontBook=bad
@@ -441,14 +508,18 @@ class EpubPersistenceTest {
                 val result=AtomicReference<String?>();scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify((()=>{const d=readerHost.diagnostics(),r=document.querySelector('foliate-fxl'),v=r.getBoundingClientRect();return {...d,viewport:{width:innerWidth,height:innerHeight,left:v.left,top:v.top,right:v.right,bottom:v.bottom},scroll:{x:r.scrollLeft,y:r.scrollTop,width:r.scrollWidth,height:r.scrollHeight,clientWidth:r.clientWidth,clientHeight:r.clientHeight},frames:r.getContents().map(c=>{const f=c.doc.defaultView.frameElement,b=f.getBoundingClientRect();return {page:c.index,width:f.clientWidth,height:f.clientHeight,left:b.left,top:b.top,right:b.right,bottom:b.bottom}})}})())") { result.set(it) } };waitUntil { result.get()!=null }
                 return JSONObject(org.json.JSONTokener(result.get()).nextValue() as String)
             }
-            fun located(page: Int) { waitUntil { (current.get()?.locator as? Locator.Page)?.page==page || error.get()!=null };val d=diagnostics();assertNull(d.toString(),error.get());assertTrue(d.toString(),d.getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(d.toString(),d.getInt("allocatedFrames")<=4);assertTrue(d.getJSONArray("contents").length()<=4) }
+            fun located(page: Int,expectedRevision: String=book.revision) { waitUntil { (current.get()?.locator as? Locator.Page)?.page==page || error.get()!=null };val d=diagnostics();assertNull(d.toString(),error.get());assertTrue(d.toString(),d.getJSONObject("anchorGeometry").getBoolean("visible"));assertTrue(d.toString(),d.getInt("allocatedFrames")<=4);assertTrue(d.getJSONArray("contents").length()<=4)
+                val viewport=requireNotNull(current.get()!!.viewport);assertEquals(expectedRevision,viewport.sourceRevision);assertTrue(viewport.contains(current.get()!!.locator));assertTrue(viewport.visiblePages.size in 1..4);assertTrue(viewport.samples.all { !it.estimated && it.pages==1 });assertEquals(d.getBoolean("atEnd"),viewport.atEnd)
+            }
             try {
                 val rules=ReaderRules(flow=ReaderFlow.PAGINATED,spreadPreference="AUTO")
                 scenario.onActivity { activity -> adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(book.publication,Locator.Page(book.revision,17,0.0,0.0),rules) }
                 located(17)
                 for(page in 0 until 30) { current.set(null);scenario.onActivity { adapter.goTo(Locator.Page(book.revision,page,0.0,0.0)) };located(page) }
-                assertEquals(29,(current.get()!!.locator as Locator.Page).page)
-                current.set(null);scenario.onActivity { adapter.prev() };located(28)
+                assertEquals(29,(current.get()!!.locator as Locator.Page).page);assertTrue(requireNotNull(current.get()!!.viewport).atEnd)
+                current.set(null);scenario.onActivity { adapter.setRules(rules.copy(fxlZoom="2"),Locator.Page(book.revision,29,.25,.5)) };located(29)
+                assertTrue(requireNotNull(current.get()!!.viewport).atEnd);assertTrue(book.fractionOf(current.get()!!.locator)<1.0)
+                current.set(null);scenario.onActivity { adapter.setRules(rules,Locator.Page(book.revision,28,0.0,0.0)) };located(28);assertFalse(requireNotNull(current.get()!!.viewport).atEnd)
                 val target=Locator.Page(book.revision,12,.25,.5)
                 current.set(null);scenario.onActivity { adapter.setRules(rules.copy(flow=ReaderFlow.SCROLLED,fxlZoom="2"),target) };located(12)
                 var position=current.get()!!.locator as Locator.Page;assertEquals(.25,position.x,.02);assertEquals(.5,position.y,.02)
@@ -466,7 +537,7 @@ class EpubPersistenceTest {
                 runBlocking { LibraryOpenedBookFactory(repository).open(svgId) }.use { svgBook ->
                     val specification=requireNotNull(svgBook.publication.fixedLayout).pages.first()
                     assertEquals(700.0,specification.width,0.0);assertEquals(1100.0,specification.height,0.0)
-                    current.set(null);scenario.onActivity { activity -> adapter.close();adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(svgBook.publication,Locator.Page(svgBook.revision,0,0.0,0.0),rules) };located(0)
+                    current.set(null);scenario.onActivity { activity -> adapter.close();adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(svgBook.publication,Locator.Page(svgBook.revision,0,0.0,0.0),rules) };located(0,svgBook.revision)
                     val result=AtomicReference<String?>()
                     scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify((()=>{const d=document.querySelector('foliate-fxl').getContents()[0].doc,s=d.querySelector('svg'),r=s.getBoundingClientRect();return {kind:s.constructor.name,x:r.x,y:r.y,width:r.width,height:r.height,image:d.querySelector('svg image').getBBox().width,rect:d.querySelector('svg rect')?{kind:d.querySelector('svg rect').constructor.name,width:d.querySelector('svg rect').getBBox().width,height:d.querySelector('svg rect').getBBox().height,fill:d.defaultView.getComputedStyle(d.querySelector('svg rect')).fill}:null,text:s.textContent}})())") { result.set(it) } }
                     waitUntil { result.get()!=null };val svg=JSONObject(org.json.JSONTokener(result.get()).nextValue() as String)
@@ -482,7 +553,7 @@ class EpubPersistenceTest {
                         assertEquals(1,requireNotNull(single.publication.fixedLayout).pages.size)
                         current.set(null)
                         scenario.onActivity { activity -> adapter.close();adapter=WebReaderAdapter(activity,listener);activity.setContentView(adapter.view);adapter.open(single.publication,Locator.Page(single.revision,0,0.0,0.0),rules.copy(spreadPreference="AUTO")) }
-                        located(0)
+                        located(0,single.revision)
                         val boundary=diagnostics()
                         assertEquals(boundary.toString(),2,boundary.getInt("allocatedFrames"))
                         assertEquals(boundary.toString(),1,boundary.getJSONArray("contents").length())

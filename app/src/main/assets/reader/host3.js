@@ -1,3 +1,4 @@
+import {textIntervals,mergeIntervals,visibleFrame,fontGeometry,compactSignature} from './viewport.js'
 // Trusted fixed-layout protocol-2 host. Content frames are inert and receive no native port.
 const nativeFeatures=Array.prototype.at && Array.prototype.findLastIndex && globalThis.ResizeObserver && globalThis.CSSStyleSheet?.prototype.replaceSync
 const base=new URL('./',location.href),identity={
@@ -5,6 +6,7 @@ const base=new URL('./',location.href),identity={
 }
 let renderer=document.getElementById('renderer'),closed=false,opening=true,commandId=0,epoch=0,latest=0,deadline=0,phase='boot',intentToken='',intentCause='Restore',userToken='',userUntil=0,chain=Promise.resolve(),descriptor,rules,lastTarget,reportTimer
 const stabilitySamples=[],events=[],superseded=Symbol('superseded'),validated=new WeakSet(),fontWarned=new WeakSet(),pointers=new Map()
+let paginationBase=''
 let gesture,zooming=false,zoom=1,lastTap=0,viewportW=0,viewportH=0,gestureTimer
 function syncViewport(){
     const w=visualViewport?.width??innerWidth,h=visualViewport?.height??innerHeight;
@@ -18,6 +20,7 @@ function syncViewport(){
 syncViewport()
 function emit(type,payload={
 }){
+    if(type==='relocated'){try{payload.viewport=readingViewport()}catch(error){emit('error',{message:String(error.message)});return}}
     if(closed)return;
     const value={
         protocol:2,...identity,layoutEpoch:epoch,commandId,intentToken,intentCause,type,...payload
@@ -77,7 +80,13 @@ function position(){
 }
 function endState() {
     const visible=boxes(),last=visible.find(page=>page.index===descriptor?.pages.length-1),view=renderer.getBoundingClientRect()
-    return {atStart:visible.some(page=>page.index===0&&page.rect.top>=view.top-.5),atEnd:Boolean(last&&last.rect.bottom<=view.bottom+.5&&last.rect.right<=view.right+.5&&last.rect.left>=view.left-.5)}
+    return {atStart:visible.some(page=>page.index===0&&page.rect.top>=view.top-.5),atEnd:Boolean(last)}
+}
+function readingViewport() {
+    const visible=boxes().sort((a,b)=>a.index-b.index),current=visible[0]?.index
+    const rect=renderer.getBoundingClientRect()
+    return {base:paginationBase,signature:compactSignature([rect.width,rect.height,renderer.getAttribute('flow'),renderer.getAttribute('zoom')]),currentSection:current,
+        samples:visible.map(x=>({section:x.index,page:1,pages:1,estimated:false,signature:compactSignature(fontGeometry([x.doc]))})),ranges:[],elements:[],points:[],visiblePages:visible.map(x=>x.index),atEnd:visible.some(x=>x.index===descriptor.pages.length-1)}
 }
 function geometry(target){
     const entry=boxes().find(x=>x.index===target?.section);
@@ -273,6 +282,7 @@ async function execute(command){
     try{
         if(!nativeFeatures)throw new Error('请更新系统 WebView 以使用固定版式内核');
         const p=command.payload;
+        if(p.paginationBase)paginationBase=p.paginationBase;
         if(command.type==='open'){
             descriptor={
                 pages:p.fixedPages,direction:p.direction,mixed:p.fixedMixed

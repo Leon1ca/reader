@@ -5,11 +5,11 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicLong
 
 enum class ReaderPhase { IDLE, LOADING, READY, RECOVERING, FAILED, CRASHED }
-data class ReaderControllerState(val phase: ReaderPhase=ReaderPhase.IDLE,val position: Locator?=null,val profile: String="",val activeViews: Int=0,val message: String?=null,val recoveryAttempt: Int=0,val consecutiveCrashes: Int=0)
+data class ReaderControllerState(val phase: ReaderPhase=ReaderPhase.IDLE,val position: Locator?=null,val profile: String="",val activeViews: Int=0,val message: String?=null,val recoveryAttempt: Int=0,val consecutiveCrashes: Int=0,val viewport: ReadingViewport?=null,val progress: ReadingProgress?=null,val currentPageBookmarks: List<ReaderBookmark> = emptyList(),val endPrompt: Boolean=false)
 
 /** Session command boundary. Surfaces own platform views; this controller owns navigation policy. */
 class ReaderController(private val generation: Long,private val register: (RendererBackend) -> (() -> Unit),
-    private val acceptEvent: (RendererEvent) -> Boolean,private val actions: ReaderActions = ReaderActions(), private val bookSearch: BookSearch? = null) {
+    private val acceptEvent: (RendererEvent) -> Boolean,private val actions: ReaderActions = ReaderActions(), private val bookSearch: BookSearch? = null,private val chapterEnd: (Locator)->PaginationBoundary?={null},private val isFinished: ()->Boolean={false}) {
     private val mutable=kotlinx.coroutines.flow.MutableStateFlow(ReaderControllerState())
     val state: kotlinx.coroutines.flow.StateFlow<ReaderControllerState> = mutable
     private var backend: RendererBackend?=null
@@ -47,6 +47,11 @@ class ReaderController(private val generation: Long,private val register: (Rende
         val hit=searchMutable.value.hits.firstOrNull { it.id==id } ?: return false
         actions.goTo(hit.locator);return true
     }
+    private var estimator: PageEstimator?=null
+    private var estimatorDocument: ReaderPublication?=null
+    private var endLatched=false
+    private var endPending=false
+    fun dismissEnd() { endPending=false;mutable.value=mutable.value.copy(endPrompt=false) }
     private var displayed: ReadingSession?=null
     private val observers=linkedSetOf<(RendererEvent) -> Unit>()
     fun observe(observer: (RendererEvent) -> Unit): () -> Unit { observers.add(observer);return { observers.remove(observer) } }
@@ -59,15 +64,25 @@ class ReaderController(private val generation: Long,private val register: (Rende
     fun receive(renderer: RendererBackend,event: RendererEvent) {
         if(renderer!==backend || !acceptEvent(event))return
         mutable.value=when(event) {
-            RendererEvent.Loading -> mutable.value.copy(phase=ReaderPhase.LOADING,message=null)
+            RendererEvent.Loading -> mutable.value.copy(phase=ReaderPhase.LOADING,message=null,viewport=null,currentPageBookmarks=emptyList(),endPrompt=false)
             is RendererEvent.Ready -> mutable.value.copy(profile=event.profileId,activeViews=event.activeViews)
-            is RendererEvent.Position -> mutable.value.copy(phase=ReaderPhase.READY,position=event.locator,consecutiveCrashes=0)
+            is RendererEvent.Position -> {
+                val viewport=event.viewport
+                if(viewport!=null) {
+                    if(!viewport.atEnd || isFinished())endPending=false
+                    else if(!endLatched)endPending=true
+                    endLatched=viewport.atEnd
+                }
+                mutable.value.copy(phase=ReaderPhase.READY,position=event.locator,consecutiveCrashes=0,viewport=viewport,
+                    progress=viewport?.let { estimator?.accept(it,chapterEnd(event.locator)) },currentPageBookmarks=displayed?.snapshot?.bookmarks.orEmpty().filter { viewport?.contains(it.locator)==true },
+                    endPrompt=viewport?.atEnd==true && endPending)
+            }
             is RendererEvent.Zoom -> mutable.value
             is RendererEvent.Notice -> mutable.value.copy(message=event.message)
-            is RendererEvent.Error -> mutable.value.copy(phase=ReaderPhase.FAILED,message=event.message)
+            is RendererEvent.Error -> mutable.value.copy(phase=ReaderPhase.FAILED,message=event.message,endPrompt=false)
             is RendererEvent.Crashed -> if(mutable.value.consecutiveCrashes<2) mutable.value.copy(phase=ReaderPhase.RECOVERING,
-                consecutiveCrashes=mutable.value.consecutiveCrashes+1,recoveryAttempt=mutable.value.recoveryAttempt+1,message=event.message)
-                else mutable.value.copy(phase=ReaderPhase.FAILED,message="自动恢复失败，请点击重试。")
+                consecutiveCrashes=mutable.value.consecutiveCrashes+1,recoveryAttempt=mutable.value.recoveryAttempt+1,message=event.message,endPrompt=false,viewport=null,currentPageBookmarks=emptyList())
+                else mutable.value.copy(phase=ReaderPhase.FAILED,message="自动恢复失败，请点击重试。",endPrompt=false,viewport=null,currentPageBookmarks=emptyList())
         }
         observers.toList().forEach { it(event) }
     }
@@ -76,6 +91,11 @@ class ReaderController(private val generation: Long,private val register: (Rende
         val renderer=backend ?: return
         val old=displayed
         displayed=session
+        if(estimatorDocument!==session.document) {
+            if(estimatorDocument!=null && estimatorDocument?.sourceRevision!=session.document.sourceRevision) { endLatched=false;endPending=false }
+            estimatorDocument=session.document;estimator=PageEstimator(session.document.paginationParts,session.document.kind==WebContentKind.FIXED)
+        }
+        mutable.value=mutable.value.copy(currentPageBookmarks=session.snapshot.bookmarks.filter { mutable.value.viewport?.contains(it.locator)==true })
         when {
             old==null || old.document!==session.document -> renderer.open(session.document,session.jump,session.snapshot.rules)
             old.snapshot.rules!=session.snapshot.rules -> renderer.setRules(session.snapshot.rules,session.jump)
@@ -88,7 +108,7 @@ class ReaderController(private val generation: Long,private val register: (Rende
     fun deleteBookmark(id: Long) { if(valid)actions.deleteBookmark(id) }
     fun patchRules(patch: RulesPatch) { if(valid)actions.patchRules(patch) }
     fun resetRules() { if(valid)actions.resetRules() }
-    fun markFinished(finished: Boolean) { if(valid)actions.finished(finished) }
+    fun markFinished(finished: Boolean) { if(valid) { dismissEnd();actions.finished(finished) } }
     fun close() { if(valid)actions.close() }
     fun flush()=if(valid)actions.flush() else true
     fun retry() { if(!valid)return;mutable.value=mutable.value.copy(phase=ReaderPhase.RECOVERING,message=null,consecutiveCrashes=0,recoveryAttempt=mutable.value.recoveryAttempt+1) }

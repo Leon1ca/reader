@@ -18,6 +18,12 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
         if (chapters.firstOrNull()?.title?.startsWith("分段 ") == true) TocSource.TEXT_SEGMENTS else TocSource.CHAPTERS)
     private fun checkOpen() { check(!closed.get()) { "正文资源已关闭" } }
     override val search = if (original != null && searchRoot != null) txtSearch(source, original, searchRoot, ::checkOpen) else null
+    override fun paginationChapterEnd(locator: Locator): PaginationBoundary? {
+        val offset=(locator as? Locator.Text)?.sourceOffset ?: return null
+        val end=chapters.firstOrNull { it.sourceOffset>offset }?.sourceOffset ?: return null
+        val part=publication.paginationParts.lastOrNull { it.sourceStart<=end } ?: return null
+        return PaginationBoundary(part.index,((end-part.sourceStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0))
+    }
     override fun toc(): List<TocEntry> = entries
     override fun locatorForToc(id: String): Locator? {
         checkOpen()

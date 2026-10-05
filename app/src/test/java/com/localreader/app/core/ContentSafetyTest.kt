@@ -20,6 +20,10 @@ class ContentSafetyTest {
         val resources = SessionResources("session",ArticleSamplePublication()) { ByteArrayInputStream(byteArrayOf()) }
         assertNotNull(resources.resolve(resources.base+"fonts/Roboto-Regular-VF.ttf",false))
         assertNotNull(resources.resolve(resources.base+"host.js",false))
+        assertNotNull(resources.resolve(resources.base+"viewport.js",false))
+        assertNull(resources.resolve(resources.base+"viewport.js",true))
+        assertNull(resources.resolve(resources.base.replace("session/","foreign/")+"viewport.js",false))
+        assertNull(resources.resolve(resources.base+"fonts/viewport.js",false))
         assertNull(resources.resolve(resources.base+"fonts/host.js",false))
         assertNull(resources.resolve(resources.base+"fonts/Roboto-Regular-VF.ttf",true))
         assertNull(resources.resolve(resources.base+"sections/0.html",true))

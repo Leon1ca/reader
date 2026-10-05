@@ -259,7 +259,8 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                 TextButton(onClick = controller::prev, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("上一页") }
                 TextButton(onClick = controller::next, enabled = !busy && restored && rendererState.phase==ReaderPhase.READY) { Text("下一页") }
             }
-            (session.snapshot.current as? Locator.Page)?.let { page -> Text("第 ${page.page+1} 页 / ${session.document.sectionCount} 页",style=MaterialTheme.typography.labelMedium) }
+            (session.snapshot.current as? Locator.Page)?.takeIf { rendererState.progress==null }?.let { page -> Text("第 ${page.page+1} 页 / ${session.document.sectionCount} 页",style=MaterialTheme.typography.labelMedium) }
+            rendererState.progress?.let { progress -> Text("${if(progress.pageEstimated)"约 " else ""}第 ${progress.page} 页 / ${if(progress.pagesEstimated)"约 " else ""}${progress.pages} 页${progress.chapterPagesLeft?.let { " · 本章剩余${if(progress.chapterEstimated)"约 " else ""}$it 页" }.orEmpty()}",style=MaterialTheme.typography.labelMedium) }
             Text("当前位置 ${(session.currentFraction * 100).roundToInt()}% · 最远 ${(session.furthestFraction * 100).roundToInt()}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
         } } }) { padding -> Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
@@ -268,6 +269,8 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             if (failed) TextButton(onClick = { failed = false; localNotice = null; controller.retry() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
             key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,rendererState.recoveryAttempt) }) }
         } }
+    if(rendererState.endPrompt)AlertDialog(onDismissRequest=controller::dismissEnd,title={Text("已到本书末尾")},text={Text("是否将本书标记为已读完？")},
+        confirmButton={TextButton(onClick={controller.markFinished(true)}) { Text("标记读完") }},dismissButton={TextButton(onClick=controller::dismissEnd) { Text("继续阅读") }})
     panel?.let { selected -> ModalBottomSheet(onDismissRequest = { dismissPanel() }) {
         SystemBarAppearance(session.snapshot.rules.theme == "dark")
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
@@ -307,10 +310,11 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                     } }
                 }
                 "书签" -> {
+                    if(rendererState.currentPageBookmarks.isNotEmpty())Text("当前页书签 ${rendererState.currentPageBookmarks.size} 个",style=MaterialTheme.typography.labelMedium)
                     if (session.snapshot.bookmarks.isEmpty()) Text("还没有书签。阅读时可添加当前文本位置。", Modifier.padding(vertical = 20.dp))
                     LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.snapshot.bookmarks, key = { it.id }) { bookmark ->
                         Row(Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { controller.goTo(bookmark.locator); panel = null }, Modifier.weight(1f)) { Text(bookmark.excerpt.ifBlank { "空白段落" }) }
+                            TextButton(onClick = { controller.goTo(bookmark.locator); panel = null }, Modifier.weight(1f)) { Column { if(rendererState.currentPageBookmarks.any { it.id==bookmark.id })Text("当前页",style=MaterialTheme.typography.labelSmall);Text(bookmark.excerpt.ifBlank { "空白段落" }) } }
                             TextButton(onClick = { controller.deleteBookmark(bookmark.id) }) { Text("删除") }
                         }
                     } }

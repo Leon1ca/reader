@@ -31,6 +31,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         var intentToken=""
         var userIntentToken=""
         var positionValidated=false
+        var paginationBase=""
         val pageQueue=java.util.ArrayDeque<String>()
     }
     val runtimeTextZoom: Int get() = view.settings.textZoom
@@ -59,7 +60,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) WebViewCompat.addWebMessageListener(view,"ReaderEvents",setOf(ReaderOrigin.URL)) { _, message, origin, mainFrame, _ ->
             if (!mainFrame || origin.toString().trimEnd('/') != ReaderOrigin.URL) return@addWebMessageListener
             val raw = message.data ?: return@addWebMessageListener
-            if (raw.length <= 16384) receive(raw)
+            if (raw.length <= 65536) receive(raw)
         }
         WebView.setWebContentsDebuggingEnabled(context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0)
     }
@@ -141,9 +142,10 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                         try {
                             val locator = withContext(Dispatchers.IO) { session.publication.locator(anchor) }
                             if (active === session && session.gate.acceptsPosition(identity,positionSerial) && locator != null) {
-                                session.locator = locator
-                                session.positionValidated=true;watchdog?.cancel()
-                                onEvent(RendererEvent.Position(locator, reason,intent))
+                                val viewport=withContext(Dispatchers.IO) { decodeViewport(session,event.optJSONObject("viewport")) }
+                                if(active!==session || !session.gate.acceptsPosition(identity,positionSerial))return@launch
+                                session.locator=locator;session.positionValidated=true;watchdog?.cancel()
+                                onEvent(RendererEvent.Position(locator, reason,intent,viewport))
                                 if(session.pageQueue.isNotEmpty())command(session,session.pageQueue.removeFirst(),null,null)
                             } else if(active===session && session.gate.acceptsPosition(identity,positionSerial) && locator==null)fail("正文返回了无效定位，请重新打开")
                         } catch(e: Exception) { if(active===session && session.gate.acceptsPosition(identity,positionSerial))fail("正文定位读取失败：${e.message}") }
@@ -191,6 +193,98 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
             }
         } catch (_: Exception) { /* malformed event is rejected */ }
     }
+    private fun decodeViewport(session: HostSession,json: JSONObject?): ReadingViewport? {
+        if(json==null)return null
+        require(json.getString("base")==session.paginationBase)
+        val signature=json.getString("signature");require(signature.matches(Regex("[0-9a-f]{1,8}-[0-9a-f]{1,8}")))
+        fun integer(value: JSONObject,key: String): Int {
+            val number=(value.get(key) as Number).toDouble();require(number.isFinite() && number==number.toInt().toDouble());return number.toInt()
+        }
+        fun anchor(value: JSONObject): RendererAnchor {
+            val section=integer(value,"section");require(section in 0 until session.publication.sectionCount)
+            if(session.publication.protocolVersion==1)return RendererAnchor.Block(section,value.getString("blockId").also { require(it.length in 1..128) },integer(value,"character"))
+            return when(value.getString("kind")) {
+                "TEXT" -> RendererAnchor.Text(section,integer(value,"offset"))
+                "ELEMENT" -> RendererAnchor.Element(section,value.getString("elementId").also { require(it.length in 1..128) })
+                else -> error("无效的可见源锚点")
+            }
+        }
+        val current=integer(json,"currentSection");require(current in 0 until session.publication.sectionCount)
+        val rawSamples=json.getJSONArray("samples");require(rawSamples.length()<=8)
+        val samples=(0 until rawSamples.length()).map { i -> val row=rawSamples.getJSONObject(i);val part=integer(row,"section");val page=integer(row,"page");val pages=integer(row,"pages");require(part in 0 until session.publication.sectionCount && page in 1..pages && pages in 1..1000000);val local=row.getString("signature");require(local.matches(Regex("[0-9a-f]{1,8}-[0-9a-f]{1,8}")))
+            val units=row.optDouble("units",pages.toDouble());val offset=row.optDouble("offset",(page-1).toDouble());require(units.isFinite() && units>0 && units<=1000000 && offset.isFinite() && offset>=0 && offset<=units)
+            PaginationSample(part,page,pages,row.getBoolean("estimated"),digest(session.paginationBase+":"+local),units,offset,row.optBoolean("scrolled")) }
+        require(samples.map { it.section }.distinct().size==samples.size && samples.any { it.section==current })
+        val rawRanges=json.getJSONArray("ranges");require(rawRanges.length()<=256)
+        fun mappedRange(start: RendererAnchor,end: RendererAnchor): VisibleSourceRange {
+            require(start.section==end.section && (session.publication.protocolVersion==1 || start is RendererAnchor.Text && end is RendererAnchor.Text))
+            val first=requireNotNull(session.publication.locator(start));val last=requireNotNull(session.publication.locator(end))
+            require(when(first) { is Locator.Text -> last is Locator.Text && first.sourceOffset<last.sourceOffset;is Locator.Epub -> last is Locator.Epub && first.spine==last.spine && first.offset<last.offset;is Locator.Article -> !first.element && last is Locator.Article && !last.element && first.blockId==last.blockId && first.textOffset<last.textOffset;else -> false });return VisibleSourceRange(first,last)
+        }
+        val ranges=(0 until rawRanges.length()).map { i -> val row=rawRanges.getJSONObject(i);mappedRange(anchor(row.getJSONObject("start")),anchor(row.getJSONObject("end"))) }.toMutableList()
+        json.optJSONArray("rangeGroups")?.let { groups ->
+            require(rawRanges.length()==0 && groups.length() in 1..256 && session.publication.protocolVersion in 1..2)
+            var totalBytes=0;var totalIntervals=0
+            val seen=HashSet<Pair<Int,String?>>()
+            for(i in 0 until groups.length()) {
+                val row=groups.getJSONObject(i);val section=integer(row,"section");require(section in 0 until session.publication.sectionCount)
+                val block=if(session.publication.protocolVersion==1)row.getString("blockId").also { require(it.length in 1..128) } else null
+                require(seen.add(section to block) && (block!=null || !row.has("blockId")))
+                val encoded=row.getString("encoded");require(encoded.length%4==0)
+                totalBytes+=encoded.length/4*3-(if(encoded.endsWith("=="))2 else if(encoded.endsWith("="))1 else 0)
+                require(totalBytes<=VisibleRangeCodec.MAX_BYTES)
+                val intervals=VisibleRangeCodec.decode(encoded);require(intervals.isNotEmpty())
+                totalIntervals+=intervals.size;require(totalIntervals<=VisibleRangeCodec.MAX_INTERVALS)
+                for(interval in intervals) {
+                    val start=if(block==null)RendererAnchor.Text(section,interval.start) else RendererAnchor.Block(section,block,interval.start)
+                    val end=if(block==null)RendererAnchor.Text(section,interval.end) else RendererAnchor.Block(section,block,interval.end)
+                    ranges.add(mappedRange(start,end))
+                }
+            }
+        }
+        val rawElements=json.getJSONArray("elements");require(rawElements.length()<=256)
+        fun mappedElement(value: RendererAnchor): Locator {
+            val mapped=requireNotNull(session.publication.locator(value))
+            require(mapped is Locator.Epub && mapped.elementId!=null || mapped is Locator.Article && mapped.element);return mapped
+        }
+        val elements=(0 until rawElements.length()).map {
+            mappedElement(anchor(rawElements.getJSONObject(it)))
+        }.toMutableList()
+        json.optJSONArray("elementGroups")?.let { groups ->
+            require(rawElements.length()==0 && groups.length() in 1..8 && session.publication.protocolVersion in 1..2)
+            val seen=HashSet<Int>();var count=0;var encodedUnits=0
+            for(i in 0 until groups.length()) {
+                val row=groups.getJSONObject(i);val section=integer(row,"section");require(section in 0 until session.publication.sectionCount && seen.add(section))
+                val ids=row.getJSONArray("ids");require(ids.length() in 1..16384);count+=ids.length();require(count<=16384)
+                val unique=HashSet<String>()
+                for(n in 0 until ids.length()) {
+                    val id=ids.getString(n);require(id.length in 1..128 && unique.add(id));encodedUnits+=JSONObject.quote(id).length+1;require(encodedUnits<=40960)
+                    elements.add(mappedElement(if(session.publication.protocolVersion==1)RendererAnchor.Block(section,id,0) else RendererAnchor.Element(section,id)))
+                }
+            }
+        }
+        val rawPoints=json.getJSONArray("points");require(rawPoints.length()<=256)
+        val points=(0 until rawPoints.length()).mapNotNull {
+            val point=anchor(rawPoints.getJSONObject(it));val mapped=requireNotNull(session.publication.locator(point))
+            require(mapped is Locator.Text || mapped is Locator.Epub && mapped.elementId==null || mapped is Locator.Article && !mapped.element)
+            session.publication.visiblePoint(point)
+        }
+        val rawPages=json.getJSONArray("visiblePages");require(rawPages.length()<=4)
+        val pages=(0 until rawPages.length()).map { i -> val value=rawPages.get(i) as Number;val page=value.toInt();require(value.toDouble()==page.toDouble() && page in 0 until session.publication.sectionCount);page }
+        require(pages.distinct().size==pages.size && (session.publication.kind==WebContentKind.FIXED || pages.isEmpty()))
+        val atEnd=json.getBoolean("atEnd")
+        require(!atEnd || if(session.publication.kind==WebContentKind.FIXED)session.publication.sectionCount-1 in pages else samples.any { it.section==session.publication.sectionCount-1 })
+        return ReadingViewport(session.publication.sourceRevision,current,digest(session.paginationBase+":"+signature),samples,ranges,elements,pages,atEnd,points)
+    }
+    private fun digest(value: String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun bundledFontSignature(context: Context): String = synchronized(fontLock) {
+        fontSignature ?: run {
+            val hash=java.security.MessageDigest.getInstance("SHA-256")
+            for(name in BundledFonts.files.sorted()) { hash.update(name.toByteArray());context.assets.open("fonts/$name").use { input -> val bytes=ByteArray(65536);while(true) { val count=input.read(bytes);if(count<0)break;hash.update(bytes,0,count) } } }
+            hash.digest().joinToString("") { "%02x".format(it) }.also { fontSignature=it }
+        }
+    }
+    companion object { private val fontLock=Any();private var fontSignature: String?=null }
     /** Compose updates adapt into typed commands rather than document reloads. */
     fun render(document: ReaderPublication, anchor: Locator, jumpSerial: Int, rules: ReaderRules) {
         if (destroyed) return
@@ -261,6 +355,10 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                 if (targetRules != null) {
                     val faces = withContext(Dispatchers.IO) { view.context.assets.open("fonts/readest.css").bufferedReader().use { it.readText() } }
                     val compiled = RuleCompiler.compile(session.publication.kind,targetRules,"${session.resources.base}fonts/readest.css",faces)
+                    val fontSignature=withContext(Dispatchers.IO) { bundledFontSignature(view.context) }
+                    val metadata=session.publication.resourceManifest.entries.sortedBy { it.key }.joinToString { "${it.key}:${it.value.length}:${it.value.mime}" }
+                    session.paginationBase=digest("${session.publication.sourceRevision}|${session.publication.revision}|$targetRules|${compiled.beforeAuthor}|${compiled.afterAuthor}|$fontSignature|$metadata|${view.settings.textZoom}|${session.publication.direction}")
+                    payload.put("paginationBase",session.paginationBase)
                     payload.put("zoom",targetRules.fxlZoom).put("spread",targetRules.spreadPreference).put("theme",targetRules.theme)
                     payload.put("flow",targetRules.flow.wire).put("profileId",compiled.profileId).put("beforeAuthor",compiled.beforeAuthor).put("afterAuthor",compiled.afterAuthor)
                     val g = compiled.geometry

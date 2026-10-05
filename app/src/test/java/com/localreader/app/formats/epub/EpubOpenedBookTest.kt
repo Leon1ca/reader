@@ -30,6 +30,20 @@ class EpubOpenedBookTest {
             book.close();assertFalse(book.accepts(end));assertThrows(IllegalStateException::class.java) { source.open("sections/0.txt") }
         } finally { root.deleteRecursively() }
     }
+    @Test fun technicalTrailingCaretIsNotTheNextPartBookmarkButLogicalEofRemainsVisible() {
+        val root=kotlin.io.path.createTempDirectory("epub-visible-endpoint").toFile()
+        try {
+            File(root,"sections").mkdirs();File(root,"sections/0.txt").writeText("ABCDEFGHIJ")
+            val section=EpubSectionRecord(0,PackagePath.entry("a.xhtml"),10,"sections/0.txt","sections/0-author.html","sections/0-custom.html",emptyMap(),emptyMap())
+            val parts=listOf(EpubPartRecord(0,0,0,5,"sections/0-author.html","sections/0-custom.html",emptyMap()),EpubPartRecord(1,0,5,5,"sections/1-author.html","sections/1-custom.html",emptyMap()))
+            val record=EpubCacheRecord("source","t","a",null,"id",listOf(section),emptyList(),emptyList(),emptyList(),"reflowable",false,"ltr",parts=parts)
+            EpubOpenedBook("id",ContentMetadata("t","a"),EpubSource(root,record)).use { book ->
+                assertNull(book.publication.visiblePoint(RendererAnchor.Text(0,5)))
+                assertEquals(5,(book.publication.visiblePoint(RendererAnchor.Text(1,0)) as Locator.Epub).offset)
+                assertEquals(10,(book.publication.visiblePoint(RendererAnchor.Text(1,5)) as Locator.Epub).offset)
+            }
+        } finally { root.deleteRecursively() }
+    }
     @Test fun historicalRecoveryIsNearbyAndExtentOrdersSpineBeforeOffset() {
         val root=kotlin.io.path.createTempDirectory("epub-recovery").toFile()
         try {

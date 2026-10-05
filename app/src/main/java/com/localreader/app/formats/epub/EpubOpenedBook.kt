@@ -71,6 +71,7 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     override val revision=record.renderRevision
     override val sourceRevision=record.revision
     override val kind=WebContentKind.EPUB
+    override val paginationParts=record.parts.map { PaginationPart(it.index,it.characters.toLong(),it.spine,it.canonicalStart.toLong()) }
     override val compatibilityNotices=record.warnings
     override val protocolVersion=2
     override val direction=record.direction
@@ -162,6 +163,13 @@ class EpubOpenedBook(override val contentId: String,override val metadata: Conte
             if(coordinate.first<epub.spine || coordinate.first==epub.spine && coordinate.second<=epub.offset)low=middle+1 else high=middle
         }
         return chapterCoordinates.getOrNull(low-1)?.let { entries[it.third] }
+    }
+    override fun paginationChapterEnd(locator: Locator): PaginationBoundary? {
+        val current=chapterOf(locator) ?: return null
+        val coordinate=chapterCoordinates.firstOrNull { entries[it.third].depth<=current.depth && entries[it.third].id!=current.id &&
+            (locator as? Locator.Epub)?.let { pos -> it.first>pos.spine || it.first==pos.spine && it.second>pos.offset }==true } ?: return null
+        val part=publication.record.parts.lastOrNull { it.spine==coordinate.first && it.canonicalStart<=coordinate.second } ?: return null
+        return PaginationBoundary(part.index,((coordinate.second-part.canonicalStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0))
     }
     override fun fractionOf(locator: Locator): Double { val target=publication.target(locator);val actual=publication.locator(target.anchor) ?: error("无法还原EPUB位置");return actual.fallbackFraction }
     override fun fractionOf(extent: ReadingExtent): Double { require(extent is EpubReadingExtent && extent.revision==revision);return EpubCoordinates.fraction(source.record.sections,extent.spine,extent.offset) }

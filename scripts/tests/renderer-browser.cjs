@@ -15,7 +15,7 @@ const server = http.createServer((req,res) => {
     res.end(`<html><head><meta charset="utf-8"></head><body>${Array.from({length:8},(_,i)=>`<p><span data-block="${index*8+i}" data-length="80">${('中文 English 123 '+ index + ':'+i+' ').padEnd(80,'字')}</span></p>`).join('')}<script>window.attacked=true;parent.ReaderEvents.postMessage('attacked')</script><script src="../host.js"></script><svg onload="parent.attacked=true"></svg><a href="javascript:parent.attacked=true" onclick="parent.attacked=true">evil</a></body></html>`)
     return
   }
-  if (!['host.html','host.js','vendor/foliate/paginator.js'].includes(resource)) {res.writeHead(403);res.end();return}
+  if (!['host.html','host.js','viewport.js','vendor/foliate/paginator.js'].includes(resource)) {res.writeHead(403);res.end();return}
   res.writeHead(200, {'Content-Type':resource.endsWith('.js')?'text/javascript':'text/html','Cache-Control':'no-store'})
   res.end(fs.readFileSync(path.join(root,resource)))
 })

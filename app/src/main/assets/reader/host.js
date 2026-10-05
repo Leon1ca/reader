@@ -1,9 +1,12 @@
+import {textIntervals,mergeIntervals,visibleFrame,fontGeometry,compactSignature,visibleCaret,compactTextRanges,compactElements} from './viewport.js'
 // Original host protocol. Only this trusted top-level document can call the native port.
 import './vendor/foliate/paginator.js'
 let paginator = document.getElementById('renderer'), initialized = false, publicationCount = 0
 const base = new URL('./', location.href)
 let identity, epoch = 0, commandId = 0, opening = true, closed = false, lastTarget, reportTimer
 let chain = Promise.resolve()
+let paginationBase=''
+let relocationDetail
 let currentProfile = ''
 let viewportWidth = 0, viewportHeight = 0
 function syncViewport() {
@@ -39,11 +42,14 @@ function bounded(promise) {
 }
 const events = []
 function emit(type, payload = {}) {
+    if(type==='relocated'){try{payload.viewport=readingViewport()}catch(error){emit('error',{message:String(error.message)});return}}
     if (closed || !identity) return
     const event = { protocol: 1, ...identity, layoutEpoch: epoch, commandId, type, ...payload }
     if (events.length === 32) events.shift()
     events.push(event)
-    globalThis.ReaderEvents?.postMessage(JSON.stringify(event))
+    const raw=JSON.stringify(event)
+    if(raw.length>65536){if(type!=='error')emit('error',{message:'Reader event exceeds bridge budget'});return}
+    globalThis.ReaderEvents?.postMessage(raw)
 }
 function rangeFor(doc, target) {
     const el = [...doc.querySelectorAll('[data-block]')].find(x => x.dataset.block === target.blockId)
@@ -83,6 +89,30 @@ function targetFor(range, index) {
     before.setEnd(range.startContainer, range.startOffset)
     const character = Math.min(Number(el.dataset.length), before.toString().length)
     return { section: index, blockId: el.dataset.block, character }
+}
+function readingViewport() {
+    const rect=paginator.getBoundingClientRect(),visible=paginator.getContents().filter(x=>x.doc?.body&&x.doc.readyState==='complete'&&visibleFrame(x.doc,rect)).sort((a,b)=>a.index-b.index),ranges=[],elements=[],points=[]
+    for(const {index,doc} of visible) { const grouped=new Map();for(const value of textIntervals(doc,rect)){const el=value.node.parentElement?.closest('[data-block]');if(!el)continue;const before=doc.createRange();before.selectNodeContents(el);before.setEnd(value.node,value.start);const start=before.toString().length;const values=grouped.get(el.dataset.block)??[];values.push({start,end:start+value.end-value.start});grouped.set(el.dataset.block,values)}for(const [blockId,values] of grouped)for(const span of mergeIntervals(values))ranges.push({start:{section:index,blockId,character:span.start},end:{section:index,blockId,character:span.end}}) }
+    for(const {index,doc} of visible)for(const el of doc.querySelectorAll('[data-block]')) {
+        const target={section:index,blockId:el.dataset.block,character:Number(el.dataset.length)}
+        if(el.dataset.element) { const box=el.getBoundingClientRect(),frame=doc.defaultView.frameElement.getBoundingClientRect();if(box.width>.1&&box.height>.1&&box.bottom+frame.top>rect.top&&box.top+frame.top<rect.bottom&&box.right+frame.left>rect.left&&box.left+frame.left<rect.right)elements.push({...target,character:0});continue }
+        if(visibleCaret(doc,rangeFor(doc,target),rect))points.push(target)
+    }
+    if(ranges.length>16384||elements.length>16384||points.length>256)throw new Error('Visible range exceeds bridge budget')
+    const detail=relocationDetail,current=ranges[0]?.start.section??elements[0]?.section??points[0]?.section??(visible.some(x=>x.index===detail?.index)?detail.index:visible[0]?.index),samples=[]
+    // Each frame is measured against the public engine's actual pagination tile.
+    // A dual-column spread can contain two different sections; relocate.size is
+    // based on the primary view and is not a count for every visible section.
+    for(const {index,doc} of visible) {
+        const frame=doc.defaultView.frameElement.getBoundingClientRect(),style=getComputedStyle(doc.body),vertical=/^(vertical|sideways)/.test(style.writingMode),side=paginator.sideProp
+        const size=paginator.size/(paginator.scrolled?1:paginator.columnCount),length=frame[side]
+        if(!(size>0&&length>0))continue
+        const backwards=side==='width'&&(vertical?style.writingMode.endsWith('-rl'):style.direction==='rtl')
+        const delta=side==='height'?rect.top-frame.top:backwards?frame.right-rect.right:rect.left-frame.left
+        const units=paginator.scrolled?Math.max(.000001,length/size):Math.max(1,Math.round(length/size)),offset=Math.max(0,Math.min(units-.000001,delta/size))
+        samples.push({section:index,page:Math.min(Math.ceil(units),Math.floor(offset+1e-6)+1),pages:Math.ceil(units),units,offset:paginator.scrolled?offset:Math.min(Math.ceil(units)-1,Math.floor(offset+1e-6)),scrolled:paginator.scrolled,estimated:paginator.scrolled,signature:compactSignature([paginator.columnCount,fontGeometry([doc])])})
+    }
+    return {base:paginationBase,signature:compactSignature([rect.width,rect.height,paginator.getAttribute('flow')]),currentSection:current,samples,ranges:ranges.length<=256?ranges:[],...(ranges.length>256?{rangeGroups:compactTextRanges(ranges)}:{}),elements:elements.length<=256?elements:[],...(elements.length>256?{elementGroups:compactElements(elements)}:{}),points,visiblePages:[],atEnd:Boolean(paginator.atEnd&&visible.some(x=>x.index===publicationCount-1))}
 }
 function anchorGeometry(target) {
     const entry = paginator.getContents().find(x => x.index === target?.section)
@@ -147,6 +177,7 @@ instance.addEventListener('load', ({ detail: { doc, index } }) => {
 })
 instance.addEventListener('relocate', ({ detail }) => {
     if (instance !== paginator) return
+    relocationDetail=detail
     const target = targetFor(detail.range, detail.index)
     if (!target || closed) return
     relocationDraft = target
@@ -183,6 +214,7 @@ async function execute(command) {
     operationDeadline = performance.now() + 12000
     try {
         const payload = command.payload
+        if(payload.paginationBase)paginationBase=payload.paginationBase
         currentProfile = payload.profileId ?? currentProfile
         if (!Array.prototype.at || !Array.prototype.findLastIndex || !globalThis.ResizeObserver) throw new Error('请更新系统 WebView 以使用阅读内核')
         const rebuildForFlow = command.type === 'setRules' && payload.flow !== paginator.getAttribute('flow')

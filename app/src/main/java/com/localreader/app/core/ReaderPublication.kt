@@ -5,6 +5,7 @@ interface ReaderPublication {
     val revision: String
     val sourceRevision: String get()=revision
     val kind: WebContentKind
+    val paginationParts: List<PaginationPart> get() = emptyList()
     val sectionCount: Int
     val protocolVersion: Int get() = 1
     val direction: String get() = "ltr"
@@ -63,6 +64,9 @@ class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit =
         }
     }.toIntArray()
     override val sectionCount = starts.size
+    override val paginationParts: List<PaginationPart> by lazy {
+        starts.mapIndexed { index,start -> val first=source.block(start).sourceOffset;val end=starts.getOrNull(index+1)?.let { source.block(it).sourceOffset } ?: source.index.totalCharacters;PaginationPart(index,end-first,0,first) }
+    }
     private fun sectionOf(paragraph: Int): Int = starts.binarySearch(paragraph).let { if (it >= 0) it else -it - 2 }
     override fun target(locator: Locator): ContentTarget {
         val resolved = source.resolve(locator)
@@ -120,6 +124,7 @@ class ArticleSamplePublication : ReaderPublication {
         val id = blockId.toIntOrNull() ?: return null
         return if (section == 0 && id in texts.indices && character in 0..texts[id].length) Locator.Article(revision, blockId, character) else null
     }
+    override val paginationParts get()=listOf(PaginationPart(0,texts.sumOf { it.length }.toLong()))
     override fun section(index: Int): ContentSection {
         require(index == 0)
         fun block(id: Int, content: String = HtmlText.escape(texts[id])) = "<span data-block=\"$id\" data-length=\"${texts[id].length}\">$content</span>"

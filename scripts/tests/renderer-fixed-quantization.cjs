@@ -14,7 +14,7 @@ const server=http.createServer((req,res)=>{
     const send=()=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-src 'none'"});res.end(`<html><head><meta name="viewport" content="width=${600+i*2},height=${900+i*4}"><script>parent.compromised=true</script><style>html,body{margin:0;width:100%;height:100%;background:hsl(${i*17} 40% 85%)}p{position:absolute;left:20px;top:20px;font:28px serif}</style></head><body data-reader-canonical-length="${text.length}" data-reader-canonical-sha="${sha}"><p>${text}</p></body></html>`)}
     if(i===delaySection)setTimeout(send,600);else send();return
   }
-  if(!['host3.html','host3.js','vendor/foliate/fixed-layout.js'].includes(resource)){res.writeHead(403);res.end();return}
+  if(!['host3.html','host3.js','viewport.js','vendor/foliate/fixed-layout.js'].includes(resource)){res.writeHead(403);res.end();return}
   res.writeHead(200,{'Content-Type':resource.endsWith('.js')?'text/javascript':'text/html'});res.end(fs.readFileSync(path.join(assets,resource)))
 })
 ;(async()=>{

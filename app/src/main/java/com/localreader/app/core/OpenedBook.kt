@@ -21,6 +21,7 @@ interface OpenedBook : Closeable {
     val publication: ReaderPublication
     val search: com.localreader.app.core.search.BookSearch? get() = null
     val textControls: TextControls? get() = null
+    fun paginationChapterEnd(locator: Locator): PaginationBoundary? = null
     fun toc(): List<TocEntry>
     fun locatorForToc(id: String): Locator?
     fun chapterOf(locator: Locator): TocEntry?

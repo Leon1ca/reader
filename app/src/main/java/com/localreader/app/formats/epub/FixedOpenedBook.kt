@@ -13,6 +13,7 @@ class FixedPublication(private val source: EpubSource): ReaderPublication {
     override val revision=record.renderRevision
     override val sourceRevision=record.revision
     override val kind=WebContentKind.FIXED
+    override val paginationParts=record.sections.map { PaginationPart(it.index,it.characters.toLong(),it.index) }
     override val compatibilityNotices=record.warnings
     override val protocolVersion=2
     override val direction=record.direction
@@ -47,6 +48,12 @@ class FixedOpenedBook(override val contentId: String,override val metadata: Cont
     override fun toc()=entries
     override fun locatorForToc(id: String): Locator? = entries.indexOfFirst { it.id==id }.takeIf { it>=0 }?.let { i -> source.record.sections.indexOfFirst { it.path==source.record.toc[i].target.path }.takeIf { it>=0 }?.let { Locator.Page(revision,it,0.0,0.0) } }
     override fun chapterOf(locator: Locator): TocEntry? = (locator as? Locator.Page)?.let { page -> entries.lastOrNull { (locatorForToc(it.id) as? Locator.Page)?.page?.let { n -> n<=page.page }==true } }
+    override fun paginationChapterEnd(locator: Locator): PaginationBoundary? {
+        val page=(locator as? Locator.Page)?.page ?: return null
+        val chapter=chapterOf(locator)
+        return entries.firstOrNull { entry -> entry.depth <= (chapter?.depth ?: 0) && (locatorForToc(entry.id) as? Locator.Page)?.page?.let { it>page }==true }
+            ?.let { PaginationBoundary((locatorForToc(it.id) as Locator.Page).page,0.0) }
+    }
     override fun accepts(locator: Locator)=!closed.get() && locator is Locator.Page && locator.version==revision && locator.page in 0 until publication.sectionCount && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
     override fun fractionOf(locator: Locator): Double { val page=publication.locator(publication.target(locator).anchor)!!;return FixedCoordinates.fraction(publication.sectionCount,page.page,page.y) }
     override fun fractionOf(extent: ReadingExtent): Double { require(extent is FixedReadingExtent && extent.revision==revision);return FixedCoordinates.fraction(publication.sectionCount,extent.page,extent.y) }

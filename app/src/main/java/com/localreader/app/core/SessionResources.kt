@@ -29,7 +29,7 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
         val common = mapOf("Cache-Control" to "no-store", "X-Content-Type-Options" to "nosniff")
         if (name == "host.html" && mainFrame) return resource("text/html", common + ("Content-Security-Policy" to HOST_CSP)) { asset(if(publication.kind==WebContentKind.FIXED) "reader/host3.html" else if(publication.protocolVersion==2) "reader/host2.html" else "reader/host.html") }
         if (mainFrame) return null
-        if (name in setOf(if(publication.kind==WebContentKind.FIXED) "host3.js" else if(publication.protocolVersion==2) "host2.js" else "host.js", if(publication.kind==WebContentKind.FIXED)"vendor/foliate/fixed-layout.js" else "vendor/foliate/paginator.js")) return resource("text/javascript",common) { asset("reader/$name") }
+        if (name in setOf("viewport.js",if(publication.kind==WebContentKind.FIXED) "host3.js" else if(publication.protocolVersion==2) "host2.js" else "host.js", if(publication.kind==WebContentKind.FIXED)"vendor/foliate/fixed-layout.js" else "vendor/foliate/paginator.js")) return resource("text/javascript",common) { asset("reader/$name") }
         if (name.startsWith("fonts/") && name.removePrefix("fonts/") in BundledFonts.files)
             return resource(if (name.endsWith(".css")) "text/css" else "font/ttf",common) { asset("$name") }
         publication.resourceManifest[name]?.let { content ->

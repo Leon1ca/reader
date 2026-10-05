@@ -10,7 +10,7 @@ data class ReadingPresentation(val metadata: ContentMetadata, val document: Read
     val textControls: TextControls?, val currentFraction: Double, val furthestFraction: Double) {
     companion object {
         fun prepare(opened: OpenedBook, snapshot: ReadingSnapshot) = ReadingPresentation(opened.metadata,opened.publication,
-            opened.toc(),opened.textControls,opened.fractionOf(snapshot.current),opened.fractionOf(snapshot.furthest))
+            opened.toc(),opened.textControls,opened.fractionOf(snapshot.current),opened.fractionOf(snapshot.furthest)).also { opened.publication.paginationParts }
     }
 }
 
