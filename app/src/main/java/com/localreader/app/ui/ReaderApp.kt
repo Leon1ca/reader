@@ -3,11 +3,14 @@ package com.localreader.app.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -228,10 +231,12 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     val controller=remember(session.generation) { model.readerController(session.generation) }
     val rendererState by controller.state.collectAsStateWithLifecycle()
     val searchState by controller.searchState.collectAsStateWithLifecycle()
+    val interaction by controller.uiEvent.collectAsStateWithLifecycle()
     var searchQuery by remember(session.generation) { mutableStateOf("") }
     fun dismissPanel() { if(panel=="搜索")controller.cancelSearch();panel=null }
     DisposableEffect(controller) {
         val stop=controller.observe { event -> when(event) {
+            is RendererEvent.Interaction -> Unit
             is RendererEvent.Zoom -> Unit
             is RendererEvent.Notice -> localNotice=event.message
             RendererEvent.Loading -> restored=false
@@ -245,10 +250,10 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     val surface=remember(session.generation) { ReaderSurface(context).apply { bind(controller) } }
     DisposableEffect(surface) { onDispose { surface.close() } }
     val background = when (session.snapshot.rules.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
-    BackHandler { if (encoding != null) encoding = null else if (panel != null) dismissPanel() else if (!busy) controller.close() }
+    BackHandler { if(interaction!=null)controller.dismissInteraction() else if(controller.returnToMain())Unit else if (encoding != null) encoding = null else if (panel != null) dismissPanel() else if (!busy) controller.close() }
 
     Scaffold(containerColor = background, topBar = { TopAppBar(title = { Text(session.metadata.title, maxLines = 1) },
-        navigationIcon = { TextButton(onClick = controller::close, enabled = !busy) { Text("返回") } },
+        navigationIcon = { TextButton(onClick = { if(!controller.returnToMain())controller.close() }, enabled = !busy) { Text(if(session.document.auxiliary)"返回主文" else "返回") } },
         actions = { if(controller.canSearch)TextButton(onClick={panel="搜索"},enabled=!busy) { Text("搜索") };TextButton(onClick = { panel = "目录" }, enabled = !busy) { Text("目录") }; TextButton(onClick = { panel = "设置" }, enabled = !busy) { Text("设置") } }) },
         bottomBar = { Surface { Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -261,6 +266,7 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             }
             (session.snapshot.current as? Locator.Page)?.takeIf { rendererState.progress==null }?.let { page -> Text("第 ${page.page+1} 页 / ${session.document.sectionCount} 页",style=MaterialTheme.typography.labelMedium) }
             rendererState.progress?.let { progress -> Text("${if(progress.pageEstimated)"约 " else ""}第 ${progress.page} 页 / ${if(progress.pagesEstimated)"约 " else ""}${progress.pages} 页${progress.chapterPagesLeft?.let { " · 本章剩余${if(progress.chapterEstimated)"约 " else ""}$it 页" }.orEmpty()}",style=MaterialTheme.typography.labelMedium) }
+            if(session.document.auxiliary)Text("附属正文 · 返回主文继续阅读",style=MaterialTheme.typography.labelMedium)
             Text("当前位置 ${(session.currentFraction * 100).roundToInt()}% · 最远 ${(session.furthestFraction * 100).roundToInt()}%", Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.labelMedium)
         } } }) { padding -> Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
@@ -269,6 +275,19 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             if (failed) TextButton(onClick = { failed = false; localNotice = null; controller.retry() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
             key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,rendererState.recoveryAttempt) }) }
         } }
+    when(val event=interaction) {
+        is ReaderUiEvent.Note -> AlertDialog(onDismissRequest=controller::dismissInteraction,title={Text("注释 · ${event.content.sourceLabel}")},text={SelectionContainer { Text(event.content.text,Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())) }},confirmButton={TextButton(onClick=controller::jumpToNote) { Text("跳到注释所在位置") }},dismissButton={TextButton(onClick=controller::dismissInteraction) { Text("关闭") }})
+        is ReaderUiEvent.ExternalLink -> AlertDialog(onDismissRequest=controller::dismissInteraction,title={Text("打开外部链接？")},text={Text(event.url)},confirmButton={TextButton(onClick={
+            val url=controller.confirmExternal()
+            if(url!=null)try { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,url.toUri())) } catch(_: android.content.ActivityNotFoundException) { localNotice="没有可打开链接的应用" }
+        }) { Text("打开浏览器") }},dismissButton={TextButton(onClick=controller::dismissInteraction) { Text("取消") }})
+        // The WebView owns its native selection handles and copy/share ActionMode.
+        // Observing a validated selection must never create a focus-stealing window.
+        is ReaderUiEvent.Selection -> LaunchedEffect(event) { controller.dismissInteraction() }
+        is ReaderUiEvent.Image -> ReaderImageViewer(event.source,controller::dismissInteraction)
+        is ReaderUiEvent.Notice -> AlertDialog(onDismissRequest=controller::dismissInteraction,title={Text("正文提示")},text={Text(event.message)},confirmButton={TextButton(onClick=controller::dismissInteraction) { Text("知道了") }})
+        null -> Unit
+    }
     if(rendererState.endPrompt)AlertDialog(onDismissRequest=controller::dismissEnd,title={Text("已到本书末尾")},text={Text("是否将本书标记为已读完？")},
         confirmButton={TextButton(onClick={controller.markFinished(true)}) { Text("标记读完") }},dismissButton={TextButton(onClick=controller::dismissEnd) { Text("继续阅读") }})
     panel?.let { selected -> ModalBottomSheet(onDismissRequest = { dismissPanel() }) {
@@ -368,7 +387,8 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val adapter = remember(document) { WebReaderAdapter(context) { event -> when(event) {
-        is RendererEvent.Zoom -> Unit
+        is RendererEvent.Interaction -> Unit
+            is RendererEvent.Zoom -> Unit
         is RendererEvent.Notice -> error = event.message
         RendererEvent.Loading -> ready = false
         is RendererEvent.Ready -> { ready = true; error = null }

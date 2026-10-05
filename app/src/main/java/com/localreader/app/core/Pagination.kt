@@ -80,14 +80,17 @@ fun ReadingViewport.contains(locator: Locator): Boolean {
     if(visiblePoints.any { point -> point.version==locator.version && when(locator) {
         is Locator.Text -> point is Locator.Text && point.sourceOffset==locator.sourceOffset
         is Locator.Epub -> locator.elementId==null && point is Locator.Epub && point.elementId==null && point.spine==locator.spine && point.offset==locator.offset
+        is Locator.EpubResource -> locator.elementId==null && point is Locator.EpubResource && point.elementId==null && point.docKey==locator.docKey && point.offset==locator.offset
         is Locator.Article -> !locator.element && point is Locator.Article && point.blockId==locator.blockId && point.textOffset==locator.textOffset
         else -> false
     } })return true
     if(visibleElements.contains(locator))return true
     if(locator is Locator.Epub && locator.elementId!=null)return visibleElements.any { it is Locator.Epub && it.version==locator.version && it.spine==locator.spine && it.elementId==locator.elementId }
+    if(locator is Locator.EpubResource && locator.elementId!=null)return visibleElements.any { it is Locator.EpubResource && it.version==locator.version && it.docKey==locator.docKey && it.elementId==locator.elementId }
     return visibleRanges.any { range -> when(locator) {
         is Locator.Text -> range.start is Locator.Text && range.end is Locator.Text && locator.version==range.start.version && locator.version==range.end.version && locator.sourceOffset>=range.start.sourceOffset && locator.sourceOffset<range.end.sourceOffset
         is Locator.Epub -> range.start is Locator.Epub && range.end is Locator.Epub && locator.version==range.start.version && locator.version==range.end.version && locator.spine==range.start.spine && locator.offset>=range.start.offset && locator.offset<range.end.offset
+        is Locator.EpubResource -> range.start is Locator.EpubResource && range.end is Locator.EpubResource && range.start.version==locator.version && range.end.version==locator.version && locator.docKey==range.start.docKey && locator.docKey==range.end.docKey && locator.offset>=range.start.offset && locator.offset<range.end.offset
         is Locator.Article -> !locator.element && range.start is Locator.Article && range.end is Locator.Article && locator.version==range.start.version && locator.version==range.end.version && locator.blockId==range.start.blockId && locator.textOffset>=range.start.textOffset && locator.textOffset<range.end.textOffset
         else -> false
     } }

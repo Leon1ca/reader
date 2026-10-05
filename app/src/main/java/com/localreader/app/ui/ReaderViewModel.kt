@@ -35,7 +35,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun readerController(sessionGeneration: Long): ReaderController {
         check(owner?.generation==sessionGeneration)
         return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) },
-            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::resetBookRules,::finished,::closeReader,::flushPosition),owner?.opened?.search,{ locator -> owner?.takeIf { it.generation==sessionGeneration }?.opened?.paginationChapterEnd(locator) },{ state.value.books.firstOrNull { it.id==owner?.opened?.contentId }?.finishedAt!=null }).also { controller=it }
+            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::resetBookRules,::finished,::closeReader,::flushPosition),owner?.opened?.search,{ locator -> owner?.takeIf { it.generation==sessionGeneration }?.opened?.paginationChapterEnd(locator) },{ state.value.books.firstOrNull { it.id==owner?.opened?.contentId }?.finishedAt!=null },owner?.opened?.interactions).also { controller=it }
     }
     private val retryOwners = java.util.concurrent.CopyOnWriteArrayList<ReadingSessionOwner>()
     val preferences = application.getSharedPreferences("ui", 0)
@@ -87,7 +87,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         if (owner === active && active.snapshot.rules != rules) {
             val screen = state.value.reader ?: return
             active.rules(rules)
-            mutable.update { it.copy(reader = active.state(serial = screen.jumpSerial + 1,notice = screen.notice)) }
+            mutable.update { it.copy(reader = active.state(screen.jump,screen.jumpSerial + 1,screen.notice,ReadingPresentation.prepare(active.opened,active.snapshot.copy(current=screen.jump)))) }
         }
     }
     fun importFiles(uris: List<Uri>) {
@@ -144,7 +144,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         return when(event) {
             is RendererEvent.Position -> {
                 val accepted=position(event.locator,event.intent==IntentCause.UserNavigation)
-                if(accepted && verifiedReaders.add(sessionGeneration)) {
+                if(accepted && event.locator !is Locator.EpubResource && verifiedReaders.add(sessionGeneration)) {
                     val active=owner ?: return false
                     val readTime=System.currentTimeMillis()
                     viewModelScope.launch(dbWriter) { try { contents.markRead(active.opened.contentId,active.opened.revision,readTime) }
@@ -181,25 +181,42 @@ class ReaderViewModel internal constructor(application: Application, private val
         return succeeded
     }
     fun closeReader() {
+        navigationJob?.cancel();++navigationSerial
         saveJob?.cancel(); flushPosition()
         val old = owner
         old?.revokeRenderers() // main thread: resource capability and position callbacks are gone before source close
+        controller?.detach();controller=null // cancel interaction/search IO before waiting for source closure
         old?.closeSource() // bounded handle closure cannot be cancelled by an immediately cleared ViewModel
         if (old?.hasPending == true) retryOwners.addIfAbsent(old)
-        controller?.detach();controller=null;owner = null; ++generation
+        owner = null; ++generation
         mutable.update { it.copy(reader = null) }
         viewModelScope.launch { withContext(Dispatchers.IO) {
             val books = contents.summaries(); mutable.update { it.copy(books = books) }
         } }
     }
-    fun jump(locator: Locator) {
+    private var navigationJob: Job?=null
+    private var navigationSerial=0L
+    fun jump(locator: Locator)=navigate { locator }
+    fun jumpToc(id: String)=navigate { opened -> opened.locatorForToc(id) ?: error("目录位置不可用") }
+    private fun navigate(resolve: (OpenedBook)->Locator) {
         val active = owner ?: return
         if (state.value.busy) return
-        mutable.update { state -> state.copy(reader = state.reader?.takeIf { it.generation == active.generation }?.let {
-            it.copy(jump = locator,jumpSerial = it.jumpSerial + 1)
-        }) }
+        navigationJob?.cancel();val serial=++navigationSerial
+        val snapshot=active.snapshot
+        viewModelScope.launch {
+            try {
+                val navigation=withContext(Dispatchers.IO) {
+                    val coroutine=currentCoroutineContext();val locator=resolve(active.opened)
+                    val target=active.opened.prepareNavigation(locator,snapshot.current) { coroutine.ensureActive() }
+                    Triple(target,ReadingPresentation.prepare(active.opened,snapshot.copy(current=target)),target!=locator)
+                }
+                if(owner!==active || serial!=navigationSerial)return@launch
+                val previous=state.value.reader ?: return@launch
+                mutable.update { it.copy(reader=active.state(navigation.first,previous.jumpSerial+1,if(navigation.third)"已恢复至附近可读位置；原书签仍保留。" else null,navigation.second)) }
+            } catch(cancel: CancellationException) { throw cancel }
+            catch(error: Exception) { if(owner===active && serial==navigationSerial)mutable.update { it.copy(error="跳转失败：${error.message}") } }
+        }.also { navigationJob=it }
     }
-    fun jumpToc(id: String) { owner?.opened?.locatorForToc(id)?.let(::jump) }
     fun style(fontSize: Float, theme: String) {
         val old = owner?.snapshot?.rules ?: return
         val patch = RulesPatch(fontSize = if(fontSize != old.fontSize) FieldUpdate.Set(fontSize) else FieldUpdate.Keep,
@@ -290,6 +307,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         val active = owner ?: return
         val controls = active.opened.textControls ?: return
         if (state.value.busy || encoding !in controls.availableEncodings) return
+        navigationJob?.cancel();++navigationSerial
         saveJob?.cancel()
         if (!flushPosition()) return
         mutable.update { it.copy(busy = true,operation = "正在以 $encoding 重新解析") }
@@ -327,5 +345,10 @@ class ReaderViewModel internal constructor(application: Application, private val
             finally { mutable.update { it.copy(busy = false, operation = "") } }
         }
     }
-    override fun onCleared() { saveJob?.cancel(); flushPosition(); owner?.let { it.revokeRenderers(); it.closeSource() };controller?.detach();controller=null; owner = null; ++generation }
+    override fun onCleared() {
+        navigationJob?.cancel();++navigationSerial;saveJob?.cancel();flushPosition()
+        val old=owner;old?.revokeRenderers()
+        controller?.detach();controller=null
+        old?.closeSource();owner=null;++generation
+    }
 }

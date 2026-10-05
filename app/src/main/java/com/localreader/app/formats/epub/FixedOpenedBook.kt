@@ -39,11 +39,12 @@ class FixedPublication(private val source: EpubSource): ReaderPublication {
         index.takeIf { it>=0 }?.let { Locator.Page(sourceRevision,it,0.0,0.0) }
     } catch(_: Exception) { null }
 }
-class FixedOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: File? = null, searchRoot: File? = null): OpenedBook {
+class FixedOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: File? = null, searchRoot: File? = null, originalHash: String? = null): OpenedBook {
     override val format=ContentFormat.EPUB
     override val revision=source.record.revision
     override val publication=FixedPublication(source)
     private val closed=AtomicBoolean(false)
+    override val interactions: BookInteractions? = if(original!=null && originalHash!=null)EpubInteractions(source,original,originalHash,publication,false) else null
     override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ page,_ -> Locator.Page(revision,page,0.0,0.0) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { i,t -> TocEntry("fixed-toc:$i",t.title,t.depth) }
     override fun toc()=entries
@@ -60,13 +61,14 @@ class FixedOpenedBook(override val contentId: String,override val metadata: Cont
         return entries.firstOrNull { entry -> entry.depth <= (chapter?.depth ?: 0) && (locatorForToc(entry.id) as? Locator.Page)?.page?.let { it>page }==true }
             ?.let { PaginationBoundary((locatorForToc(it.id) as Locator.Page).page,0.0) }
     }
-    override fun accepts(locator: Locator)=!closed.get() && locator is Locator.Page && locator.version==revision && locator.page in 0 until publication.sectionCount && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
-    override fun fractionOf(locator: Locator): Double { val page=publication.locator(publication.target(locator).anchor)!!;return FixedCoordinates.fraction(publication.sectionCount,page.page,page.y) }
+    override fun accepts(locator: Locator)=if(locator is Locator.EpubResource)!closed.get() && interactions?.accepts(locator)==true else !closed.get() && locator is Locator.Page && locator.version==revision && locator.page in 0 until publication.sectionCount && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
+    override fun fractionOf(locator: Locator): Double { if(locator is Locator.EpubResource)return fractionOf(locator.returnTo); val page=publication.locator(publication.target(locator).anchor)!!;return FixedCoordinates.fraction(publication.sectionCount,page.page,page.y) }
     override fun fractionOf(extent: ReadingExtent): Double { require(extent is FixedReadingExtent && extent.revision==revision);return FixedCoordinates.fraction(publication.sectionCount,extent.page,extent.y) }
-    override fun excerpt(locator: Locator,maxChars: Int): String { require(maxChars in 0..120);return if(accepts(locator))LocatorCodec.safePrefix("第 ${(locator as Locator.Page).page+1} 页",maxChars) else "" }
+    override fun excerpt(locator: Locator,maxChars: Int): String { require(maxChars in 0..120);if(locator is Locator.EpubResource)return interactions?.excerpt(locator,maxChars).orEmpty();return if(accepts(locator))LocatorCodec.safePrefix("第 ${(locator as Locator.Page).page+1} 页",maxChars) else "" }
     override fun furthestOf(first: ReadingExtent,second: Locator): ReadingExtent {
+        if(second is Locator.EpubResource) { require(first is FixedReadingExtent && first.revision==revision && accepts(second));return first }
         require(first is FixedReadingExtent && second is Locator.Page && first.revision==revision && accepts(second))
         return if(first.page>second.page || first.page==second.page && first.y>=second.y)first else FixedReadingExtent(revision,second.page,second.x,second.y)
     }
-    override fun close() { if(closed.compareAndSet(false,true))source.close() }
+    override fun close() { if(closed.compareAndSet(false,true)) { interactions?.close();source.close() } }
 }

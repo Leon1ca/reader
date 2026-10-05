@@ -178,16 +178,37 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
                         if(token.matches(Regex("[a-zA-Z0-9-]{1,64}")))session.userIntentToken=token
                     }
                 }
-                "linkRequested" -> {
-                    if(!session.gate.ready)return
-                    val href=event.optString("href");if(href.length !in 1..4096)return
-                    scope.launch {
-                        val locator=withContext(Dispatchers.IO) { session.publication.linkTarget(href) }
-                        if(active===session && session.gate.accepts(identity) && locator!=null)goTo(locator)
+                "linkRequested","externalRequested","imageRequested","selectionRequested" -> {
+                    if(!session.gate.ready || !session.positionValidated)return
+                    val section=(event.opt("section") as? Number)?.toDouble()?.takeIf { it.isFinite() && it==it.toInt().toDouble() && it.toInt() in 0 until session.publication.sectionCount }?.toInt() ?: return
+                    val request=when(event.getString("type")) {
+                        "linkRequested","externalRequested" -> {
+                            val href=event.optString("href");if(href.length !in 1..4096)return
+                            ContentInteraction.Link(section,href,event.getString("type")=="externalRequested")
+                        }
+                        "imageRequested" -> {
+                            if(session.publication.kind==WebContentKind.FIXED)return
+                            val id=event.optString("elementId");if(id.length !in 1..128)return
+                            ContentInteraction.Image(section,id)
+                        }
+                        else -> {
+                            fun offset(key: String): Int {
+                                val value=(event.get(key) as? Number)?.toDouble() ?: error("Invalid selection offset")
+                                require(value.isFinite() && value>=0 && value<=Int.MAX_VALUE && value==value.toInt().toDouble());return value.toInt()
+                            }
+                            val start=offset("start");val end=offset("end");val text=event.getString("text")
+                            require(end>start && end-start<=4096 && text.length in 1..2000 && LocatorCodec.wellFormed(text))
+                            val ranges=VisibleRangeCodec.decode(event.getString("selectionRanges"))
+                            require(ranges.isNotEmpty() && ranges.size<=4096 && ranges.all { it.start>=start && it.end<=end })
+                            val rect=event.getJSONObject("rect")
+                            listOf("left","top","width","height").forEach { key -> require(rect.getDouble(key).isFinite() && kotlin.math.abs(rect.getDouble(key))<=1000000) }
+                            require(rect.getDouble("width")>0 && rect.getDouble("height")>0)
+                            ContentInteraction.Selection(section,RendererAnchor.Text(section,start),RendererAnchor.Text(section,end),text,ranges)
+                        }
                     }
+                    onEvent(RendererEvent.Interaction(request))
                 }
                 "notice" -> onEvent(RendererEvent.Notice(event.optString("message").take(300)))
-                "externalRequested" -> if(session.gate.ready)onEvent(RendererEvent.Notice("外部链接不会在正文组件中打开。"))
                 "error" -> fail("正文排版失败：${event.optString("message").take(300)}")
                 "layoutInvalidated" -> if (session.gate.ready) command(session,"setRules",session.locator,session.rules)
             }
@@ -219,7 +240,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         fun mappedRange(start: RendererAnchor,end: RendererAnchor): VisibleSourceRange {
             require(start.section==end.section && (session.publication.protocolVersion==1 || start is RendererAnchor.Text && end is RendererAnchor.Text))
             val first=requireNotNull(session.publication.locator(start));val last=requireNotNull(session.publication.locator(end))
-            require(when(first) { is Locator.Text -> last is Locator.Text && first.sourceOffset<last.sourceOffset;is Locator.Epub -> last is Locator.Epub && first.spine==last.spine && first.offset<last.offset;is Locator.Article -> !first.element && last is Locator.Article && !last.element && first.blockId==last.blockId && first.textOffset<last.textOffset;else -> false });return VisibleSourceRange(first,last)
+            require(when(first) { is Locator.Text -> last is Locator.Text && first.sourceOffset<last.sourceOffset;is Locator.Epub -> last is Locator.Epub && first.spine==last.spine && first.offset<last.offset;is Locator.EpubResource -> last is Locator.EpubResource && first.docKey==last.docKey && first.offset<last.offset;is Locator.Article -> !first.element && last is Locator.Article && !last.element && first.blockId==last.blockId && first.textOffset<last.textOffset;else -> false });return VisibleSourceRange(first,last)
         }
         val ranges=(0 until rawRanges.length()).map { i -> val row=rawRanges.getJSONObject(i);mappedRange(anchor(row.getJSONObject("start")),anchor(row.getJSONObject("end"))) }.toMutableList()
         json.optJSONArray("rangeGroups")?.let { groups ->
@@ -245,7 +266,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         val rawElements=json.getJSONArray("elements");require(rawElements.length()<=256)
         fun mappedElement(value: RendererAnchor): Locator {
             val mapped=requireNotNull(session.publication.locator(value))
-            require(mapped is Locator.Epub && mapped.elementId!=null || mapped is Locator.Article && mapped.element);return mapped
+            require(mapped is Locator.EpubResource && mapped.elementId!=null || mapped is Locator.Epub && mapped.elementId!=null || mapped is Locator.Article && mapped.element);return mapped
         }
         val elements=(0 until rawElements.length()).map {
             mappedElement(anchor(rawElements.getJSONObject(it)))
@@ -266,7 +287,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         val rawPoints=json.getJSONArray("points");require(rawPoints.length()<=256)
         val points=(0 until rawPoints.length()).mapNotNull {
             val point=anchor(rawPoints.getJSONObject(it));val mapped=requireNotNull(session.publication.locator(point))
-            require(mapped is Locator.Text || mapped is Locator.Epub && mapped.elementId==null || mapped is Locator.Article && !mapped.element)
+            require(mapped is Locator.Text || mapped is Locator.EpubResource && mapped.elementId==null || mapped is Locator.Epub && mapped.elementId==null || mapped is Locator.Article && !mapped.element)
             session.publication.visiblePoint(point)
         }
         val rawPages=json.getJSONArray("visiblePages");require(rawPages.length()<=4)
@@ -274,7 +295,7 @@ class WebReaderAdapter(context: Context, private val onEvent: (RendererEvent) ->
         require(pages.distinct().size==pages.size && (session.publication.kind==WebContentKind.FIXED || pages.isEmpty()))
         val atEnd=json.getBoolean("atEnd")
         require(!atEnd || if(session.publication.kind==WebContentKind.FIXED)session.publication.sectionCount-1 in pages else samples.any { it.section==session.publication.sectionCount-1 })
-        return ReadingViewport(session.publication.sourceRevision,current,digest(session.paginationBase+":"+signature),samples,ranges,elements,pages,atEnd,points)
+        return ReadingViewport(session.publication.sourceRevision,current,digest(session.paginationBase+":"+signature),samples,ranges,elements,pages,atEnd && !session.publication.auxiliary,points)
     }
     private fun digest(value: String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     private fun bundledFontSignature(context: Context): String = synchronized(fontLock) {

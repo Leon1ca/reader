@@ -20,7 +20,7 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
             val coroutine=currentCoroutineContext()
             val (directory,cache)=repository.currentEpubCache(book) { coroutine.ensureActive() }
             val source=EpubSource(directory,cache)
-            try { return@create if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot) }
+            try { return@create if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) }
             catch(error: Throwable) { source.close();throw error }
         }
         val source = repository.engine(requireNotNull(repository.db.txt(book.id)))

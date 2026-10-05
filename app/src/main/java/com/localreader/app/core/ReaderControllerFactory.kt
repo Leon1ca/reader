@@ -11,11 +11,13 @@ class ReaderControllerFactory(private val books: OpenedBookFactory,private val s
     suspend fun open(contentId: String,generation: Long,loadSnapshot: suspend (OpenedBook)->ReadingSnapshot = { book -> withContext(Dispatchers.IO) { store.loadSnapshot(book.contentId) } }): PreparedReader {
         val opened=books.open(contentId)
         try {
-            val snapshot=loadSnapshot(opened)
+            val stored=loadSnapshot(opened)
+            val navigation=withContext(Dispatchers.IO) { val coroutine=currentCoroutineContext();opened.prepareNavigation(stored.current) { coroutine.ensureActive() } }
+            val snapshot=stored.copy(current=navigation)
             currentCoroutineContext().ensureActive()
             check(opened.revision==snapshot.current.version) { "书籍版本在打开期间改变" }
             val owner=ReadingSessionOwner(opened,generation,store,snapshot)
-            val session=withContext(Dispatchers.IO) { owner.state() }
+            val session=withContext(Dispatchers.IO) { owner.state(notice=if(navigation!=stored.current)"附属正文不可用，已恢复至主文附近；原书签仍保留。" else null) }
             currentCoroutineContext().ensureActive()
             return PreparedReader(owner,session)
         } catch(error: Throwable) { opened.close();throw error }

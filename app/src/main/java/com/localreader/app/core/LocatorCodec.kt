@@ -15,6 +15,12 @@ object LocatorCodec {
             is Locator.Article -> json.put("t","article").put("blockId",locator.blockId).put("textOffset",locator.textOffset).put("element",locator.element)
             is Locator.Epub -> json.put("t","epub").put("spine",locator.spine).put("offset",locator.offset).put("quote",safePrefix(locator.quote,48))
                 .put("progression",locator.progression).put("fallbackFraction",locator.fallbackFraction).also { locator.elementId?.let { id -> it.put("elementId",id) } }
+            is Locator.EpubResource -> {
+                require(locator.returnTo is Locator.Epub || locator.returnTo is Locator.Page)
+                require(locator.returnTo.version==locator.version)
+                json.put("t","epub-resource").put("docKey",locator.docKey).put("offset",locator.offset).put("quote",safePrefix(locator.quote,48)).put("returnTo",JSONObject(encode(locator.returnTo)))
+                locator.elementId?.let { json.put("elementId",it) }
+            }
             is Locator.Page -> { require(locator.page>=0 && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0) { "固定页面定位无效" };json.put("t","page").put("page",locator.page).put("x",locator.x).put("y",locator.y) }
             is Locator.Comic -> json.put("t","comic").put("imageId",locator.imageId).put("order",locator.order).put("y",locator.y)
             is Locator.Unknown -> error("unreachable")
@@ -32,6 +38,12 @@ object LocatorCodec {
             "article" -> Locator.Article(version,string(json,"blockId"),int(json,"textOffset"),boolean(json,"element"))
             "epub" -> Locator.Epub(version,int(json,"spine"),int(json,"offset"),string(json,"quote",allowEmpty = true).also { require(it.length <= 48 && wellFormed(it)) },fraction(json,"progression"),fraction(json,"fallbackFraction"),
                 if(json.has("elementId"))string(json,"elementId").also { require(it.length<=128) } else null)
+            "epub-resource" -> {
+                val key=string(json,"docKey");require(key.matches(Regex("[0-9a-f]{32}")))
+                val main=json.getJSONObject("returnTo");require(main.optString("t") in setOf("epub","page") && main.opt("schema")==1 && !main.has("returnTo"))
+                val returned=decode(main.toString());require(returned.version==version && (returned is Locator.Epub || returned is Locator.Page))
+                Locator.EpubResource(version,key,int(json,"offset"),returned,string(json,"quote",true).also { require(it.length<=48 && wellFormed(it)) },if(json.has("elementId"))string(json,"elementId").also { require(it.length<=128) } else null)
+            }
             "page" -> Locator.Page(version,int(json,"page"),fraction(json,"x"),fraction(json,"y"))
             "comic" -> Locator.Comic(version,string(json,"imageId"),int(json,"order"),fraction(json,"y"))
             else -> Locator.Unknown(version,raw)
@@ -40,6 +52,7 @@ object LocatorCodec {
     fun key(locator: Locator): String = when (locator) {
         is Locator.Text -> "text|${locator.version}|${locator.sourceOffset}"
         is Locator.Epub -> "epub|${locator.version}|${locator.spine}|${locator.offset}" + (locator.elementId?.let { "|element|$it" } ?: "")
+        is Locator.EpubResource -> "epub-resource|${locator.version}|${locator.docKey}|${locator.offset}"+(locator.elementId?.let { "|element|$it" } ?: "")
         is Locator.Article -> "article|${locator.version}|${locator.blockId}|${locator.textOffset}|${locator.element}"
         is Locator.Page -> "page|${locator.version}|${locator.page}"
         is Locator.Comic -> "comic|${locator.version}|${locator.imageId}|${locator.order}|${locator.y}"
@@ -65,7 +78,7 @@ object LocatorCodec {
         if (end > 0 && end < text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--
         return text.substring(0,end)
     }
-    private fun wellFormed(text: String): Boolean {
+    internal fun wellFormed(text: String): Boolean {
         var i = 0
         while (i < text.length) { val c = text[i++]; if (c.isHighSurrogate()) { if (i == text.length || !text[i++].isLowSurrogate()) return false } else if (c.isLowSurrogate()) return false }
         return true

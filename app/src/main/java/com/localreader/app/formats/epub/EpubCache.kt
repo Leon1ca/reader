@@ -64,10 +64,18 @@ object EpubCache {
         } }
         return true
     }
-    fun build(original: File,directory: File,hash: String,checkpoint: () -> Unit = {}): EpubCacheRecord {
+    fun build(original: File,directory: File,hash: String,checkpoint: () -> Unit = {}): EpubCacheRecord = buildDocument(original,directory,hash,null,checkpoint)
+    internal fun buildAuxiliary(original: File,directory: File,hash: String,path: PackagePath,checkpoint: ()->Unit): EpubCacheRecord = buildDocument(original,directory,hash,path,checkpoint)
+    private fun buildDocument(original: File,directory: File,hash: String,document: PackagePath?,checkpoint: () -> Unit): EpubCacheRecord {
         directory.mkdirs()
         return EpubZip(original,checkpoint).use { zip ->
-            zip.verifyAll();val packageInfo=EpubPackages.parse(zip)
+            zip.verifyAll();val parsed=EpubPackages.parse(zip)
+            val packageInfo=if(document==null)parsed else {
+                val item=requireNotNull(parsed.resources[document]) { "附属文档不在清单中" }
+                require(item.mime in setOf("application/xhtml+xml","text/html")) { "此附属资源不是正文文档" }
+                require(zip.entries.getValue(document).size<=8L*1024*1024) { "附属文档超过 8 MiB 输入预算" }
+                parsed.copy(spine=listOf(EpubSpine(item,true,"reflowable","none",null)),toc=emptyList(),cover=null,layout="reflowable",mixed=false)
+            }
             // Effective fixed layout metadata is parsed accurately; its backend is implemented in R3.
             val fixed=packageInfo.layout=="pre-paginated"
             val fixedPages=mutableListOf<EpubFixedPage>()

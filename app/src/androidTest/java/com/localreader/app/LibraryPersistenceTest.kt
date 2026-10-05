@@ -431,6 +431,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Interaction -> Unit
                         is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
@@ -528,6 +529,7 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
+                        is RendererEvent.Interaction -> Unit
                         is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)

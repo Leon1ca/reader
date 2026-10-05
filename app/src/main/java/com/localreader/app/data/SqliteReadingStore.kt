@@ -32,7 +32,13 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
             ContentFormat.TXT -> { val meta = requireNotNull(db.txtMetadata(contentId));require(locator is Locator.Text && locator.sourceOffset in 0..meta.characters && locator.paragraph in 0 until meta.paragraphs && locator.character >= 0) { "无效TXT定位" } }
             ContentFormat.EPUB -> {
                 val cache=db.epubCache(contentId)
-                if(cache.layout=="pre-paginated") {
+                if(locator is Locator.EpubResource) {
+                    require(locator.returnTo is Locator.Epub || locator.returnTo is Locator.Page)
+                    checkCurrent(contentId,revision,locator.returnTo)
+                    val record=EpubAuxiliary.read(db.epubDirectory(contentId),revision,locator.docKey).second
+                    val section=record.sections.single()
+                    require(locator.offset in 0..section.characters && (locator.elementId==null || section.elements[locator.elementId]==locator.offset)) { "无效附属正文坐标" }
+                } else if(cache.layout=="pre-paginated") {
                     require(locator is Locator.Page && locator.page in cache.fixedPages.indices && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0) { "无效固定页面坐标" }
                 } else {
                     require(locator is Locator.Epub) { "无效EPUB定位" }
@@ -51,6 +57,29 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
                     require(furthest is TxtReadingExtent && previous is TxtReadingExtent && furthest.revision==revision)
                     val meta=requireNotNull(db.txtMetadata(contentId));require(furthest.sourceOffset in 0..meta.characters)
                     db.positionValues(current,furthest.copy(sourceOffset=maxOf(previous.sourceOffset,furthest.sourceOffset)),meta.characters)
+                }
+                is Locator.EpubResource -> {
+                    val cache=db.epubCache(contentId)
+                    // The owner can still hold a valid main advance not yet committed
+                    // when an auxiliary anchor replaces its debounce snapshot.
+                    val extent: ReadingExtent
+                    val extentFraction: Double
+                    when {
+                        furthest is EpubReadingExtent && previous is EpubReadingExtent && cache.layout!="pre-paginated" -> {
+                            require(furthest.revision==revision && previous.revision==revision && furthest.spine in cache.sections.indices && furthest.offset in 0..cache.sections[furthest.spine].characters)
+                            val merged=if(previous.spine>furthest.spine || previous.spine==furthest.spine && previous.offset>=furthest.offset)previous else furthest
+                            extent=merged;extentFraction=EpubCoordinates.fraction(cache.sections,merged.spine,merged.offset)
+                        }
+                        furthest is FixedReadingExtent && previous is FixedReadingExtent && cache.layout=="pre-paginated" -> {
+                            require(furthest.revision==revision && previous.revision==revision && furthest.page in cache.fixedPages.indices && furthest.x.isFinite() && furthest.y.isFinite() && furthest.x in 0.0..1.0 && furthest.y in 0.0..1.0)
+                            val merged=if(previous.page>furthest.page || previous.page==furthest.page && previous.y>=furthest.y)previous else furthest
+                            extent=merged;extentFraction=FixedCoordinates.fraction(cache.sections.size,merged.page,merged.y)
+                        }
+                        else -> error("附属正文的主文阅读范围无效")
+                    }
+                    val main=current.returnTo
+                    val fraction=when(main) { is Locator.Epub -> EpubCoordinates.fraction(cache.sections,main.spine,main.offset);is Locator.Page -> FixedCoordinates.fraction(cache.sections.size,main.page,main.y);else -> error("无效主文返回位置") }
+                    ContentValues().apply { put("locator_json",LocatorCodec.encode(current));put("fraction",fraction);put("furthest_json",ReadingExtentCodec.encode(extent));put("furthest_fraction",extentFraction) }
                 }
                 is Locator.Epub -> {
                     require(furthest is EpubReadingExtent && previous is EpubReadingExtent && furthest.revision==revision && previous.revision==revision)

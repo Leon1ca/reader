@@ -153,11 +153,12 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     }
 }
 
-class EpubOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: java.io.File? = null, searchRoot: java.io.File? = null): OpenedBook {
+class EpubOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: java.io.File? = null, searchRoot: java.io.File? = null, originalHash: String? = null): OpenedBook {
     override val format=ContentFormat.EPUB
     override val revision=source.record.revision
     override val publication=EpubPublication(source)
     private val closed=AtomicBoolean(false)
+    override val interactions: BookInteractions? = if(original!=null && originalHash!=null)EpubInteractions(source,original,originalHash,publication,true) else null
     override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ spine,offset -> publication.position(spine,offset) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { index,item -> TocEntry("epub-toc:$index",item.title,item.depth) }
     override fun toc()=entries
@@ -185,10 +186,10 @@ class EpubOpenedBook(override val contentId: String,override val metadata: Conte
             (locator as? Locator.Epub)?.let { pos -> it.first>pos.spine || it.first==pos.spine && it.second>pos.offset }==true } ?: return null
         return publication.paginationCoordinate(Locator.Epub(revision,coordinate.first,coordinate.second))
     }
-    override fun fractionOf(locator: Locator): Double { val target=publication.target(locator);val actual=publication.locator(target.anchor) ?: error("无法还原EPUB位置");return actual.fallbackFraction }
+    override fun fractionOf(locator: Locator): Double { if(locator is Locator.EpubResource)return fractionOf(locator.returnTo); val target=publication.target(locator);val actual=publication.locator(target.anchor) ?: error("无法还原EPUB位置");return actual.fallbackFraction }
     override fun fractionOf(extent: ReadingExtent): Double { require(extent is EpubReadingExtent && extent.revision==revision);return EpubCoordinates.fraction(source.record.sections,extent.spine,extent.offset) }
     override fun excerpt(locator: Locator,maxChars: Int): String {
-        require(maxChars in 0..120);val epub=locator as? Locator.Epub ?: return "";if(!accepts(epub))return ""
+        require(maxChars in 0..120);if(locator is Locator.EpubResource)return interactions?.excerpt(locator,maxChars).orEmpty();val epub=locator as? Locator.Epub ?: return "";if(!accepts(epub))return ""
         val section=source.record.sections[epub.spine];var start=epub.offset
         if(start>0 && start<section.characters) {
             val pair=source.textSlice(epub.spine,start-1,2)
@@ -197,13 +198,15 @@ class EpubOpenedBook(override val contentId: String,override val metadata: Conte
         return LocatorCodec.safePrefix(source.textSlice(epub.spine,start,maxChars+1),maxChars)
     }
     override fun accepts(locator: Locator): Boolean {
+        if(locator is Locator.EpubResource)return !closed.get() && interactions?.accepts(locator)==true
         if(closed.get() || locator !is Locator.Epub || locator.version!=revision)return false
         val section=source.record.sections.getOrNull(locator.spine) ?: return false
         return locator.offset in 0..section.characters && (locator.elementId==null || section.elements[locator.elementId]==locator.offset)
     }
     override fun furthestOf(first: ReadingExtent,second: Locator): ReadingExtent {
+        if(second is Locator.EpubResource) { require(first is EpubReadingExtent && first.revision==revision && accepts(second));return first }
         require(first is EpubReadingExtent && second is Locator.Epub && first.revision==revision && accepts(second))
         return if(first.spine>second.spine || first.spine==second.spine && first.offset>=second.offset)first else EpubReadingExtent(revision,second.spine,second.offset)
     }
-    override fun close() { if(closed.compareAndSet(false,true))source.close() }
+    override fun close() { if(closed.compareAndSet(false,true)) { interactions?.close();source.close() } }
 }

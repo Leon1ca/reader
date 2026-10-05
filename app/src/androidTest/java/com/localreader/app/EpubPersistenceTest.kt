@@ -292,7 +292,8 @@ class EpubPersistenceTest {
                     is RendererEvent.Position -> {
                         position.set(event);positionCount.incrementAndGet()
                     }
-                    is RendererEvent.Zoom -> Unit
+                    is RendererEvent.Interaction -> Unit
+                        is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> notice.set(event.message)
                     is RendererEvent.Error -> error.set(event.message)
                     is RendererEvent.Crashed -> error.set(event.message)

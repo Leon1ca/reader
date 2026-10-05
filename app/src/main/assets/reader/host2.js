@@ -267,13 +267,49 @@ instance.addEventListener('load', ({ detail: { doc, index } }) => {
     if (instance !== paginator || closed) return
     // Content is inert even when it has same-origin DOM access for Range measurement.
     doc.addEventListener('click', event => {
+        if(instance!==paginator || closed)return
         const link=event.target.closest?.('a')
         if(link) {
             event.preventDefault()
-            if(!opening && event.isTrusted && link.dataset.readerExternal)emit('externalRequested',{href:link.dataset.readerExternal})
-            else if(!opening && event.isTrusted && link.dataset.readerHref)emit('linkRequested',{href:link.dataset.readerHref})
+            if(!opening && event.isTrusted && link.dataset.readerExternal)emit('externalRequested',{section:index,href:link.dataset.readerExternal})
+            else if(!opening && event.isTrusted && link.dataset.readerHref)emit('linkRequested',{section:index,href:link.dataset.readerHref})
+            return
+        }
+        const image=event.target.closest?.('img[data-reader-element]')
+        if(image && !opening && event.isTrusted && doc.getSelection()?.isCollapsed!==false) {
+            event.preventDefault();emit('imageRequested',{section:index,elementId:image.dataset.readerElement})
         }
     }, true)
+    let selectionTimer=0,lastSelectionAt=-Infinity
+    const selection=()=>{
+        if(opening || closed || instance!==paginator)return
+        const selected=doc.getSelection();if(!selected || selected.isCollapsed || !selected.rangeCount)return
+        const range=selected.getRangeAt(0),value=textIndex(doc)
+        const start=value.starts.get(range.startContainer),end=value.starts.get(range.endContainer)
+        if(start===undefined || end===undefined)return
+        const a=start+range.startOffset,b=end+range.endOffset
+        if(b<=a || b-a>4096)return
+        const rect=range.getBoundingClientRect()
+        const text=selected.toString();if(!text || text.length>2000 || rect.width<=0 || rect.height<=0)return
+        const pieces=[]
+        for(const run of value.runs) {
+            const from=Math.max(a,run.start),to=Math.min(b,run.end)
+            if(to<=from || getComputedStyle(run.node.parentElement).visibility!=='visible')continue
+            const piece=doc.createRange();piece.setStart(run.node,from-run.start);piece.setEnd(run.node,to-run.start)
+            // Selection text excludes display:none runs, while canonical source retains them.
+            if([...piece.getClientRects()].some(r=>r.width>0 && r.height>0))pieces.push({start:{section:index,offset:from},end:{section:index,offset:to}})
+        }
+        const group=compactTextRanges(pieces)[0];if(!group)return
+        emit('selectionRequested',{section:index,start:a,end:b,text,selectionRanges:group.encoded,rect:{left:rect.left,top:rect.top,width:rect.width,height:rect.height}})
+    }
+    for(const name of ['pointerup','touchend','selectionchange'])doc.addEventListener(name,event=>{
+        if(!event.isTrusted || opening || closed || instance!==paginator)return
+        // Script-created selectionchange is trusted by browsers too. A real input
+        // must precede it; direct pointer/touch completion remains independently trusted.
+        if(name==='selectionchange' && performance.now()>userInteractionUntil)return
+        clearTimeout(selectionTimer)
+        selectionTimer=setTimeout(()=>{lastSelectionAt=performance.now();selection()},Math.max(0,200-(performance.now()-lastSelectionAt)))
+    },{passive:true})
     for (const type of ['wheel','touchmove','pointerdown','keydown']) doc.addEventListener(type,event => {
         if (instance === paginator) userIntent(event)
     },{capture:true,passive:true})

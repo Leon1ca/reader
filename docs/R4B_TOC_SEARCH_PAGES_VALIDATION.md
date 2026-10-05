@@ -22,6 +22,6 @@
 
 ## 设备验证
 
-Final full suites: phone 61/61 (189.353s), API29 emulator 60/60 (133.718s), Fold37 emulator 61/61 (181.339s). All zero skips; elapsed time is NOT a performance measurement. These actual full runs cover TOC/search estimates, reflow source-glyph navigation, and the earlier pagination/end/dense regressions. No host/vendor/CSS changes; previous nine browser results are reused under unchanged asset hashes, not reported as newly run. This substage is complete; remaining R4C/D, R5 and R6 are still pending.
+正式候选完整设备回归全部通过，均无跳过：手机 61/61（189.353 秒），Android 29 模拟器 60/60（133.718 秒），Android 37 折叠模拟器 61/61（181.339 秒）。套件耗时不是性能指标。本次实际完整回归覆盖目录及搜索页码、字号重排后的同源字形定位，以及此前分页、读完提示和密集正文用例。未改 host、vendor 或正文 CSS，旧 9 项浏览器结果按相同资产哈希复用，未声称重新运行。本批闭合，后续 R4C/D、R5 和 R6 仍待完成。
 
-After-QA observation: all prior semantic data, 29 source/index files, 9 books and 3 bookmarks retained; SQLite integrity_check=ok. Only three preference revision counters 148->156 and SQLite high-water counters bookmarks 86->90 / locator_backups 45->47 changed. allFieldsIdentical=false is recorded; no backup restore or counter rewind.
+测试后原语义字段、29 份源文件和索引、9 本书与 3 个书签均完整，SQLite 完整性检查为 ok。只有三份偏好修订 148→156 及自增高水位书签 86→90、位置备份 45→47 变化，明确记录 allFieldsIdentical=false。没有恢复旧备份或回退计数。

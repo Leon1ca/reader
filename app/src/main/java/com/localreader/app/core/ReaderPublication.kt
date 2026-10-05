@@ -8,6 +8,7 @@ interface ReaderPublication {
     val paginationParts: List<PaginationPart> get() = emptyList()
     /** Metadata-only estimate input; this method must never read or decode source text. */
     fun paginationCoordinate(locator: Locator): PaginationBoundary? = null
+    val auxiliary: Boolean get() = false
     val sectionCount: Int
     val protocolVersion: Int get() = 1
     val direction: String get() = "ltr"

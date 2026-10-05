@@ -213,15 +213,16 @@ function listen(engine){
             section:index,activeViews:engine.frameCount
         });
         doc.addEventListener('click',event=>{
+            if(engine!==renderer || closed)return;
             const link=event.target.closest?.('a');
             if(!link)return;
             event.preventDefault();
             if(!opening&&event.isTrusted){
                 if(link.dataset.readerExternal)emit('externalRequested',{
-                    href:link.dataset.readerExternal
+                    section:index,href:link.dataset.readerExternal
                 });
                 else if(link.dataset.readerHref)emit('linkRequested',{
-                    href:link.dataset.readerHref
+                    section:index,href:link.dataset.readerHref
                 })
             }
         },true);

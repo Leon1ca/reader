@@ -92,6 +92,10 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     fun txtMetadata(id: String): TxtMetadata? = readableDatabase.rawQuery("SELECT * FROM txt_meta WHERE content_id=?",arrayOf(id)).use { if(it.moveToFirst()) TxtMetadata(it.string("encoding"),it.int("paragraphs"),it.long("characters")) else null }
     fun contents(): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding,e.layout AS epub_layout FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id LEFT JOIN epub_meta e ON e.content_id=c.id",null).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"),c.nullString("epub_layout"),if(c.isNull(c.getColumnIndexOrThrow("finished_at"))) null else c.long("finished_at"),c.int("hidden_from_continue")!=0,c.nullString("cover_path"))) } }
     fun byHash(hash: String): ContentRecord? = readableDatabase.rawQuery("SELECT * FROM contents WHERE hash=?",arrayOf(hash)).use { if(it.moveToFirst()) it.content() else null }
+    internal fun epubDirectory(id: String): java.io.File {
+        val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB)
+        return EpubCache.activeDirectory(java.io.File(context.filesDir,"library/$id/versions/${content.revision}"))
+    }
     internal fun epubCache(id: String): EpubCacheRecord {
         val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB)
         val key="$id:${content.revision}"

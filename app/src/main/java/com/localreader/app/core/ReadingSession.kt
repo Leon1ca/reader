@@ -9,7 +9,7 @@ data class ReadingSession(val contentId: String, val revision: String, val gener
 data class ReadingPresentation(val metadata: ContentMetadata, val document: ReaderPublication, val toc: List<TocEntry>,
     val textControls: TextControls?, val currentFraction: Double, val furthestFraction: Double,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap()) {
     companion object {
-        fun prepare(opened: OpenedBook, snapshot: ReadingSnapshot) = ReadingPresentation(opened.metadata,opened.publication,
+        fun prepare(opened: OpenedBook, snapshot: ReadingSnapshot) = ReadingPresentation(opened.metadata,opened.publicationFor(snapshot.current),
             opened.toc(),opened.textControls,opened.fractionOf(snapshot.current),opened.fractionOf(snapshot.furthest)).also { opened.publication.paginationParts }.let { it.copy(tocCoordinates=opened.paginationTocCoordinates()) }
     }
 }

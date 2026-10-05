@@ -19,6 +19,9 @@ interface OpenedBook : Closeable {
     val revision: String
     val metadata: ContentMetadata
     val publication: ReaderPublication
+    val interactions: BookInteractions? get() = null
+    fun prepareNavigation(locator: Locator,origin: Locator?=null,checkpoint: ()->Unit = {}): Locator = interactions?.prepare(locator,origin,checkpoint) ?: locator
+    fun publicationFor(locator: Locator): ReaderPublication = interactions?.publication(locator) ?: publication
     val search: com.localreader.app.core.search.BookSearch? get() = null
     val textControls: TextControls? get() = null
     fun paginationChapterEnd(locator: Locator): PaginationBoundary? = null

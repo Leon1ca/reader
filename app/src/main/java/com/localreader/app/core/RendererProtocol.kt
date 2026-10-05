@@ -17,6 +17,7 @@ sealed interface RendererEvent {
     data class Ready(val profileId: String, val activeViews: Int, val nearby: Boolean = false) : RendererEvent
     /** A trusted fixed-page gesture commits its visible position and zoom together. */
     data class Zoom(val locator: Locator.Page,val zoom: String) : RendererEvent
+    data class Interaction(val request: ContentInteraction): RendererEvent
     data class Notice(val message: String) : RendererEvent
     data class Error(val message: String) : RendererEvent
     /** The system renderer process died; the host may rebuild the renderer from the last known locator. */

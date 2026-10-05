@@ -33,6 +33,24 @@ class EpubOpenedBookTest {
             book.close();assertFalse(book.accepts(end));assertThrows(IllegalStateException::class.java) { source.open("sections/0.txt") }
         } finally { root.deleteRecursively() }
     }
+    @Test fun auxiliaryPublicationMapsOnlyItsCanonicalDocumentAndKeepsUtf16ExcerptSafe() {
+        val root=kotlin.io.path.createTempDirectory("aux-source").toFile()
+        try {
+            File(root,"sections").mkdirs();File(root,"sections/0.txt").writeText("😀note")
+            val section=EpubSectionRecord(0,PackagePath.entry("notes.xhtml"),6,"sections/0.txt","sections/0-author.html","sections/0-custom.html",emptyMap(),emptyMap())
+            val record=EpubCacheRecord("source","notes","author",null,"id",listOf(section),emptyList(),emptyList(),emptyList(),"reflowable",false,"ltr")
+            EpubSource(root,record).use { source ->
+                val main=Locator.Epub("source",2,40)
+                val aux=EpubResourcePublication(EpubPublication(source),source,"a".repeat(32),main)
+                val first=aux.locator(RendererAnchor.Text(0,0)) as Locator.EpubResource
+                assertEquals(main,first.returnTo);assertEquals("a".repeat(32),first.docKey)
+                assertEquals(RendererAnchor.Text(0,3),aux.target(first.copy(offset=3)).anchor)
+                assertEquals("",aux.excerpt(first,1));assertEquals("😀",aux.excerpt(first,2));assertEquals("no",aux.excerpt(first.copy(offset=1),2))
+                assertTrue(aux.auxiliary);assertTrue(aux.paginationParts.isEmpty());assertNull(aux.paginationCoordinate(first))
+                assertFalse(aux.accepts(first.copy(docKey="b".repeat(32))))
+            }
+        } finally { root.deleteRecursively() }
+    }
     @Test fun technicalTrailingCaretIsNotTheNextPartBookmarkButLogicalEofRemainsVisible() {
         val root=kotlin.io.path.createTempDirectory("epub-visible-endpoint").toFile()
         try {
