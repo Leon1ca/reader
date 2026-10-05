@@ -184,7 +184,8 @@ class EpubPersistenceTest {
         val id=import(searchEpub(listOf("<p>第一章前言</p>","<p>"+"可见正文段落。".repeat(120)+"独立搜索标记😀结尾</p>")))
         val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) };val search=requireNotNull(book.search)
         val requested=AtomicReference<Locator?>();val position=AtomicReference<Locator?>();val error=AtomicReference<String?>()
-        val controller=ReaderController(1,{ {} },{ true },ReaderActions(goTo={requested.set(it)}),search)
+        val store=SqliteReadingStore(repository.db);val owner=ReadingSessionOwner(book,1,store,store.loadSnapshot(id))
+        val controller=ReaderController(1,owner::bind,{ event -> if(event is RendererEvent.Position)owner.position(event.locator,false,System.currentTimeMillis()) else true },ReaderActions(goTo={requested.set(it)}),search,book::paginationChapterEnd)
         lateinit var adapter: WebReaderAdapter;var created=false
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
@@ -192,14 +193,24 @@ class EpubPersistenceTest {
                 waitUntil { controller.searchState.value.phase==com.localreader.app.core.search.SearchPhase.DONE || controller.searchState.value.phase==com.localreader.app.core.search.SearchPhase.FAILED }
                 assertEquals(controller.searchState.value.message,com.localreader.app.core.search.SearchPhase.DONE,controller.searchState.value.phase)
                 assertEquals("独立搜索标记",controller.searchState.value.query);val hit=controller.searchState.value.hits.single()
-                scenario.onActivity { assertTrue(controller.goToSearch(hit.id));adapter=WebReaderAdapter(it) { event -> when(event) { is RendererEvent.Position -> position.set(event.locator);is RendererEvent.Error -> error.set(event.message);else -> Unit } };created=true;it.setContentView(adapter.view);adapter.open(book.publication,requireNotNull(requested.get()),ReaderRules()) }
-                waitUntil { position.get()!=null || error.get()!=null };assertNull(error.get());assertEquals((hit.locator as Locator.Epub).offset,(position.get() as Locator.Epub).offset)
+                scenario.onActivity { assertTrue(controller.goToSearch(hit.id)) }
+                val session=owner.state(requireNotNull(requested.get()),1)
+                scenario.onActivity { adapter=WebReaderAdapter(it) { event -> controller.receive(adapter,event);when(event) { is RendererEvent.Position -> position.set(event.locator);is RendererEvent.Error -> error.set(event.message);else -> Unit } };created=true;it.setContentView(adapter.view);controller.attach(adapter);controller.present(session) }
+                waitUntil { controller.state.value.phase in listOf(ReaderPhase.READY,ReaderPhase.FAILED) };assertNull(error.get());assertEquals((hit.locator as Locator.Epub).offset,(position.get() as Locator.Epub).offset)
+                val estimate=requireNotNull(controller.pageForSearch(hit.id));assertTrue(estimate.estimated);assertTrue(estimate.page in 1..requireNotNull(controller.state.value.progress).pages)
+                assertNull(controller.pageForSearch("missing-hit"))
+                val firstSignature=requireNotNull(controller.state.value.viewport).layoutSig
+                owner.rules(owner.snapshot.rules.copy(fontSize=24f));val reflow=owner.state(hit.locator,1)
+                scenario.onActivity { controller.present(reflow);assertNull(controller.pageForSearch(hit.id)) }
+                waitUntil { controller.state.value.phase==ReaderPhase.FAILED || controller.state.value.phase==ReaderPhase.READY && controller.state.value.viewport?.layoutSig!=firstSignature }
+                assertEquals(controller.state.value.message,ReaderPhase.READY,controller.state.value.phase);assertEquals(hit.locator,controller.state.value.position)
+                assertTrue(requireNotNull(controller.pageForSearch(hit.id)).estimated)
                 val diagnostic=AtomicReference<String?>();scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify(readerHost.diagnostics())") { diagnostic.set(it) } };waitUntil { diagnostic.get()!=null }
                 assertTrue(JSONObject(org.json.JSONTokener(diagnostic.get()).nextValue() as String).getJSONObject("anchorGeometry").getBoolean("visible"))
                 scenario.onActivity { controller.search("甲");controller.cancelSearch();controller.detach() }
                 assertEquals(com.localreader.app.core.search.SearchPhase.CANCELED,controller.searchState.value.phase)
                 assertFalse(controller.goToSearch(hit.id))
-            } finally { scenario.onActivity { if(created)adapter.close();controller.detach() };book.close() }
+            } finally { scenario.onActivity { if(created)adapter.close();controller.detach();owner.revokeRenderers();owner.closeSource() } }
         }
     }
     @Test fun textViewportMapsVisibleOriginalBlocksEmptyCaretAndLastPageWithoutAdvancingExtent() {

@@ -21,9 +21,10 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
     override fun paginationChapterEnd(locator: Locator): PaginationBoundary? {
         val offset=(locator as? Locator.Text)?.sourceOffset ?: return null
         val end=chapters.firstOrNull { it.sourceOffset>offset }?.sourceOffset ?: return null
-        val part=publication.paginationParts.lastOrNull { it.sourceStart<=end } ?: return null
-        return PaginationBoundary(part.index,((end-part.sourceStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0))
+        return publication.paginationCoordinate(Locator.Text(revision,end,0))
     }
+    private val tocCoordinates by lazy { chapters.mapIndexedNotNull { index,chapter -> publication.paginationCoordinate(Locator.Text(revision,chapter.sourceOffset,chapter.paragraph))?.let { entries[index].id to it } }.toMap() }
+    override fun paginationTocCoordinates()=tocCoordinates
     override fun toc(): List<TocEntry> = entries
     override fun locatorForToc(id: String): Locator? {
         checkOpen()

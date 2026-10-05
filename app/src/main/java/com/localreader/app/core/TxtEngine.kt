@@ -212,7 +212,7 @@ class TxtEngine(private val directory: File, override val version: String) : Txt
         val r = record(paragraph)
         val length = r.getInt(8); val flags = r.getInt(24)
         require(length in 0..(TxtParser.MAX_BLOCK + 1) * 4) { "索引数据损坏" }
-        return TxtBlockMetadata(length,flags and 2 != 0)
+        return TxtBlockMetadata(length,flags and 2 != 0,r.getLong(12))
     }
     @Synchronized override fun close() { text.close(); records.close(); cache.clear() }
 }

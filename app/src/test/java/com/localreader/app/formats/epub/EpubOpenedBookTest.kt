@@ -27,6 +27,9 @@ class EpubOpenedBookTest {
             assertEquals(7,(book.publication.linkTarget(PackageHref(path,"tail").identity) as Locator.Epub).offset)
             // Chapter names use cached coordinates and remain available after a file disappears.
             File(root,"sections/0.txt").delete();assertEquals("tail",book.chapterOf(end)?.title)
+            assertEquals(PaginationBoundary(0,7.0/text.length,true),book.paginationTocCoordinates()["epub-toc:1"])
+            assertEquals(PaginationBoundary(0,1.0,true),book.publication.paginationCoordinate(end))
+            assertNull(book.publication.paginationCoordinate(Locator.Epub("old",0,0)))
             book.close();assertFalse(book.accepts(end));assertThrows(IllegalStateException::class.java) { source.open("sections/0.txt") }
         } finally { root.deleteRecursively() }
     }
@@ -41,6 +44,7 @@ class EpubOpenedBookTest {
                 assertNull(book.publication.visiblePoint(RendererAnchor.Text(0,5)))
                 assertEquals(5,(book.publication.visiblePoint(RendererAnchor.Text(1,0)) as Locator.Epub).offset)
                 assertEquals(10,(book.publication.visiblePoint(RendererAnchor.Text(1,5)) as Locator.Epub).offset)
+                assertEquals(PaginationBoundary(1,0.0,true),book.publication.paginationCoordinate(Locator.Epub("source",0,5)))
             }
         } finally { root.deleteRecursively() }
     }

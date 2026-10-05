@@ -50,6 +50,11 @@ class FixedOpenedBookTest {
                 assertTrue(pub.target(legacy).nearby);assertEquals(2,pub.target(legacy).section)
                 assertFalse(pub.target(legacy.copy(offset=0)).nearby)
                 assertEquals(Locator.Page(opened.revision,2,0.0,0.0),opened.locatorForToc("fixed-toc:0"))
+                assertEquals(mapOf("fixed-toc:0" to PaginationBoundary(2,0.0)),opened.paginationTocCoordinates())
+                assertEquals(PaginationBoundary(2,0.0),pub.paginationCoordinate(page))
+                assertNull(pub.paginationCoordinate(page.copy(version="old")))
+                assertNull(pub.paginationCoordinate(page.copy(page=3)))
+                assertNull(pub.paginationCoordinate(legacy))
                 val css=RuleCompiler.compile(WebContentKind.FIXED,ReaderRules(fontSize=36f,epubStyleMode="CUSTOM"),"https://appassets.androidplatform.net/fonts/readest.css")
                 assertEquals("",css.beforeAuthor);assertEquals("",css.afterAuthor)
             }

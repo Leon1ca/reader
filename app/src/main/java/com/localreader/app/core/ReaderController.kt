@@ -53,6 +53,15 @@ class ReaderController(private val generation: Long,private val register: (Rende
     private var endPending=false
     fun dismissEnd() { endPending=false;mutable.value=mutable.value.copy(endPrompt=false) }
     private var displayed: ReadingSession?=null
+    fun pageForToc(id: String): PageEstimate? {
+        if(!valid || mutable.value.phase!=ReaderPhase.READY)return null
+        return displayed?.tocCoordinates?.get(id)?.let { estimator?.estimate(it) }
+    }
+    fun pageForSearch(id: String): PageEstimate? {
+        if(!valid || mutable.value.phase!=ReaderPhase.READY || searchMutable.value.phase!=SearchPhase.DONE)return null
+        val hit=searchMutable.value.hits.firstOrNull { it.id==id } ?: return null
+        return displayed?.document?.paginationCoordinate(hit.locator)?.let { estimator?.estimate(it) }
+    }
     private val observers=linkedSetOf<(RendererEvent) -> Unit>()
     fun observe(observer: (RendererEvent) -> Unit): () -> Unit { observers.add(observer);return { observers.remove(observer) } }
     fun attach(renderer: RendererBackend): () -> Unit {

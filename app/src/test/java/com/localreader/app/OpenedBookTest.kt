@@ -31,6 +31,10 @@ class OpenedBookTest {
             })
             assertEquals(entry,opened.chapterOf(locator))
         }
+        assertEquals(opened.toc().map { it.id }.toSet(),opened.paginationTocCoordinates().keys)
+        assertTrue(opened.paginationTocCoordinates().values.all { it.approximate })
+        assertEquals(PaginationBoundary(opened.publication.paginationParts.lastIndex,1.0,true),opened.publication.paginationCoordinate(Locator.Text(opened.revision,engine.index.totalCharacters,0)))
+        assertNull(opened.publication.paginationCoordinate(Locator.Text("old",0,0)))
         val text = engine.block(2)
         val locator = Locator.Text(engine.version,text.sourceOffset + 2,2,2)
         assertTrue(opened.accepts(locator))

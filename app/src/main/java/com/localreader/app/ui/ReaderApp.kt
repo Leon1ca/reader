@@ -294,6 +294,8 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                         TextButton(onClick={if(controller.goToSearch(hit.id))dismissPanel()},modifier=Modifier.fillMaxWidth()) {
                             Column(Modifier.fillMaxWidth()) {
                                 if(hit.chapter.isNotBlank())Text(hit.chapter,style=MaterialTheme.typography.labelSmall)
+                                val page=if(rendererState.phase==ReaderPhase.READY)controller.pageForSearch(hit.id) else null
+                                Text(page?.let { "${if(it.estimated)"约 " else ""}第 ${it.page} 页" } ?: "页码尚未估算",style=MaterialTheme.typography.labelSmall)
                                 Text(buildAnnotatedString {
                                     append(hit.excerpt.text.substring(0,hit.excerpt.matchStart))
                                     withStyle(SpanStyle(fontWeight=FontWeight.Bold,background=Color(0xFFFFDF86),color=Color.Black)) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
@@ -306,7 +308,9 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
                 "目录" -> {
                     Text(if (session.textControls?.tocSource == TocSource.TEXT_SEGMENTS) "未识别到章节标题，以下为按文本长度建立的分段。" else "按章节标题建立目录。", Modifier.padding(vertical = 12.dp))
                     LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.toc, key = { it.id }) { chapter ->
-                        TextButton(onClick = { controller.goToToc(chapter.id); panel = null }, modifier = Modifier.fillMaxWidth()) { Text(chapter.title) }
+                        TextButton(onClick = { controller.goToToc(chapter.id); panel = null }, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.fillMaxWidth()) { Text(chapter.title);val page=if(rendererState.phase==ReaderPhase.READY)controller.pageForToc(chapter.id) else null;Text(page?.let { "${if(it.estimated)"约 " else ""}第 ${it.page} 页" } ?: "页码尚未估算",style=MaterialTheme.typography.labelSmall) }
+                        }
                     } }
                 }
                 "书签" -> {

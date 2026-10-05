@@ -96,6 +96,7 @@ class ReadingUiTest {
             assertNull(repository.content(imported.id)!!.finishedAt)
             val firstGeneration = requireNotNull(model().state.value.reader).generation
             compose.onNodeWithText("目录").performClick()
+            waitFor { compose.onAllNodes(hasText("约 第 ",substring=true)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Chapter 2 UI end").performClick()
             ready()
             val jumped = requireNotNull(model().state.value.reader).snapshot.current
@@ -183,6 +184,7 @@ class ReadingUiTest {
             compose.onNodeWithText("搜索正文").performTextReplacement(marker)
             compose.onNodeWithText("查找").performClick()
             waitFor { try { compose.onNodeWithText("找到 1 处").assertExists();true } catch(_: AssertionError) { false } }
+            waitFor { compose.onAllNodes(hasText("约 第 ",substring=true)).fetchSemanticsNodes().isNotEmpty() }
             val result=hasText(marker,substring=true) and !hasSetTextAction()
             compose.onNode(result).performClick()
             val offset=text.indexOf(marker).toLong()

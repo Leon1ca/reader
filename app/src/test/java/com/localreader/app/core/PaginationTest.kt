@@ -16,6 +16,23 @@ class PaginationTest {
         val resized=estimator.accept(view(2,listOf(PaginationSample(2,1,5,false)),"new-layout"))!!
         assertTrue(resized.pageEstimated);assertTrue(resized.pagesEstimated);assertEquals(15,resized.pages)
     }
+    @Test fun tocAndSearchCoordinatesShareMeasuredPrefixAndExplicitApproximationAfterReflow() {
+        val estimator=PageEstimator(List(3) { PaginationPart(it,1000) })
+        assertNull(estimator.estimate(PaginationBoundary(1,0.0)))
+        estimator.accept(view(0,listOf(PaginationSample(0,1,2,false))))
+        assertEquals(PageEstimate(3,false),estimator.estimate(PaginationBoundary(1,0.0)))
+        assertEquals(PageEstimate(6,true),estimator.estimate(PaginationBoundary(2,.5,true)))
+        estimator.accept(view(1,listOf(PaginationSample(1,1,4,false))))
+        assertEquals(PageEstimate(7,false),estimator.estimate(PaginationBoundary(2,0.0)))
+        assertEquals(PageEstimate(8,true),estimator.estimate(PaginationBoundary(2,.5,true)))
+        estimator.accept(view(2,listOf(PaginationSample(2,1,3,false))))
+        assertEquals(PageEstimate(9,false),estimator.estimate(PaginationBoundary(2,1.0)))
+        estimator.accept(view(1,listOf(PaginationSample(1,1,5,false)),"resized"))
+        assertEquals(PageEstimate(11,true),estimator.estimate(PaginationBoundary(2,0.0)))
+        assertNull(estimator.estimate(PaginationBoundary(3,0.0)))
+        val fixed=PageEstimator(List(30) { PaginationPart(it,0) },true)
+        assertEquals(PageEstimate(30,false),fixed.estimate(PaginationBoundary(29,.75)))
+    }
     @Test fun emptyImagePartIsNotACharacterDensitySampleAndChapterBoundaryUsesSourceCoordinates() {
         val estimator=PageEstimator(listOf(PaginationPart(0,0),PaginationPart(1,1000000)))
         val result=estimator.accept(view(0,listOf(PaginationSample(0,1,1,false))))!!

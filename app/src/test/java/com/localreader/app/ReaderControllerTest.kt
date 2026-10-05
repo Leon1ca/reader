@@ -38,6 +38,19 @@ class ReaderControllerTest {
         controller.markFinished(false);controller.receive(backend,position(false));controller.receive(backend,position(true));assertTrue(controller.state.value.endPrompt)
         controller.detach()
     }
+    @Test fun tocEstimatesFollowAcceptedLayoutAndAreUnavailableDuringReplacement() {
+        val backend=FakeBackend();val controller=ReaderController(4,{ { it.close() } },{true})
+        val document=ArticleSamplePublication();val anchor=Locator.Article(document.revision,"0",0)
+        val session=ReadingSession("id",document.revision,4,ContentMetadata("t","a"),document,listOf(TocEntry("toc","chapter")),null,
+            ReadingSnapshot(anchor,TxtReadingExtent(document.revision,0),ReaderRules(),emptyList()),0.0,0.0,anchor,tocCoordinates=mapOf("toc" to PaginationBoundary(0,.5,true)))
+        controller.attach(backend);controller.present(session)
+        assertNull(controller.pageForToc("toc"))
+        fun position(pages: Int,sig: String)=RendererEvent.Position(anchor,"anchor",IntentCause.Restore,ReadingViewport(document.revision,0,sig,listOf(PaginationSample(0,1,pages,false)),emptyList(),emptyList(),emptyList(),false))
+        controller.receive(backend,position(4,"before"));assertEquals(PageEstimate(3,true),controller.pageForToc("toc"))
+        controller.receive(backend,RendererEvent.Loading);assertNull(controller.pageForToc("toc"))
+        controller.receive(backend,position(6,"after"));assertEquals(PageEstimate(4,true),controller.pageForToc("toc"))
+        assertNull(controller.pageForToc("missing"));controller.detach();assertNull(controller.pageForToc("toc"))
+    }
     private class FakeBackend: RendererBackend {
         val calls=mutableListOf<String>()
         override fun open(document: ReaderPublication,locator: Locator,rules: ReaderRules) { calls.add("open") }

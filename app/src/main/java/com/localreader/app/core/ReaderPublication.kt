@@ -6,6 +6,8 @@ interface ReaderPublication {
     val sourceRevision: String get()=revision
     val kind: WebContentKind
     val paginationParts: List<PaginationPart> get() = emptyList()
+    /** Metadata-only estimate input; this method must never read or decode source text. */
+    fun paginationCoordinate(locator: Locator): PaginationBoundary? = null
     val sectionCount: Int
     val protocolVersion: Int get() = 1
     val direction: String get() = "ltr"
@@ -51,21 +53,33 @@ class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit =
     override val revision = source.version
     override val kind = WebContentKind.TXT
     // Only compact record metadata is scanned. No book text is decoded for this directory.
-    private val starts: IntArray = buildList {
-        add(0)
+    private val directory: Pair<IntArray,LongArray> = run {
+        val paragraphs=mutableListOf<Int>();val offsets=mutableListOf<Long>()
         var records = 0; var bytes = 0
         for (paragraph in 0 until source.index.paragraphs) {
             if (paragraph % 1024 == 0) checkpoint()
             val meta = source.metadata(paragraph)
-            if (records > 0 && ((records >= 64 || bytes >= 32768) && !meta.continuation || bytes + meta.utf8Bytes > 128 * 1024)) {
-                add(paragraph); records = 0; bytes = 0
+            if (paragraph==0 || records > 0 && ((records >= 64 || bytes >= 32768) && !meta.continuation || bytes + meta.utf8Bytes > 128 * 1024)) {
+                paragraphs.add(paragraph);offsets.add(meta.sourceOffset);records = 0; bytes = 0
             }
             bytes += meta.utf8Bytes; records++
         }
-    }.toIntArray()
+        paragraphs.toIntArray() to offsets.toLongArray()
+    }
+    private val starts=directory.first
     override val sectionCount = starts.size
-    override val paginationParts: List<PaginationPart> by lazy {
-        starts.mapIndexed { index,start -> val first=source.block(start).sourceOffset;val end=starts.getOrNull(index+1)?.let { source.block(it).sourceOffset } ?: source.index.totalCharacters;PaginationPart(index,end-first,0,first) }
+    override val paginationParts: List<PaginationPart> = directory.second.mapIndexed { index,first ->
+        val end=directory.second.getOrNull(index+1) ?: source.index.totalCharacters
+        PaginationPart(index,end-first,0,first)
+    }
+    override fun paginationCoordinate(locator: Locator): PaginationBoundary? {
+        val text=locator as? Locator.Text ?: return null
+        if(text.version!=sourceRevision || text.sourceOffset !in 0..source.index.totalCharacters)return null
+        val parts=paginationParts
+        var low=0;var high=parts.size
+        while(low<high) { val middle=(low+high) ushr 1;if(parts[middle].sourceStart<=text.sourceOffset)low=middle+1 else high=middle }
+        val part=parts[(low-1).coerceAtLeast(0)]
+        return PaginationBoundary(part.index,((text.sourceOffset-part.sourceStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0),true)
     }
     private fun sectionOf(paragraph: Int): Int = starts.binarySearch(paragraph).let { if (it >= 0) it else -it - 2 }
     override fun target(locator: Locator): ContentTarget {

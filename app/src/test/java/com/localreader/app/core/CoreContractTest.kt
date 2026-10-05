@@ -10,7 +10,7 @@ class CoreContractTest {
         override val index = TextIndex("UTF-8",blocks.size,blocks.sumOf { it.text.length.toLong() + 1 },emptyList())
         var decoded = 0
         override fun block(paragraph: Int) = blocks[paragraph].also { decoded++ }
-        override fun metadata(paragraph: Int) = blocks[paragraph].let { TxtBlockMetadata(it.text.toByteArray().size,it.continuation) }
+        override fun metadata(paragraph: Int) = blocks[paragraph].let { TxtBlockMetadata(it.text.toByteArray().size,it.continuation,it.sourceOffset) }
         override fun resolve(locator: Locator): ResolvedText { val text = locator as Locator.Text; return ResolvedText(text.paragraph,text.character,false) }
         override fun close() {}
     }
@@ -20,6 +20,11 @@ class CoreContractTest {
         val publication = TxtPublication(source)
         assertEquals(0,source.decoded)
         assertTrue(publication.sectionCount > 100)
+        assertEquals(source.index.totalCharacters,publication.paginationParts.sumOf { it.characters })
+        val part=publication.paginationParts[publication.sectionCount/2]
+        assertEquals(PaginationBoundary(part.index,0.0,true),publication.paginationCoordinate(Locator.Text(source.version,part.sourceStart,0)))
+        assertNull(publication.paginationCoordinate(Locator.Text("old",part.sourceStart,0)))
+        assertEquals(0,source.decoded)
         val resolver = SessionResources("session-a",publication) { ByteArrayInputStream(byteArrayOf()) }
         listOf(0,publication.sectionCount/2,publication.sectionCount-1).forEach { section ->
             val response = requireNotNull(resolver.resolve("${resolver.base}sections/$section.html",false))

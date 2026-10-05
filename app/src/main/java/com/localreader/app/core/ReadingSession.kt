@@ -5,12 +5,12 @@ data class ReadingSession(val contentId: String, val revision: String, val gener
     val metadata: ContentMetadata, val document: ReaderPublication, val toc: List<TocEntry>,
     val textControls: TextControls?, val snapshot: ReadingSnapshot,
     val currentFraction: Double, val furthestFraction: Double,
-    val jump: Locator, val jumpSerial: Int = 0, val notice: String? = null)
+    val jump: Locator, val jumpSerial: Int = 0, val notice: String? = null,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap())
 data class ReadingPresentation(val metadata: ContentMetadata, val document: ReaderPublication, val toc: List<TocEntry>,
-    val textControls: TextControls?, val currentFraction: Double, val furthestFraction: Double) {
+    val textControls: TextControls?, val currentFraction: Double, val furthestFraction: Double,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap()) {
     companion object {
         fun prepare(opened: OpenedBook, snapshot: ReadingSnapshot) = ReadingPresentation(opened.metadata,opened.publication,
-            opened.toc(),opened.textControls,opened.fractionOf(snapshot.current),opened.fractionOf(snapshot.furthest)).also { opened.publication.paginationParts }
+            opened.toc(),opened.textControls,opened.fractionOf(snapshot.current),opened.fractionOf(snapshot.furthest)).also { opened.publication.paginationParts }.let { it.copy(tocCoordinates=opened.paginationTocCoordinates()) }
     }
 }
 
@@ -48,7 +48,7 @@ class ReadingSessionOwner(val opened: OpenedBook, val generation: Long, private 
     fun state(jump: Locator = snapshot.current, serial: Int = 0, notice: String? = null,
               presentation: ReadingPresentation = ReadingPresentation.prepare(opened,snapshot)): ReadingSession =
         ReadingSession(opened.contentId,opened.revision,generation,presentation.metadata,presentation.document,presentation.toc,presentation.textControls,
-            snapshot,presentation.currentFraction,presentation.furthestFraction,jump,serial,notice)
+            snapshot,presentation.currentFraction,presentation.furthestFraction,jump,serial,notice,presentation.tocCoordinates)
 }
 
 /** Format-specific mutation is separate from the general content and renderer ports. */

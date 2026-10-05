@@ -14,6 +14,7 @@ class FixedPublication(private val source: EpubSource): ReaderPublication {
     override val sourceRevision=record.revision
     override val kind=WebContentKind.FIXED
     override val paginationParts=record.sections.map { PaginationPart(it.index,it.characters.toLong(),it.index) }
+    override fun paginationCoordinate(locator: Locator): PaginationBoundary? = (locator as? Locator.Page)?.takeIf { it.version==sourceRevision && it.page in 0 until sectionCount }?.let { PaginationBoundary(it.page,0.0) }
     override val compatibilityNotices=record.warnings
     override val protocolVersion=2
     override val direction=record.direction
@@ -46,6 +47,11 @@ class FixedOpenedBook(override val contentId: String,override val metadata: Cont
     override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ page,_ -> Locator.Page(revision,page,0.0,0.0) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { i,t -> TocEntry("fixed-toc:$i",t.title,t.depth) }
     override fun toc()=entries
+    private val tocCoordinates: Map<String,PaginationBoundary> by lazy {
+        val pages=source.record.sections.associate { it.path to it.index }
+        source.record.toc.mapIndexedNotNull { index,item -> pages[item.target.path]?.let { entries[index].id to PaginationBoundary(it,0.0) } }.toMap()
+    }
+    override fun paginationTocCoordinates()=tocCoordinates
     override fun locatorForToc(id: String): Locator? = entries.indexOfFirst { it.id==id }.takeIf { it>=0 }?.let { i -> source.record.sections.indexOfFirst { it.path==source.record.toc[i].target.path }.takeIf { it>=0 }?.let { Locator.Page(revision,it,0.0,0.0) } }
     override fun chapterOf(locator: Locator): TocEntry? = (locator as? Locator.Page)?.let { page -> entries.lastOrNull { (locatorForToc(it.id) as? Locator.Page)?.page?.let { n -> n<=page.page }==true } }
     override fun paginationChapterEnd(locator: Locator): PaginationBoundary? {

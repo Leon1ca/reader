@@ -115,6 +115,17 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
         while(low<high) { val middle=(low+high) ushr 1;if(parts[middle].canonicalStart<=offset)low=middle+1 else high=middle }
         return parts[(low-1).coerceAtLeast(0)]
     }
+    override fun paginationCoordinate(locator: Locator): PaginationBoundary? {
+        val epub=locator as? Locator.Epub ?: return null
+        if(epub.version!=sourceRevision)return null
+        val chapter=record.sections.getOrNull(epub.spine) ?: return null
+        if(epub.offset !in 0..chapter.characters || epub.elementId!=null && epub.elementId !in chapter.elements)return null
+        val rows=partsBySpine[epub.spine] ?: return null
+        val part=if(epub.elementId!=null)rows.firstOrNull { epub.elementId in it.elements } ?: return null else partAt(rows,epub.offset)
+        // Zero-text galleries have no source distance that predicts an image's page.
+        if(part.characters==0 && epub.elementId!=null)return null
+        return PaginationBoundary(part.index,((epub.offset-part.canonicalStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0),true)
+    }
     private val sectionsByPath=record.sections.associateBy { it.path }
     data class Coordinate(val spine: Int,val offset: Int,val elementId: String?)
     fun coordinate(href: PackageHref): Coordinate? {
@@ -150,6 +161,10 @@ class EpubOpenedBook(override val contentId: String,override val metadata: Conte
     override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ spine,offset -> publication.position(spine,offset) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { index,item -> TocEntry("epub-toc:$index",item.title,item.depth) }
     override fun toc()=entries
+    private val tocCoordinates by lazy { source.record.toc.mapIndexedNotNull { index,item -> publication.coordinate(item.target)?.let { coordinate ->
+        publication.paginationCoordinate(Locator.Epub(revision,coordinate.spine,coordinate.offset,elementId=coordinate.elementId))?.let { entries[index].id to it }
+    } }.toMap() }
+    override fun paginationTocCoordinates()=tocCoordinates
     override fun locatorForToc(id: String): Locator? = entries.indexOfFirst { it.id==id }.takeIf { it>=0 }?.let { publication.locatorForHref(source.record.toc[it].target) }
     // Coordinate lookup never decodes chapter text; only actual navigation creates a quote.
     private val chapterCoordinates=source.record.toc.mapIndexedNotNull { index,item ->
@@ -168,8 +183,7 @@ class EpubOpenedBook(override val contentId: String,override val metadata: Conte
         val current=chapterOf(locator) ?: return null
         val coordinate=chapterCoordinates.firstOrNull { entries[it.third].depth<=current.depth && entries[it.third].id!=current.id &&
             (locator as? Locator.Epub)?.let { pos -> it.first>pos.spine || it.first==pos.spine && it.second>pos.offset }==true } ?: return null
-        val part=publication.record.parts.lastOrNull { it.spine==coordinate.first && it.canonicalStart<=coordinate.second } ?: return null
-        return PaginationBoundary(part.index,((coordinate.second-part.canonicalStart).toDouble()/part.characters.coerceAtLeast(1)).coerceIn(0.0,1.0))
+        return publication.paginationCoordinate(Locator.Epub(revision,coordinate.first,coordinate.second))
     }
     override fun fractionOf(locator: Locator): Double { val target=publication.target(locator);val actual=publication.locator(target.anchor) ?: error("无法还原EPUB位置");return actual.fallbackFraction }
     override fun fractionOf(extent: ReadingExtent): Double { require(extent is EpubReadingExtent && extent.revision==revision);return EpubCoordinates.fraction(source.record.sections,extent.spine,extent.offset) }
