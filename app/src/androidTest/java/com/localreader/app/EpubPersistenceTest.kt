@@ -126,6 +126,82 @@ class EpubPersistenceTest {
         runBlocking { LibraryOpenedBookFactory(repository).open(ncx) }.use { book -> assertEquals(listOf("NCX第一章","NCX第二章"),book.toc().map { it.title });assertEquals(1,(book.locatorForToc(book.toc()[1].id) as Locator.Epub).spine) }
         runBlocking { LibraryOpenedBookFactory(repository).open(fallback) }.use { book -> assertEquals(3,book.toc().size);assertNotNull(book.locatorForToc(book.toc()[2].id)) }
     }
+    private fun searchEpub(bodies: List<String>): ByteArray {
+        val output=ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            fun text(name: String,value: String) {
+                val bytes=value.toByteArray();val entry=ZipEntry(name).apply { time=315532800000L;method=ZipEntry.STORED;size=bytes.size.toLong();compressedSize=size;crc=CRC32().apply { update(bytes) }.value }
+                zip.putNextEntry(entry);zip.write(bytes);zip.closeEntry()
+            }
+            text("mimetype","application/epub+zip")
+            text("META-INF/container.xml","<container><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>")
+            val manifest=bodies.indices.joinToString("") { "<item id='s$it' href='s$it.xhtml' media-type='application/xhtml+xml'/>" }
+            val spine=bodies.indices.joinToString("") { "<itemref idref='s$it'/>" }
+            text("book.opf","<package version='3.0' unique-identifier='id'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:identifier id='id'>search-${UUID.randomUUID()}</dc:identifier><dc:title>真实搜索输入</dc:title></metadata><manifest>$manifest</manifest><spine>$spine</spine></package>")
+            bodies.forEachIndexed { index,body -> text("s$index.xhtml","<html xmlns='http://www.w3.org/1999/xhtml'><head/><body>$body</body></html>") }
+        }
+        return output.toByteArray()
+    }
+    @Test fun txtSearchDecodesRealEncodingsPreservesNewlineContextAndLegacyContinuation() {
+        val variants=listOf("UTF-8" to "ΟΣ\nΑ", "UTF-16LE" to "ΟΣ\r\nΑ", "UTF-16BE" to "ΟΣ\rΑ", "GB18030" to "中文甲乙", "Big5" to "中文甲乙", "Shift_JIS" to "日本語", "ISO-8859-1" to "café")
+        for((encoding,value) in variants) {
+            val directory=File(root,"txt-search-${UUID.randomUUID()}").apply { mkdirs() }
+            val original=File(directory,"original.txt");original.writeBytes(value.toByteArray(java.nio.charset.Charset.forName(encoding)))
+            TxtParser.build(original,directory,encoding)
+            com.localreader.app.formats.txt.TxtOpenedBook("own",ContentMetadata("搜索",""),TxtEngine(directory,"v"),original,File(directory,"queries").apply { mkdirs() }).use { opened ->
+                val search=requireNotNull(opened.search)
+                val query=if(value.startsWith("ΟΣ"))"ς" else value
+                val hit=search.scan(query).first.single();assertEquals(if(value.startsWith("ΟΣ"))1L else 0L,(hit.locator as Locator.Text).sourceOffset)
+                assertTrue(opened.accepts(hit.locator));assertFalse(search.scan(if(value.startsWith("ΟΣ"))"ΣΑ" else value+"missing").first.isNotEmpty())
+                assertTrue(File(directory,"queries").listFiles().orEmpty().isEmpty())
+            }
+        }
+        val directory=File(root,"legacy-search").apply { mkdirs() };val original=File(directory,"original.txt")
+        val value="x".repeat(2047)+"BC"+"y".repeat(2048)+"\nBC\n"
+        original.writeText(value);TxtParser.build(original,directory)
+        java.io.RandomAccessFile(File(directory,"meta.bin"),"rw").use { it.writeInt(1) }
+        java.io.RandomAccessFile(File(directory,"index.bin"),"rw").use { file -> var at=24L;while(at<file.length()) { file.seek(at);val flags=file.readInt();file.seek(at);file.writeInt(flags and 1);at+=28 } }
+        com.localreader.app.formats.txt.TxtOpenedBook("legacy",ContentMetadata("旧索引",""),TxtEngine(directory,"old"),original,File(directory,"queries").apply { mkdirs() }).use { opened ->
+            val hits=requireNotNull(opened.search).scan("BC").first;assertEquals(listOf(2047L,4098L),hits.map { (it.locator as Locator.Text).sourceOffset });assertTrue(hits.all { opened.accepts(it.locator) })
+            assertTrue(requireNotNull(opened.search).scan("yBC").first.isEmpty())
+        }
+    }
+    @Test fun epubSearchUsesWholeLogicalContextThenRealParagraphCutsAndExactTwoHundredLimit() {
+        val id=import(searchEpub(listOf("前<div>AB<span>C</span><p>D</p>E</div>后<p>ΟΣ</p><p>Α</p><p>e</p><p>&#x301;</p>","<p>"+"甲".repeat(400000)+"跨部分命中"+"乙".repeat(1000)+"</p>")))
+        runBlocking { LibraryOpenedBookFactory(repository).open(id) }.use { opened ->
+            val search=requireNotNull(opened.search)
+            assertEquals(2,(search.scan("BC").first.single().locator as Locator.Epub).offset)
+            listOf("CD","DE","é","οσα","ΟΣ").forEach { assertTrue(it,search.scan(it).first.isEmpty()) }
+            val greek=search.scan("οσ").first.single();assertEquals(7,(greek.locator as Locator.Epub).offset)
+            val long=search.scan("跨部分命中").first.single();val locator=long.locator as Locator.Epub;assertEquals(1,locator.spine);assertEquals(400000,locator.offset);assertTrue(opened.publication.target(locator).section>1)
+            assertTrue(opened.accepts(locator));assertEquals("跨部分命中",long.excerpt.text.substring(long.excerpt.matchStart,long.excerpt.matchEnd))
+            val full=search.scan("甲");assertEquals(200,full.first.size);assertTrue(full.second)
+        }
+        val exact=import(searchEpub(listOf("<p>"+"甲".repeat(200)+"</p>","<p>无匹配</p>")))
+        runBlocking { LibraryOpenedBookFactory(repository).open(exact) }.use { opened -> val result=requireNotNull(opened.search).scan("甲");assertEquals(200,result.first.size);assertFalse(result.second) }
+    }
+    @Test fun actualControllerSearchResultNavigatesVisibleGlyphAndCancelsOldGeneration() {
+        val id=import(searchEpub(listOf("<p>第一章前言</p>","<p>"+"可见正文段落。".repeat(120)+"独立搜索标记😀结尾</p>")))
+        val book=runBlocking { LibraryOpenedBookFactory(repository).open(id) };val search=requireNotNull(book.search)
+        val requested=AtomicReference<Locator?>();val position=AtomicReference<Locator?>();val error=AtomicReference<String?>()
+        val controller=ReaderController(1,{ {} },{ true },ReaderActions(goTo={requested.set(it)}),search)
+        lateinit var adapter: WebReaderAdapter;var created=false
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { controller.search("");assertEquals(com.localreader.app.core.search.SearchPhase.IDLE,controller.searchState.value.phase);controller.search("可见");controller.search("独立搜索标记") }
+                waitUntil { controller.searchState.value.phase==com.localreader.app.core.search.SearchPhase.DONE || controller.searchState.value.phase==com.localreader.app.core.search.SearchPhase.FAILED }
+                assertEquals(controller.searchState.value.message,com.localreader.app.core.search.SearchPhase.DONE,controller.searchState.value.phase)
+                assertEquals("独立搜索标记",controller.searchState.value.query);val hit=controller.searchState.value.hits.single()
+                scenario.onActivity { assertTrue(controller.goToSearch(hit.id));adapter=WebReaderAdapter(it) { event -> when(event) { is RendererEvent.Position -> position.set(event.locator);is RendererEvent.Error -> error.set(event.message);else -> Unit } };created=true;it.setContentView(adapter.view);adapter.open(book.publication,requireNotNull(requested.get()),ReaderRules()) }
+                waitUntil { position.get()!=null || error.get()!=null };assertNull(error.get());assertEquals((hit.locator as Locator.Epub).offset,(position.get() as Locator.Epub).offset)
+                val diagnostic=AtomicReference<String?>();scenario.onActivity { adapter.view.evaluateJavascript("JSON.stringify(readerHost.diagnostics())") { diagnostic.set(it) } };waitUntil { diagnostic.get()!=null }
+                assertTrue(JSONObject(org.json.JSONTokener(diagnostic.get()).nextValue() as String).getJSONObject("anchorGeometry").getBoolean("visible"))
+                scenario.onActivity { controller.search("甲");controller.cancelSearch();controller.detach() }
+                assertEquals(com.localreader.app.core.search.SearchPhase.CANCELED,controller.searchState.value.phase)
+                assertFalse(controller.goToSearch(hit.id))
+            } finally { scenario.onActivity { if(created)adapter.close();controller.detach() };book.close() }
+        }
+    }
     private fun waitUntil(timeout: Long=16000,predicate: () -> Boolean) {
         val end=System.currentTimeMillis()+timeout
         while(!predicate()) { if(System.currentTimeMillis()>end)throw AssertionError("EPUB runtime condition timed out");Thread.sleep(30) }

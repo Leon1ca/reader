@@ -162,4 +162,44 @@ class ReadingUiTest {
             repository.db.preferencesRevision.value=restoredRevision
         }
     }
+    @Test fun searchPanelClickUsesProductionControllerAndPersistsOriginalTextAnchor() {
+        compose.runOnUiThread { readerModel=ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
+        val target=InstrumentationRegistry.getInstrumentation().targetContext
+        val repository=(target.applicationContext as ReaderApplication).repository
+        val nonce=UUID.randomUUID().toString();val marker="SEARCH-$nonce"
+        val uri=Uri.parse("content://com.localreader.app.test.fixtures/search-ui-$nonce.txt")
+        val text="Chapter 1 Search\n"+"Original English paragraph and 中文😀。\n".repeat(100)+"Chapter 2 Result\nTarget $marker exact source.\n"
+        target.contentResolver.openOutputStream(uri,"wt")!!.use { it.write(text.toByteArray()) }
+        var id: String?=null
+        try {
+            waitFor { !model().state.value.loading }
+            compose.runOnUiThread { model().importFiles(listOf(uri)) }
+            waitFor { !model().state.value.busy && model().state.value.results.isNotEmpty() }
+            id=requireNotNull(model().state.value.results.single().bookId)
+            val record=requireNotNull(repository.content(requireNotNull(id)))
+            compose.onNodeWithText("完成").performClick();openFromShelf(record.title);ready()
+            compose.onNodeWithText("搜索").performClick()
+            compose.onNodeWithText("搜索正文").performTextReplacement(marker)
+            compose.onNodeWithText("查找").performClick()
+            waitFor { try { compose.onNodeWithText("找到 1 处").assertExists();true } catch(_: AssertionError) { false } }
+            val result=hasText(marker,substring=true) and !hasSetTextAction()
+            compose.onNode(result).performClick()
+            val offset=text.indexOf(marker).toLong()
+            waitFor { (model().state.value.reader?.snapshot?.current as? com.localreader.app.core.Locator.Text)?.sourceOffset==offset }
+            ready();assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible"))
+            compose.onNodeWithText("添加书签").performClick()
+            waitFor { model().state.value.reader?.snapshot?.bookmarks?.size==1 }
+            val saved=requireNotNull(model().state.value.reader).snapshot.current
+            compose.onNodeWithText("返回").performClick();waitFor { model().state.value.reader==null }
+            openFromShelf(record.title);ready()
+            waitFor { model().state.value.reader?.snapshot?.current==saved }
+            assertEquals(saved,repository.db.bookmarks(requireNotNull(id)).single().locator)
+            assertEquals(text,target.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() })
+        } finally {
+            compose.runOnUiThread { model().closeReader() }
+            id?.let { repository.content(it)?.let(repository::delete) }
+            target.contentResolver.delete(uri,null,null)
+        }
+    }
+
 }

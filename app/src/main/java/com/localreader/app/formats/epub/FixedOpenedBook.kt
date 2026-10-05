@@ -37,11 +37,12 @@ class FixedPublication(private val source: EpubSource): ReaderPublication {
         index.takeIf { it>=0 }?.let { Locator.Page(sourceRevision,it,0.0,0.0) }
     } catch(_: Exception) { null }
 }
-class FixedOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource): OpenedBook {
+class FixedOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: File? = null, searchRoot: File? = null): OpenedBook {
     override val format=ContentFormat.EPUB
     override val revision=source.record.revision
     override val publication=FixedPublication(source)
     private val closed=AtomicBoolean(false)
+    override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ page,_ -> Locator.Page(revision,page,0.0,0.0) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { i,t -> TocEntry("fixed-toc:$i",t.title,t.depth) }
     override fun toc()=entries
     override fun locatorForToc(id: String): Locator? = entries.indexOfFirst { it.id==id }.takeIf { it>=0 }?.let { i -> source.record.sections.indexOfFirst { it.path==source.record.toc[i].target.path }.takeIf { it>=0 }?.let { Locator.Page(revision,it,0.0,0.0) } }

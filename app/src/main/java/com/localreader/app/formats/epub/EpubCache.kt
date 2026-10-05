@@ -212,7 +212,7 @@ object EpubCache {
     private fun JSONArray.objects()=(0 until length()).map(::getJSONObject)
     private fun safeFile(value: String): String { require(value.matches(Regex("(?:assets/[a-z0-9-]+(?:\\.css)?|sections/[0-9]+(?:-author\\.html|-custom\\.html|\\.txt|\\.u16))")));return value }
     private fun write(file: File,bytes: ByteArray) { file.parentFile!!.mkdirs();FileOutputStream(file).use { it.write(bytes);it.fd.sync() } }
-    private fun syncDirectory(file: File) {
+    internal fun syncDirectory(file: File) {
         if(!file.exists())return
         val fd=android.system.Os.open(file.path,android.system.OsConstants.O_RDONLY,0)
         try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }

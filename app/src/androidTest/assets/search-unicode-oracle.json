@@ -1,0 +1,613 @@
+{
+  "schema": 1,
+  "normalization": "NFKC(lowercase(Locale.ROOT,NFKC(fullSource)))",
+  "mappingAuthority": "Explicit hand-authored source intervals, independently verified scalar bounds; not inferred from codepoint normalization.",
+  "cases": [
+    {
+      "id": "ligature_full",
+      "source": "甲ﬃ乙",
+      "query": "ffi",
+      "expectedNormalizedSource": "甲ffi乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 4,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        1,
+        2
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 3,
+      "sourceUtf8Sha256": "3989ece8e784949bd093ae1983749f59e46b727aae2c64196d0816ce3f410f54",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "sourceLength": 1,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 2
+        }
+      ]
+    },
+    {
+      "id": "ligature_partial",
+      "source": "甲ﬃ乙",
+      "query": "fi",
+      "expectedNormalizedSource": "甲ffi乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 2,
+          "normalizedEnd": 4,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 3,
+      "sourceUtf8Sha256": "3989ece8e784949bd093ae1983749f59e46b727aae2c64196d0816ce3f410f54",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "sourceLength": 1,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 2
+        }
+      ]
+    },
+    {
+      "id": "ligature_duplicate_source",
+      "source": "甲ﬃ乙",
+      "query": "f",
+      "expectedNormalizedSource": "甲ffi乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 2,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        },
+        {
+          "normalizedStart": 2,
+          "normalizedEnd": 3,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "Two normalized hits map to one source glyph; emit one deduplicated source hit.",
+      "sourceUtf16Length": 3,
+      "sourceUtf8Sha256": "3989ece8e784949bd093ae1983749f59e46b727aae2c64196d0816ce3f410f54",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "sourceLength": 1,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 2
+        }
+      ]
+    },
+    {
+      "id": "math_uppercase_and_fullwidth",
+      "source": "甲𝐀Ｂ乙",
+      "query": "ab",
+      "expectedNormalizedSource": "甲ab乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 3,
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        1,
+        3
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 5,
+      "sourceUtf8Sha256": "61dddce897422b3c5ee04ce23475b1885b3c0bca332b9060857ab168589d0a88",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "sourceLength": 3,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 4
+        }
+      ]
+    },
+    {
+      "id": "dotted_I_expansion",
+      "source": "甲İ乙",
+      "query": "i̇",
+      "expectedNormalizedSource": "甲i̇乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 3,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 3,
+      "sourceUtf8Sha256": "46fe193a5568662a2df4e8ba9d25692ccd5f48ec61ec21d2c5ba61b002578dd9",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "sourceLength": 1,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 2
+        }
+      ]
+    },
+    {
+      "id": "dotted_I_partial",
+      "source": "甲İ乙",
+      "query": "i",
+      "expectedNormalizedSource": "甲i̇乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 2,
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 3,
+      "sourceUtf8Sha256": "46fe193a5568662a2df4e8ba9d25692ccd5f48ec61ec21d2c5ba61b002578dd9",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 2,
+          "sourceLength": 1,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 2
+        }
+      ]
+    },
+    {
+      "id": "combining_acute",
+      "source": "甲é乙",
+      "query": "É",
+      "expectedNormalizedSource": "甲é乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 2,
+          "sourceStart": 1,
+          "sourceEnd": 3,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        2
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "Part cut lies between base and combining mark; normalize full source before matching.",
+      "sourceUtf16Length": 4,
+      "sourceUtf8Sha256": "1a0d65bd9b425c08a344f3cf72d4b005d88191db5446ccceb64a0746800e3669",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 3,
+          "sourceLength": 2,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 3
+        }
+      ]
+    },
+    {
+      "id": "hangul_jamo",
+      "source": "甲각乙",
+      "query": "각",
+      "expectedNormalizedSource": "甲각乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 2,
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        2,
+        3
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 5,
+      "sourceUtf8Sha256": "a802f2b90300a15321ccd15c2570b8a144fbd712bed60d1b36fdde8d910032d5",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "sourceLength": 3,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 4
+        }
+      ]
+    },
+    {
+      "id": "emoji_and_ligature",
+      "source": "甲😀乙ﬃ",
+      "query": "😀乙",
+      "expectedNormalizedSource": "甲😀乙ffi",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 4,
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        1,
+        3
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 2046,
+      "note": "Global persistent source hit = [2047,2050); cut at relative2 is inside surrogate pair and must be repaired.",
+      "sourceUtf16Length": 5,
+      "sourceUtf8Sha256": "dc518a10b1b81925d8506def406786840da6db8d3b6b26361ed7801eadf39e81",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "sourceLength": 3,
+          "absoluteSourceStart": 2047,
+          "absoluteSourceEnd": 2050
+        }
+      ]
+    },
+    {
+      "id": "emoji_zwj",
+      "source": "A👩‍💻B",
+      "query": "👩‍💻",
+      "expectedNormalizedSource": "a👩‍💻b",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 6,
+          "sourceStart": 1,
+          "sourceEnd": 6,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        3,
+        4
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "Legal scalar cuts still must preserve match tail across ZWJ sequence.",
+      "sourceUtf16Length": 7,
+      "sourceUtf8Sha256": "26d532daad5b35016eb76dc63dd677d636f03c322658007a11fb9f3c018e3b60",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 6,
+          "sourceLength": 5,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 6
+        }
+      ]
+    },
+    {
+      "id": "nbsp_to_space",
+      "source": "甲A B乙",
+      "query": "a b",
+      "expectedNormalizedSource": "甲a b乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 4,
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 5,
+      "sourceUtf8Sha256": "e3e4a28925179407638ff4aa9fdce86dcf578a5ae86b65bd98e084fd702d57e1",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 4,
+          "sourceLength": 3,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 4
+        }
+      ]
+    },
+    {
+      "id": "part_join_allowed",
+      "source": "前ABCD后",
+      "query": "bc",
+      "expectedNormalizedSource": "前abcd后",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 2,
+          "normalizedEnd": 4,
+          "sourceStart": 2,
+          "sourceEnd": 4,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        3
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 6,
+      "sourceUtf8Sha256": "f3cc9a46cb23aa429278376c0069adb1c01b9031e9a4ff4105df7bd89db454b0",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 2,
+          "sourceEnd": 4,
+          "sourceLength": 2,
+          "absoluteSourceStart": 2,
+          "absoluteSourceEnd": 4
+        }
+      ]
+    },
+    {
+      "id": "paragraph_no_false_join",
+      "source": "前AB\nCD后",
+      "query": "bc",
+      "expectedNormalizedSource": "前ab\ncd后",
+      "expectedRawMatches": [],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [
+        4
+      ],
+      "sourceBaseUtf16": 0,
+      "note": "Source LF remains canonical; never discard it and concatenate AB+CD.",
+      "sourceUtf16Length": 7,
+      "sourceUtf8Sha256": "2f36b3a53f3c5bb468d614f58be0a0e8d55a7309e7292da760c10373c568e726",
+      "expectedDeduplicatedSourceHits": []
+    },
+    {
+      "id": "paragraph_explicit_query_rejected",
+      "source": "前AB\nCD后",
+      "query": "ab\ncd",
+      "expectedNormalizedSource": "前ab\ncd后",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 6,
+          "sourceStart": 1,
+          "sourceEnd": 6,
+          "allowed": false
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [
+        4
+      ],
+      "sourceBaseUtf16": 0,
+      "note": "Whole normalization finds this, but the declared real-paragraph search-unit policy rejects cross-boundary hits.",
+      "sourceUtf16Length": 7,
+      "sourceUtf8Sha256": "2f36b3a53f3c5bb468d614f58be0a0e8d55a7309e7292da760c10373c568e726",
+      "expectedDeduplicatedSourceHits": []
+    },
+    {
+      "id": "sharp_s_not_ss",
+      "source": "Straße SS",
+      "query": "ss",
+      "expectedNormalizedSource": "straße ss",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 7,
+          "normalizedEnd": 9,
+          "sourceStart": 7,
+          "sourceEnd": 9,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 9,
+      "sourceUtf8Sha256": "0034261423fb1a80098d70555563e2e5322af0b98978cc3689698db928b10d92",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 7,
+          "sourceEnd": 9,
+          "sourceLength": 2,
+          "absoluteSourceStart": 7,
+          "absoluteSourceEnd": 9
+        }
+      ]
+    },
+    {
+      "id": "sharp_s_literal",
+      "source": "Straße SS",
+      "query": "ß",
+      "expectedNormalizedSource": "straße ss",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 4,
+          "normalizedEnd": 5,
+          "sourceStart": 4,
+          "sourceEnd": 5,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 9,
+      "sourceUtf8Sha256": "0034261423fb1a80098d70555563e2e5322af0b98978cc3689698db928b10d92",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 4,
+          "sourceEnd": 5,
+          "sourceLength": 1,
+          "absoluteSourceStart": 4,
+          "absoluteSourceEnd": 5
+        }
+      ]
+    },
+    {
+      "id": "greek_context_medial",
+      "source": "ΟΣΑ ΟΣ",
+      "query": "οσα",
+      "expectedNormalizedSource": "οσα ος",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 0,
+          "normalizedEnd": 3,
+          "sourceStart": 0,
+          "sourceEnd": 3,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        1,
+        2,
+        5
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 6,
+      "sourceUtf8Sha256": "860aa194e4dbe7d9cbebc33f32f5ddceee65b6a8a93a279b27cd328ef5e5d172",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 0,
+          "sourceEnd": 3,
+          "sourceLength": 3,
+          "absoluteSourceStart": 0,
+          "absoluteSourceEnd": 3
+        }
+      ]
+    },
+    {
+      "id": "greek_context_final",
+      "source": "ΟΣΑ ΟΣ",
+      "query": "ος",
+      "expectedNormalizedSource": "οσα ος",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 4,
+          "normalizedEnd": 6,
+          "sourceStart": 4,
+          "sourceEnd": 6,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [
+        5
+      ],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 6,
+      "sourceUtf8Sha256": "860aa194e4dbe7d9cbebc33f32f5ddceee65b6a8a93a279b27cd328ef5e5d172",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 4,
+          "sourceEnd": 6,
+          "sourceLength": 2,
+          "absoluteSourceStart": 4,
+          "absoluteSourceEnd": 6
+        }
+      ]
+    },
+    {
+      "id": "same_text_spine_boundary",
+      "source": "ABCD",
+      "query": "bc",
+      "expectedNormalizedSource": "abcd",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 3,
+          "sourceStart": 1,
+          "sourceEnd": 3,
+          "allowed": false
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [
+        2
+      ],
+      "sourceBaseUtf16": 0,
+      "note": "Here cut2 denotes a logical document/spine boundary, not physical part; no cross-document match.",
+      "sourceUtf16Length": 4,
+      "sourceUtf8Sha256": "e12e115acf4552b2568b55e93cbd39394c4ef81c82447fafc997882a02d23677",
+      "expectedDeduplicatedSourceHits": []
+    },
+    {
+      "id": "fullwidth_query_same_transform",
+      "source": "甲ABC123乙",
+      "query": "ＡＢＣ１２３",
+      "expectedNormalizedSource": "甲abc123乙",
+      "expectedRawMatches": [
+        {
+          "normalizedStart": 1,
+          "normalizedEnd": 7,
+          "sourceStart": 1,
+          "sourceEnd": 7,
+          "allowed": true
+        }
+      ],
+      "partCutsUtf16": [],
+      "paragraphCutsUtf16": [],
+      "sourceBaseUtf16": 0,
+      "note": "",
+      "sourceUtf16Length": 8,
+      "sourceUtf8Sha256": "0fbdb5fc966946ba47d3f51acf2dee3e7e66d71189aa1a78e126347ac1421477",
+      "expectedDeduplicatedSourceHits": [
+        {
+          "sourceStart": 1,
+          "sourceEnd": 7,
+          "sourceLength": 6,
+          "absoluteSourceStart": 1,
+          "absoluteSourceEnd": 7
+        }
+      ]
+    }
+  ]
+}

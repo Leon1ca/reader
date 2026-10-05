@@ -19,6 +19,7 @@ interface OpenedBook : Closeable {
     val revision: String
     val metadata: ContentMetadata
     val publication: ReaderPublication
+    val search: com.localreader.app.core.search.BookSearch? get() = null
     val textControls: TextControls? get() = null
     fun toc(): List<TocEntry>
     fun locatorForToc(id: String): Locator?

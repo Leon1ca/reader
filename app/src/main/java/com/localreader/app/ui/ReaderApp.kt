@@ -31,6 +31,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.content.edit
 import com.localreader.app.core.*
+import com.localreader.app.core.search.SearchPhase
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
 import com.localreader.app.core.ContentSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -223,6 +227,9 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     val context = LocalContext.current
     val controller=remember(session.generation) { model.readerController(session.generation) }
     val rendererState by controller.state.collectAsStateWithLifecycle()
+    val searchState by controller.searchState.collectAsStateWithLifecycle()
+    var searchQuery by remember(session.generation) { mutableStateOf("") }
+    fun dismissPanel() { if(panel=="搜索")controller.cancelSearch();panel=null }
     DisposableEffect(controller) {
         val stop=controller.observe { event -> when(event) {
             is RendererEvent.Zoom -> Unit
@@ -238,11 +245,11 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
     val surface=remember(session.generation) { ReaderSurface(context).apply { bind(controller) } }
     DisposableEffect(surface) { onDispose { surface.close() } }
     val background = when (session.snapshot.rules.theme) { "dark" -> Color(0xFF19201C); "white" -> Color.White; else -> paper }
-    BackHandler { if (encoding != null) encoding = null else if (panel != null) panel = null else if (!busy) controller.close() }
+    BackHandler { if (encoding != null) encoding = null else if (panel != null) dismissPanel() else if (!busy) controller.close() }
 
     Scaffold(containerColor = background, topBar = { TopAppBar(title = { Text(session.metadata.title, maxLines = 1) },
         navigationIcon = { TextButton(onClick = controller::close, enabled = !busy) { Text("返回") } },
-        actions = { TextButton(onClick = { panel = "目录" }, enabled = !busy) { Text("目录") }; TextButton(onClick = { panel = "设置" }, enabled = !busy) { Text("设置") } }) },
+        actions = { if(controller.canSearch)TextButton(onClick={panel="搜索"},enabled=!busy) { Text("搜索") };TextButton(onClick = { panel = "目录" }, enabled = !busy) { Text("目录") }; TextButton(onClick = { panel = "设置" }, enabled = !busy) { Text("设置") } }) },
         bottomBar = { Surface { Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { panel = "书签" }, enabled = !busy) { Text("书签 ${session.snapshot.bookmarks.size}") }
@@ -261,11 +268,38 @@ private fun ReaderScreen(model: ReaderViewModel, session: ReadingSession, busy: 
             if (failed) TextButton(onClick = { failed = false; localNotice = null; controller.retry() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("重试") }
             key(session.generation) { AndroidView(factory = { surface }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { it.present(session,rendererState.recoveryAttempt) }) }
         } }
-    panel?.let { selected -> ModalBottomSheet(onDismissRequest = { panel = null }) {
+    panel?.let { selected -> ModalBottomSheet(onDismissRequest = { dismissPanel() }) {
         SystemBarAppearance(session.snapshot.rules.theme == "dark")
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Text(selected, style = MaterialTheme.typography.headlineSmall)
             when (selected) {
+                "搜索" -> {
+                    OutlinedTextField(searchQuery,{ searchQuery=it },label={Text("搜索正文")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                    Row {
+                        TextButton(onClick={controller.search(searchQuery)},enabled=searchQuery.isNotEmpty()) { Text("查找") }
+                        if(searchState.phase==SearchPhase.RUNNING)TextButton(onClick=controller::cancelSearch) { Text("取消搜索") }
+                    }
+                    when(searchState.phase) {
+                        SearchPhase.RUNNING -> { LinearProgressIndicator(Modifier.fillMaxWidth());Text("正在搜索 ${searchState.completedDocuments} / ${searchState.totalDocuments} 章") }
+                        SearchPhase.FAILED -> Text(searchState.message ?: "搜索失败，请重试")
+                        SearchPhase.CANCELED -> Text("搜索已取消")
+                        SearchPhase.DONE -> Text(if(searchState.hits.isEmpty())"没有找到匹配正文" else "找到 ${searchState.hits.size} 处${if(searchState.truncated)"，仅显示前 200 处" else ""}")
+                        SearchPhase.IDLE -> Text("按正文顺序查找；不跨自然段匹配。")
+                    }
+                    if(session.document.kind==WebContentKind.FIXED)Text("固定版式只检索已有文字，点击前往该页；图片不进行文字识别。",style=MaterialTheme.typography.labelSmall)
+                    LazyColumn(Modifier.heightIn(max=400.dp)) { items(searchState.hits,key={it.id}) { hit ->
+                        TextButton(onClick={if(controller.goToSearch(hit.id))dismissPanel()},modifier=Modifier.fillMaxWidth()) {
+                            Column(Modifier.fillMaxWidth()) {
+                                if(hit.chapter.isNotBlank())Text(hit.chapter,style=MaterialTheme.typography.labelSmall)
+                                Text(buildAnnotatedString {
+                                    append(hit.excerpt.text.substring(0,hit.excerpt.matchStart))
+                                    withStyle(SpanStyle(fontWeight=FontWeight.Bold,background=Color(0xFFFFDF86),color=Color.Black)) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
+                                    append(hit.excerpt.text.substring(hit.excerpt.matchEnd))
+                                })
+                            }
+                        }
+                    } }
+                }
                 "目录" -> {
                     Text(if (session.textControls?.tocSource == TocSource.TEXT_SEGMENTS) "未识别到章节标题，以下为按文本长度建立的分段。" else "按章节标题建立目录。", Modifier.padding(vertical = 12.dp))
                     LazyColumn(Modifier.heightIn(max = 400.dp)) { items(session.toc, key = { it.id }) { chapter ->

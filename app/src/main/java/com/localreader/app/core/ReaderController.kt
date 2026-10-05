@@ -1,16 +1,52 @@
 package com.localreader.app.core
 
+import com.localreader.app.core.search.*
+import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicLong
+
 enum class ReaderPhase { IDLE, LOADING, READY, RECOVERING, FAILED, CRASHED }
 data class ReaderControllerState(val phase: ReaderPhase=ReaderPhase.IDLE,val position: Locator?=null,val profile: String="",val activeViews: Int=0,val message: String?=null,val recoveryAttempt: Int=0,val consecutiveCrashes: Int=0)
 
 /** Session command boundary. Surfaces own platform views; this controller owns navigation policy. */
 class ReaderController(private val generation: Long,private val register: (RendererBackend) -> (() -> Unit),
-    private val acceptEvent: (RendererEvent) -> Boolean,private val actions: ReaderActions = ReaderActions()) {
+    private val acceptEvent: (RendererEvent) -> Boolean,private val actions: ReaderActions = ReaderActions(), private val bookSearch: BookSearch? = null) {
     private val mutable=kotlinx.coroutines.flow.MutableStateFlow(ReaderControllerState())
     val state: kotlinx.coroutines.flow.StateFlow<ReaderControllerState> = mutable
     private var backend: RendererBackend?=null
     private var release: (() -> Unit)?=null
-    private var valid=true
+    @Volatile private var valid=true
+    private val searchScope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+    private var searchJob: Job?=null
+    private val searchSerial=AtomicLong()
+    private val searchLock=Any()
+    private fun publishSearch(serial: Long,state: SearchState) = synchronized(searchLock) { if(valid && searchSerial.get()==serial)searchMutable.value=state }
+    private val searchMutable=kotlinx.coroutines.flow.MutableStateFlow(SearchState())
+    val searchState: kotlinx.coroutines.flow.StateFlow<SearchState> = searchMutable
+    val canSearch: Boolean get() = bookSearch != null
+    fun search(query: String) {
+        if(!valid || bookSearch==null)return
+        searchJob?.cancel()
+        if(query.isEmpty()) { synchronized(searchLock) { searchSerial.incrementAndGet();searchMutable.value=SearchState() };searchJob=null;return }
+        val serial=synchronized(searchLock) { searchSerial.incrementAndGet().also { searchMutable.value=SearchState(query,SearchPhase.RUNNING) } }
+        searchJob=searchScope.launch {
+            try {
+                val result=bookSearch.scan(query,checkpoint={ ensureActive();check(valid && searchSerial.get()==serial) },progress={ completed,total ->
+                    publishSearch(serial,SearchState(query,SearchPhase.RUNNING,completedDocuments=completed,totalDocuments=total))
+                })
+                publishSearch(serial,SearchState(query,SearchPhase.DONE,result.first,result.second))
+            } catch(cancel: CancellationException) { throw cancel }
+            catch(error: Exception) { publishSearch(serial,SearchState(query,SearchPhase.FAILED,message=error.message ?: "搜索失败，请重试")) }
+        }
+    }
+    fun cancelSearch() {
+        synchronized(searchLock) { searchSerial.incrementAndGet();searchMutable.value=searchMutable.value.copy(phase=SearchPhase.CANCELED) }
+        searchJob?.cancel();searchJob=null
+    }
+    fun goToSearch(id: String): Boolean {
+        if(!valid || searchMutable.value.phase!=SearchPhase.DONE)return false
+        val hit=searchMutable.value.hits.firstOrNull { it.id==id } ?: return false
+        actions.goTo(hit.locator);return true
+    }
     private var displayed: ReadingSession?=null
     private val observers=linkedSetOf<(RendererEvent) -> Unit>()
     fun observe(observer: (RendererEvent) -> Unit): () -> Unit { observers.add(observer);return { observers.remove(observer) } }
@@ -58,5 +94,5 @@ class ReaderController(private val generation: Long,private val register: (Rende
     fun retry() { if(!valid)return;mutable.value=mutable.value.copy(phase=ReaderPhase.RECOVERING,message=null,consecutiveCrashes=0,recoveryAttempt=mutable.value.recoveryAttempt+1) }
     fun next() { backend?.next() }
     fun prev() { backend?.prev() }
-    fun detach() { valid=false;release?.invoke();release=null;backend=null;displayed=null }
+    fun detach() { valid=false;cancelSearch();searchScope.cancel();release?.invoke();release=null;backend=null;displayed=null }
 }

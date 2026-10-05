@@ -122,7 +122,7 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
         return Coordinate(section.index,fragment?.offset ?: 0,fragment?.elementId)
     }
     fun locatorForHref(href: PackageHref): Locator.Epub? = coordinate(href)?.let { position(it.spine,it.offset,it.elementId) }
-    private fun position(spine: Int,offset: Int,element: String?=null): Locator.Epub {
+    internal fun position(spine: Int,offset: Int,element: String?=null): Locator.Epub {
         val length=record.sections[spine].characters
         val probe=source.textSlice(spine,(offset-1).coerceAtLeast(0),51)
         val insidePair=offset>0 && probe.length>=2 && probe[0].isHighSurrogate() && probe[1].isLowSurrogate()
@@ -141,11 +141,12 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     }
 }
 
-class EpubOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource): OpenedBook {
+class EpubOpenedBook(override val contentId: String,override val metadata: ContentMetadata,private val source: EpubSource, original: java.io.File? = null, searchRoot: java.io.File? = null): OpenedBook {
     override val format=ContentFormat.EPUB
     override val revision=source.record.revision
     override val publication=EpubPublication(source)
     private val closed=AtomicBoolean(false)
+    override val search = if (original != null && searchRoot != null) epubSearch(source,original,searchRoot,{ check(!closed.get()) { "正文资源已关闭" } },{ spine,offset -> publication.position(spine,offset) },{ chapterOf(it)?.title.orEmpty() }) else null
     private val entries=source.record.toc.mapIndexed { index,item -> TocEntry("epub-toc:$index",item.title,item.depth) }
     override fun toc()=entries
     override fun locatorForToc(id: String): Locator? = entries.indexOfFirst { it.id==id }.takeIf { it>=0 }?.let { publication.locatorForHref(source.record.toc[it].target) }

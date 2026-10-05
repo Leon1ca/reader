@@ -19,7 +19,7 @@ interface EpubResourceWriter {
 }
 
 /** Does not insert text wrappers; canonical coordinates are the safe body text-node stream. */
-class EpubSanitizer(private val resources: EpubResourceWriter) {
+class EpubSanitizer(private val resources: EpubResourceWriter, private val searchBoundary: ((Int) -> Unit)? = null) {
     fun sanitize(bytes: ByteArray,path: PackagePath,mime: String = "text/html",inputLimit: Long = EpubLimits.SMALL_SPINE_BYTES,elementPrefix: String=""): SanitizedSpine {
         require(elementPrefix.isEmpty() || elementPrefix.matches(Regex("batch-[0-9]{1,5}-")))
         require(inputLimit in EpubLimits.SMALL_SPINE_BYTES..8L*1024*1024 && bytes.size<=inputLimit) { "EPUB 单个解析批次超过 8 MB 或常规章节预算" }
@@ -108,11 +108,14 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
             when(node) {
                 is TextNode -> canonical.append(node.wholeText)
                 is Element -> {
+                    val searchBlock = node.tagName() in SEARCH_BLOCKS
+                    if (searchBlock) searchBoundary?.invoke(canonical.length)
                     val elementId=if(node.tagName() in setOf("img","svg","image","hr") || (node.hasAttr("id") && node.childNodes().none { it is TextNode && it.wholeText.isNotEmpty() })) {
                         "${elementPrefix}element-${elementCounter++}".also { elements.add(it);node.attr("data-reader-element",it) }
                     } else null
                     if(node.hasAttr("id"))fragments.putIfAbsent(node.id(),CanonicalFragment(canonical.length,elementId))
                     if(node.tagName() !in setOf("script","style","noscript"))node.childNodes().forEach(::walk)
+                    if (searchBlock) searchBoundary?.invoke(canonical.length)
                 }
                 else -> node.childNodes().forEach(::walk)
             }
@@ -139,6 +142,7 @@ class EpubSanitizer(private val resources: EpubResourceWriter) {
     companion object {
         const val VERSION="epub-safe-html-1/canonical-text-1"
         private val ACTIVE=setOf("script","noscript","template","iframe","frame","frameset","object","embed","applet","form","input","button","select","textarea","base","audio","video","source","track","canvas","foreignobject","set")
+        private val SEARCH_BLOCKS=setOf("p","li","dt","dd","pre","h1","h2","h3","h4","h5","h6","td","th","caption","figcaption","blockquote","div","section","article","text")
     }
 
 }

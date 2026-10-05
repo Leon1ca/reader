@@ -20,13 +20,13 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
             val coroutine=currentCoroutineContext()
             val (directory,cache)=repository.currentEpubCache(book) { coroutine.ensureActive() }
             val source=EpubSource(directory,cache)
-            try { return@create if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source) }
+            try { return@create if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot) }
             catch(error: Throwable) { source.close();throw error }
         }
         val source = repository.engine(requireNotNull(repository.db.txt(book.id)))
         try {
             val coroutine = currentCoroutineContext()
-            TxtOpenedBook(contentId,ContentMetadata(book.title,book.author),source) { coroutine.ensureActive() }
+            TxtOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot) { coroutine.ensureActive() }
                 .also { coroutine.ensureActive() }
         } catch (error: Throwable) { source.close(); throw error }
     }
@@ -40,7 +40,7 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
             repository.reencodePrepared(requireNotNull(repository.db.txt(book.id)),encoding,checkpoint = { coroutine.ensureActive() }) { candidate ->
                 val source = repository.engine(candidate)
                 try {
-                    val handle = TxtOpenedBook(contentId,ContentMetadata(candidate.title,candidate.author),source) { coroutine.ensureActive() }
+                    val handle = TxtOpenedBook(contentId,ContentMetadata(candidate.title,candidate.author),source,repository.original(book),repository.searchRoot) { coroutine.ensureActive() }
                     opened = handle
                     val snapshot = SqliteReadingStore(repository.db).candidateSnapshot(candidate)
                     val presentation = ReadingPresentation.prepare(handle,snapshot)

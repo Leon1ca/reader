@@ -2,11 +2,12 @@ package com.localreader.app.formats.txt
 
 import com.localreader.app.core.*
 import java.util.concurrent.atomic.AtomicBoolean
+import java.io.File
 
 data class TxtReadingExtent(val revision: String, val sourceOffset: Long) : ReadingExtent
 
 class TxtOpenedBook(override val contentId: String, override val metadata: ContentMetadata,
-                    private val source: TxtTextSource, checkpoint: () -> Unit = {}) : OpenedBook {
+                    private val source: TxtTextSource, original: File? = null, searchRoot: File? = null, checkpoint: () -> Unit = {}) : OpenedBook {
     private val closed = AtomicBoolean(false)
     override val format = ContentFormat.TXT
     override val revision = source.version
@@ -16,6 +17,7 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
     override val textControls = TextControls(source.index.encoding, TxtParser.encodings.toList(),
         if (chapters.firstOrNull()?.title?.startsWith("分段 ") == true) TocSource.TEXT_SEGMENTS else TocSource.CHAPTERS)
     private fun checkOpen() { check(!closed.get()) { "正文资源已关闭" } }
+    override val search = if (original != null && searchRoot != null) txtSearch(source, original, searchRoot, ::checkOpen) else null
     override fun toc(): List<TocEntry> = entries
     override fun locatorForToc(id: String): Locator? {
         checkOpen()

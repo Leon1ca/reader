@@ -25,6 +25,9 @@ class LibraryRepository(private val context: Context) : ContentRepository {
     private val trash = File(context.filesDir, "trash").apply { mkdirs() }
     @Volatile private var recovered = false
 
+    internal fun original(book: ContentRecord) = File(File(library, book.id), if (book.format == ContentFormat.TXT) "original.txt" else "original.epub")
+    internal val searchRoot: File get() = File(context.cacheDir, "reader-search").apply { check(mkdirs() || isDirectory) }
+
     /** Run before accepting operations. Metadata is committed only after a complete private directory exists. */
     fun recover() = mutate { recoverLocked() }
     private fun recoverLocked() {

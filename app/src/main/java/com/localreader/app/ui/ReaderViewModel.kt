@@ -35,7 +35,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun readerController(sessionGeneration: Long): ReaderController {
         check(owner?.generation==sessionGeneration)
         return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) },
-            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::resetBookRules,::finished,::closeReader,::flushPosition)).also { controller=it }
+            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::resetBookRules,::finished,::closeReader,::flushPosition),owner?.opened?.search).also { controller=it }
     }
     private val retryOwners = java.util.concurrent.CopyOnWriteArrayList<ReadingSessionOwner>()
     val preferences = application.getSharedPreferences("ui", 0)
