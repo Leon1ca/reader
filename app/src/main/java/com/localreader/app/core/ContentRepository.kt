@@ -11,7 +11,7 @@ data class ContentSummary(val id: String, val format: ContentFormat, val title: 
     val encoding: String? = null, val epubLayout: String? = null, val finishedAt: Long? = null,
     val hiddenFromContinue: Boolean = false, val coverPath: String? = null)
 
-data class ImportResult(val name: String,val status: String,val bookId: String? = null)
+data class ImportResult(val name: String,val status: String,val bookId: String? = null,val outcome: ImportOutcome = ImportOutcome.FAILED)
 /** SAF is a platform boundary; the repository receives a cancellable stream capability. */
 data class ImportSource(val name: String,val mime: String,val declaredBytes: Long?,val open: () -> InputStream)
 interface ContentRepository {
@@ -19,6 +19,7 @@ interface ContentRepository {
     fun summaries(): List<ContentSummary>
     fun content(id: String): ContentRecord?
     fun import(source: ImportSource,cancelled: () -> Boolean = { false }): ImportResult
+    fun deleteDetailed(book: ContentRecord): ContentDeletion { delete(book);return ContentDeletion(book.id,true) }
     fun delete(book: ContentRecord)
     fun updateMetadata(id: String,title: String,author: String)
     fun markRead(id: String, revision: String, time: Long = System.currentTimeMillis())
@@ -28,4 +29,6 @@ interface ContentRepository {
 
 }
 data class BookDetail(val content: ContentRecord,val summary: ContentSummary,val characters: Long?,
-    val bookmarkCount: Int,val hasBookSettings: Boolean)
+    val bookmarkCount: Int,val hasFixedViewState: Boolean)
+
+data class ContentDeletion(val id: String,val metadataRemoved: Boolean,val fileCleanupPending: Boolean=false,val error: String?=null)

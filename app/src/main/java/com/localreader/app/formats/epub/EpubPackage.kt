@@ -25,6 +25,17 @@ internal data class EpubXml(val name: String,val namespace: String,val attribute
         appendNode(this@EpubXml)
     }
 }
+/** Shared XML safety rules: nothing is ever fetched and no document-defined entity is expanded. */
+internal object EpubXmlRules {
+    private val xmlEntities=setOf("amp","lt","gt","apos","quot")
+    /** A plain DOCTYPE (common in EPUB 2 NCX/XHTML) is harmless; only an internal subset can define entities. */
+    fun doctype(text: String?) = require(text==null || '[' !in text) { "EPUB XML 不允许内部 DTD 或自定义实体" }
+    /** Named XHTML character references such as &nbsp; resolve from the fixed HTML5 table. */
+    fun entity(name: String,text: String?): String {
+        if(name.startsWith("#") || name in xmlEntities)return requireNotNull(text) { "EPUB XML 实体无效" }
+        return org.jsoup.nodes.Entities.getByName(name).also { require(it.isNotEmpty()) { "EPUB XML 含自定义实体" } }
+    }
+}
 internal object EpubXmlReader {
     fun parse(bytes: ByteArray): EpubXml {
         require(bytes.size<=EpubLimits.XML_BYTES) { "EPUB XML 超过读取限制" }
@@ -35,7 +46,7 @@ internal object EpubXmlReader {
         val stack=ArrayDeque<EpubXml>();var root:EpubXml?=null;var count=0
         while(parser.eventType!=XmlPullParser.END_DOCUMENT) {
             when(parser.eventType) {
-                XmlPullParser.DOCDECL -> error("EPUB XML 不允许 DTD 或外部实体")
+                XmlPullParser.DOCDECL -> EpubXmlRules.doctype(parser.text)
                 XmlPullParser.START_TAG -> {
                     require(++count<=100000 && stack.size<128 && parser.attributeCount<=256) { "EPUB XML 结构超过限制" }
                     val attrs=linkedMapOf<String,String>()
@@ -51,8 +62,8 @@ internal object EpubXmlReader {
                 XmlPullParser.END_TAG -> { require(stack.isNotEmpty());stack.removeLast() }
                 XmlPullParser.TEXT,XmlPullParser.CDSECT -> if(stack.isNotEmpty()) stack.last().appendText(parser.text.orEmpty())
                 XmlPullParser.ENTITY_REF -> {
-                    require(parser.name in setOf("amp","lt","gt","apos","quot") || parser.name.startsWith("#")) { "EPUB XML 含自定义实体" }
-                    if(stack.isNotEmpty())stack.last().appendText(requireNotNull(parser.text))
+                    val value=EpubXmlRules.entity(parser.name,parser.text)
+                    if(stack.isNotEmpty())stack.last().appendText(value)
                 }
             }
             parser.nextToken()
@@ -115,7 +126,7 @@ object EpubPackages {
             }
         }
         return EpubPackage(opf,identifier,title,author,meta.children.firstOrNull { it.name=="language" }?.content()?.trim(),items,spine,toc,cover,
-            layout,spread,spineNode.attr("page-progression-direction").ifBlank { "ltr" },property("rendition:orientation"),property("rendition:viewport"),spine.any { it.layout!=layout },encryption)
+            layout,spread,spineNode.attr("page-progression-direction").takeIf {it in setOf("ltr","rtl")} ?: "default",property("rendition:orientation"),property("rendition:viewport"),spine.any { it.layout!=layout },encryption)
     }
     private fun navToc(zip: EpubZip,item: EpubItem): List<EpubToc> {
         val doc=org.jsoup.Jsoup.parse(zip.read(item.path,EpubLimits.XML_BYTES).inputStream(),null,"https://epub.invalid/")

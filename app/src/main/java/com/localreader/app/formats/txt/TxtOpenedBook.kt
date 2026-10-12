@@ -11,7 +11,10 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
     private val closed = AtomicBoolean(false)
     override val format = ContentFormat.TXT
     override val revision = source.version
-    override val publication: ReaderPublication = TxtPublication(source, checkpoint)
+    private val projection=source.displayDirectory?.let { TxtDisplayProjection.prepare(source,it,checkpoint) }
+    override val publication: ReaderPublication = try { TxtPublication(source,checkpoint,projection) }
+        catch(error: Throwable) { try {projection?.close()} catch(close: Throwable) {error.addSuppressed(close)};throw error }
+    override val textPreview = original?.let { file -> TextPreviewSource { encoding,lines,checkpoint -> checkOpen();readTextPreview({ file.inputStream() },encoding,lines,null,source.index.chapters.size) { checkOpen();checkpoint() } } }
     private val chapters = source.index.chapters
     private val entries = chapters.map { TocEntry("text:${it.sourceOffset}", it.title) }
     override val textControls = TextControls(source.index.encoding, TxtParser.encodings.toList(),
@@ -67,5 +70,5 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
         require(first is TxtReadingExtent && second is Locator.Text && first.revision == revision && second.version == revision)
         return if (first.sourceOffset >= second.sourceOffset) first else TxtReadingExtent(revision,second.sourceOffset)
     }
-    override fun close() { if (closed.compareAndSet(false,true)) source.close() }
+    override fun close() { if (closed.compareAndSet(false,true))try {projection?.close()} finally {source.close()} }
 }

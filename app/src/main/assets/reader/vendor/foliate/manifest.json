@@ -5,13 +5,25 @@
   "source": "https://raw.githubusercontent.com/readest/foliate-js/341dc63cda7ad26b31ada4ee905e40b5020da88a/paginator.js",
   "license": "MIT",
   "upstreamSha256": "f64fe326bb0a6069c40019b954b0bc50206a06b9813605e6485d109021e4e21c",
-  "packagedSha256": "20c7058a8293355740e3a4f95529c38732be2c66d171968e5b74af75fb4e24ed",
-  "patchSha256": "15c20d1b0e276aaf9e9a43003c8cb1e5f9171bed08974db0e22b68dc6971b41d",
+  "packagedSha256": "035dc54cf98c3aeb6a045d04c54174aed6a6aa03bb276b0bb46f7aef7ea81540",
+  "patchSha256": "682827559e8d110d8eb42a0f5a1de69472ef75cda0a0f62db6e90d8afb68f37a",
   "patches": [
     "inert iframe sandbox",
     "global view budget and compensated eviction",
     "view release cancels observer/navigation",
-    "paginator destroy disconnects container observer"
+    "paginator destroy disconnects container observer",
+    "respect vertical maximum and remeasure positive integer columns",
+    "body principal axis with limited uniform-orthogonal content adaptation",
+    "default page progression follows actual source document",
+    "full writing-mode preload boundary and primary-local scrolled rectangle mapping",
+    "mixed orthogonal scrolled blocks retain author mode and height in local scrollports with source-clip geometry, anchor-aware turns and endpoint guards",
+    "non-animated page lock releases after actual rendering turn instead of fixed 100ms delay",
+    "cached navigation awaits the actual cancellable source load and rejects replaced views before anchor resolution",
+    "sequence-owned target View/document and geometry across navigation awaits, passive-scroll primary protection and bounded cancellation",
+    "optional diagnostic-only target load/render/font phase observer",
+    "reset stabilization on cancellation; prevent delayed preload replacing navigation-owned views",
+    "clear discarded cached navigation lease before writing-mode replacement",
+    "fixed renderer cancellation preserves engine and handles superseded background spread tasks"
   ],
   "modules": [
     {
@@ -20,8 +32,8 @@
       "patch": "fixed-layout.patch",
       "source": "https://raw.githubusercontent.com/readest/foliate-js/341dc63cda7ad26b31ada4ee905e40b5020da88a/fixed-layout.js",
       "upstreamSha256": "b03a83df6ff9f7a208299a4b45c7edffdaec50f45b3e699f5b0b1611ed963289",
-      "packagedSha256": "4de9c7e34ef2497e4071976668c13a019ea5b71baec37718dd94afdac05c0aab",
-      "patchSha256": "a99f9d895e8361a4d4cbbfbb6bf5a8742ab6093822ca573dddf6c01a0c0897e9",
+      "packagedSha256": "23de642d69aa6c365fe55249e7760c42c7971be673ef1437fe91998f9f0d438b",
+      "patchSha256": "a0c992397120ff9e5ba06fbe03ee48347246a9587363ed824a8887a32133df59",
       "patches": [
         "inert iframe sandbox and native feature gate",
         "reserve all frame leases before allocation; limit four",
@@ -30,7 +42,8 @@
         "viewport normalization and RTL scroll offset coordinates",
         "unified public zoom semantics for continuous placeholders and loaded frames",
         "retain every consecutive author center page as its own spread",
-        "omit only explicitly decorative spread blank frames from getContents, retaining their leases"
+        "omit only explicitly decorative spread blank frames from getContents, retaining their leases",
+        "await host canonical admission before publishing either frame path; cancellable current document leases and explicit pending diagnostics"
       ]
     }
   ]

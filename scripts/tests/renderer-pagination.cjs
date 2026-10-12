@@ -5,7 +5,7 @@ const paragraphs=Array.from({length:3},(_,i)=>Array.from({length:[3,80,24][i]},(
 const server=http.createServer((req,res)=>{
  const file=req.url.startsWith(base)?req.url.slice(base.length):'',match=/^sections\/(\d+)\.html$/.exec(file)
  if(match){const i=Number(match[1]),text=paragraphs[i].join(''),sha=crypto.createHash('sha256').update(text).digest('hex');res.writeHead(200,{'Content-Type':'text/html','Content-Security-Policy':"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'"});res.end(`<html><body data-reader-canonical-length="${text.length}" data-reader-canonical-sha="${sha}">${paragraphs[i].map(x=>`<p>${x}</p>`).join('')}</body></html>`);return}
- if(!['host2.html','host2.js','viewport.js','vendor/foliate/paginator.js'].includes(file)){res.writeHead(403);res.end();return}
+ if(!['host2.html','host2.js','viewport.js','input.js','vendor/foliate/paginator.js'].includes(file)){res.writeHead(403);res.end();return}
  res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':'text/html'});res.end(fs.readFileSync(path.join(assets,file)))
 })
 ;(async()=>{

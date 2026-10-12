@@ -5,7 +5,7 @@ data class ReadingSession(val contentId: String, val revision: String, val gener
     val metadata: ContentMetadata, val document: ReaderPublication, val toc: List<TocEntry>,
     val textControls: TextControls?, val snapshot: ReadingSnapshot,
     val currentFraction: Double, val furthestFraction: Double,
-    val jump: Locator, val jumpSerial: Int = 0, val notice: String? = null,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap())
+    val jump: Locator, val jumpSerial: Int = 0, val notice: String? = null,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap(),val operation: ReaderOperationToken?=null)
 data class ReadingPresentation(val metadata: ContentMetadata, val document: ReaderPublication, val toc: List<TocEntry>,
     val textControls: TextControls?, val currentFraction: Double, val furthestFraction: Double,val tocCoordinates: Map<String,PaginationBoundary> = emptyMap()) {
     companion object {

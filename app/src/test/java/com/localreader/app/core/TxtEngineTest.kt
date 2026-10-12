@@ -14,6 +14,36 @@ class TxtEngineTest {
         if (encoding == null) TxtParser.build(source, directory) else TxtParser.build(source, directory, encoding)
         return TxtEngine(directory, "version-a")
     }
+    @Test fun mappedIndexRejectsTruncationAndOutOfBoundsRecords() {
+        val source=temporary.newFile().apply { writeText("第一章 开始\n正文\n第二章 继续") }
+        val directory=temporary.newFolder();TxtParser.build(source,directory)
+        val index=java.io.File(directory,"index.bin")
+        java.io.RandomAccessFile(index,"rw").use { it.setLength(it.length()-1) }
+        assertThrows(IllegalArgumentException::class.java) { TxtEngine(directory,"v") }
+        TxtParser.build(source,directory)
+        java.io.RandomAccessFile(index,"rw").use { it.writeLong(Long.MAX_VALUE) }
+        TxtEngine(directory,"v").use { engine -> assertThrows(IllegalArgumentException::class.java) { engine.block(0) } }
+    }
+    @Test fun oldVersionTwoIndexesStillOpenAndSectionCacheRecoversFromCorruption() {
+        val source=temporary.newFile().apply { writeText("正文。".repeat(40000)) }
+        val directory=temporary.newFolder();TxtParser.build(source,directory)
+        java.io.RandomAccessFile(java.io.File(directory,"meta.bin"),"rw").use { meta -> meta.writeInt(2);meta.setLength(meta.length()-16) }
+        TxtEngine(directory,"v").use { engine ->
+            val first=TxtPublication(engine);val expected=(0 until first.sectionCount).map { first.section(it).html }
+            val cache=java.io.File(directory,"txt-sections-v2-raw.bin");assertTrue(cache.isFile)
+            cache.writeBytes(byteArrayOf(1,2,3))
+            val reopened=TxtPublication(engine)
+            assertEquals(expected,(0 until reopened.sectionCount).map { reopened.section(it).html })
+            val correct=cache.readBytes()
+            java.io.RandomAccessFile(cache,"rw").use { file ->
+                file.readInt();file.readUTF();file.readInt();file.readLong();file.readInt()
+                file.readInt();file.readInt();file.readLong();val position=file.filePointer;val empty=file.readBoolean()
+                file.seek(position);file.writeBoolean(!empty) // A valid field change must fail the checksum.
+            }
+            TxtPublication(engine)
+            assertArrayEquals(correct,cache.readBytes())
+        }
+    }
     @Test fun commonEncodingsProduceSameReadableContent() {
         val expected = "第一章 开始\n你好，世界。\n第二章 回来\n终章"
         listOf("UTF-8", "UTF-16LE", "UTF-16BE", "GB18030").forEach { encoding ->

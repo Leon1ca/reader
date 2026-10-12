@@ -1,3 +1,4 @@
+import {installInput,applyInsets} from './input.js'
 import {textIntervals,mergeIntervals,visibleFrame,fontGeometry,compactSignature} from './viewport.js'
 // Trusted fixed-layout protocol-2 host. Content frames are inert and receive no native port.
 const nativeFeatures=Array.prototype.at && Array.prototype.findLastIndex && globalThis.ResizeObserver && globalThis.CSSStyleSheet?.prototype.replaceSync
@@ -5,9 +6,9 @@ const base=new URL('./',location.href),identity={
     sessionId:base.pathname.split('/')[2],revision:decodeURIComponent(base.pathname.split('/')[3])
 }
 let renderer=document.getElementById('renderer'),closed=false,opening=true,commandId=0,epoch=0,latest=0,deadline=0,phase='boot',intentToken='',intentCause='Restore',userToken='',userUntil=0,chain=Promise.resolve(),descriptor,rules,lastTarget,reportTimer
-const stabilitySamples=[],events=[],superseded=Symbol('superseded'),validated=new WeakSet(),fontWarned=new WeakSet(),pointers=new Map()
-let paginationBase=''
-let gesture,zooming=false,zoom=1,lastTap=0,viewportW=0,viewportH=0,gestureTimer
+const stabilitySamples=[],events=[],superseded=Symbol('superseded'),validated=new WeakSet(),validationTasks=new WeakMap(),fontWarned=new WeakSet(),pointers=new Map()
+let paginationBase='',documentError=null
+let gesture,zooming=false,zoom=1,viewportW=0,viewportH=0,gestureTimer
 function syncViewport(){
     const w=visualViewport?.width??innerWidth,h=visualViewport?.height??innerHeight;
     if(closed||!Number.isFinite(w)||!Number.isFinite(h)||w<=0||h<=0)return false;
@@ -20,7 +21,7 @@ function syncViewport(){
 syncViewport()
 function emit(type,payload={
 }){
-    if(type==='relocated'){try{payload.viewport=readingViewport()}catch(error){emit('error',{message:String(error.message)});return}}
+    if(type==='relocated'){try{payload.viewport=readingViewport();Object.assign(payload,endState());payload.pageDirection=descriptor?.direction==='rtl'?'rtl':'ltr'}catch(error){emit('error',{message:String(error.message)});return}}
     if(closed)return;
     const value={
         protocol:2,...identity,layoutEpoch:epoch,commandId,intentToken,intentCause,type,...payload
@@ -80,13 +81,13 @@ function position(){
 }
 function endState() {
     const visible=boxes(),last=visible.find(page=>page.index===descriptor?.pages.length-1),view=renderer.getBoundingClientRect()
-    return {atStart:visible.some(page=>page.index===0&&page.rect.top>=view.top-.5),atEnd:Boolean(last)}
+    return {atStart:visible.some(page=>page.index===0),atEnd:Boolean(last)}
 }
 function readingViewport() {
     const visible=boxes().sort((a,b)=>a.index-b.index),current=visible[0]?.index
     const rect=renderer.getBoundingClientRect()
     return {base:paginationBase,signature:compactSignature([rect.width,rect.height,renderer.getAttribute('flow'),renderer.getAttribute('zoom')]),currentSection:current,
-        samples:visible.map(x=>({section:x.index,page:1,pages:1,estimated:false,signature:compactSignature(fontGeometry([x.doc]))})),ranges:[],elements:[],points:[],visiblePages:visible.map(x=>x.index),atEnd:visible.some(x=>x.index===descriptor.pages.length-1)}
+        samples:visible.map(x=>({section:x.index,page:1,pages:1,estimated:false,signature:compactSignature(fontGeometry([x.doc]))})),ranges:[],elements:[],points:[],visiblePages:visible.map(x=>x.index),atEnd:visible.some(x=>x.index===descriptor.pages.length-1),fixed:{zoom:Math.max(1,Math.min(5,zoomValue())),spread:rules.spread,overflowX:visible.some(x=>x.rect.width>rect.width+.5),overflowY:visible.some(x=>x.rect.height>rect.height+.5)}}
 }
 function geometry(target){
     const entry=boxes().find(x=>x.index===target?.section);
@@ -102,6 +103,8 @@ function geometry(target){
 }
 async function validate(doc){
     if(validated.has(doc))return;
+    if(validationTasks.has(doc))return validationTasks.get(doc);
+    const task=(async()=>{
     const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT),parts=[];
     let node,size=0;
     while((node=walker.nextNode())){
@@ -110,11 +113,14 @@ async function validate(doc){
     }if(size!==Number(doc.body.dataset.readerCanonicalLength))throw new Error(`Fixed canonical length mismatch ${size}/${doc.body.dataset.readerCanonicalLength}`);
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(parts.join(''))),sha=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');
     if(sha!==doc.body.dataset.readerCanonicalSha)throw new Error('Fixed canonical hash mismatch');
-    validated.add(doc)
+    })();
+    validationTasks.set(doc,task);
+    return task
 }
 async function settled(target,restore=true){
     let signature,count=0;
     while(!closed&&performance.now()<deadline){
+        if(documentError)throw documentError;
         if(commandId!==latest)throw superseded;
         syncViewport();
         const contents=renderer.getContents();
@@ -197,6 +203,12 @@ function report(){
     }),50)
 }
 function listen(engine){
+    engine.addEventListener('documenterror',({detail:{error}})=>{
+        if(engine!==renderer||closed||error?.name==='AbortError')return;
+        if(documentError)return;
+        documentError=error;
+        emit('error',{message:String(error.message??error).slice(0,300)})
+    });
     engine.addEventListener('relocate',()=>{
         if(engine===renderer)report()
     });
@@ -209,6 +221,7 @@ function listen(engine){
         }
     })=>{
         if(engine!==renderer||closed)return;
+        installInput(doc,{active:()=>engine===renderer&&!opening&&!closed,flow:()=>rules.flow,direction:()=>descriptor.direction,zoom:zoomValue,emit,imageTap:true,doubleTap:()=>commitZoom(zoomValue()>1?'fit-page':2)});
         emit('sectionLoaded',{
             section:index,activeViews:engine.frameCount
         });
@@ -236,6 +249,13 @@ function listen(engine){
         wirePointers(doc)
     })
 }
+function updateRules(){
+    applyInsets(rules,renderer);
+    for(const [name,value] of Object.entries({zoom:rules.zoom,spread:rules.spread==='SINGLE'?'none':'auto',flow:rules.flow}))
+        if(renderer.getAttribute(name)!==String(value))renderer.setAttribute(name,String(value));
+    document.body.style.background=({dark:'#1a1917',paper:'#f3ecdf',gray:'#e6e6e3',green:'#dce8d6',white:'#ffffff'})[rules.theme]??'#ffffff';
+    zoom=Number(rules.zoom)||1;
+}
 async function rebuild(){
     const {
         FixedLayout
@@ -246,18 +266,26 @@ async function rebuild(){
     renderer=new FixedLayout();
     renderer.id='renderer';
     old.replaceWith(renderer);
+    documentError=null;
     listen(renderer);
-    renderer.setAttribute('zoom',rules.zoom);
-    renderer.setAttribute('spread',rules.spread==='SINGLE'?'none':'auto');
-    renderer.setAttribute('flow',rules.flow);
-    document.body.style.background=rules.theme==='dark'?'#19201c':rules.theme==='paper'?'#f6f1e7':'#ffffff';
+    applyInsets(rules,renderer);
+    updateRules();
+    document.body.style.background=({dark:'#1a1917',paper:'#f3ecdf',gray:'#e6e6e3',green:'#dce8d6',white:'#ffffff'})[rules.theme]??'#ffffff';
     zoom=Number(rules.zoom)||1;
     const sections=descriptor.pages.map(page=>({
-        id:String(page.index),pageSpread:rules.spread==='SINGLE'||page.spread==='none'?'center':page.pageSpread||undefined,viewport:{
+        id:String(page.index),pageSpread:page.spread==='none'?'center':page.pageSpread||undefined,viewport:{
             width:page.width,height:page.height
         },load:()=>new URL(`sections/${page.index}.html`,base).href
     }));
+    const engine=renderer;
     renderer.open({
+        beforeDocumentPublish:async({doc,index,signal})=>{
+            if(closed||renderer!==engine||signal.aborted)throw new DOMException('Fixed document canceled','AbortError');
+            if(!Number.isInteger(index)||!descriptor.pages[index]||doc.defaultView?.frameElement?.contentDocument!==doc)throw new Error('Fixed document identity mismatch');
+            await validate(doc);
+            if(closed||renderer!==engine||signal.aborted||doc.defaultView?.frameElement?.contentDocument!==doc)throw new DOMException('Fixed document canceled','AbortError');
+            validated.add(doc)
+        },
         dir:descriptor.direction,sections,rendition:{
             spread:rules.spread==='SINGLE'?'none':'auto',viewport:{
                 width:descriptor.pages[0].width,height:descriptor.pages[0].height
@@ -301,7 +329,7 @@ async function execute(command){
                 ...rules,...p
             };
             lastTarget=p.target;
-            await rebuild();
+            updateRules();
             await bounded(renderer.goTo({
                 index:lastTarget.section
             }),'navigation');
@@ -313,6 +341,7 @@ async function execute(command){
             if(!lastTarget)throw new Error('No visible fixed page')
         }else throw new Error('Unknown fixed command');
         if(commandId!==latest||closed)throw superseded;
+        if(documentError)throw documentError;
         const nearby=lastTarget?.nearby;
         lastTarget=position()??lastTarget;
         if(nearby)lastTarget.nearby=true;
@@ -346,7 +375,7 @@ globalThis.readerHost=Object.freeze({
     command(command){
         if(closed||command.protocol!==2||command.sessionId!==identity.sessionId||command.revision!==identity.revision||!Number.isInteger(command.commandId)||command.commandId<=latest)return;
         latest=command.commandId;
-        if(opening)renderer.destroy?.();
+        if(opening)renderer.cancelNavigation?.();
         chain=chain.then(()=>execute(command))
     },close(){
         closed=true;
@@ -357,7 +386,7 @@ globalThis.readerHost=Object.freeze({
         renderer.remove()
     },diagnostics(){
         return {
-            protocol:2,identity,commandId,layoutEpoch:epoch,phase,target:lastTarget,actualVisibleTarget:position(),anchorGeometry:geometry(lastTarget),activeViews:renderer.frameCount??0,allocatedFrames:renderer.frameCount??0,visiblePages:boxes().map(x=>x.index),...endState(),pagination:{current:(position()?.section??0)+1,total:descriptor?.pages.length??0,estimated:false},zoom:renderer.getAttribute('zoom'),flow:renderer.getAttribute('flow'),stabilitySamples:[...stabilitySamples],events:[...events],contents:frames().map(x=>({
+            protocol:2,identity,commandId,layoutEpoch:epoch,phase,target:lastTarget,actualVisibleTarget:position(),anchorGeometry:geometry(lastTarget),activeViews:renderer.frameCount??0,allocatedFrames:renderer.frameCount??0,frameAdmissions:renderer.getFrameDiagnostics?.()??[],visiblePages:boxes().map(x=>x.index),...endState(),pagination:{current:(position()?.section??0)+1,total:descriptor?.pages.length??0,estimated:false},zoom:renderer.getAttribute('zoom'),flow:renderer.getAttribute('flow'),stabilitySamples:[...stabilitySamples],events:[...events],contents:frames().map(x=>({
                 section:x.index,state:x.doc.readyState,canonicalLength:x.doc.body.dataset.readerCanonicalLength,validated:validated.has(x.doc),images:[...x.doc.images].map(img=>({
                     complete:img.complete,width:img.naturalWidth,height:img.naturalHeight
                 })),fontFaces:[...x.doc.fonts].map(f=>({
@@ -430,18 +459,13 @@ function wirePointers(target) {
         } else if(gesture?.kind==='pan' && gesture.moved && !gesture.overflowX && event.type==='pointerup') {
             const dx=gesture.x-gesture.startX,dy=gesture.y-gesture.startY
             if(Math.abs(dx)>48 && Math.abs(dx)>Math.abs(dy)*1.5)emit('pageRequested',{direction:(descriptor.direction==='rtl'?dx>0:dx<0)?'next':'prev',userIntentToken:userToken})
-        } else if(gesture?.kind==='pan' && !gesture.moved && event.type==='pointerup') {
-            const now=performance.now()
-            if(now-lastTap<300){
-                lastTap=0;
-                commitZoom(zoomValue()>1?'fit-page':2)
-            }else lastTap=now
         }
         gesture=null
     }
     target.addEventListener('pointerup',finish,true)
     target.addEventListener('pointercancel',finish,true)
 }
+installInput(document,{active:()=>!opening&&!closed,flow:()=>rules.flow,direction:()=>descriptor.direction,zoom:zoomValue,emit,imageTap:true,doubleTap:()=>commitZoom(zoomValue()>1?'fit-page':2)})
 function zoomValue() {
     const explicit=Number(renderer.getAttribute('zoom'))
     if(Number.isFinite(explicit) && explicit>0)return Math.max(1,Math.min(5,explicit))

@@ -61,8 +61,10 @@ class SchemaFourTest {
                 val snapshot = store.loadSnapshot(id)
                 assertEquals(Locator.Text("rev$id",40,1,2,0.4),snapshot.current)
                 assertEquals(TxtReadingExtent("rev$id",60),snapshot.furthest)
-                assertEquals(17.7f,snapshot.rules.fontSize);assertEquals("dark",snapshot.rules.theme)
-                assertEquals(if(version<3 || id=="b") ReaderFlow.SCROLLED else ReaderFlow.PAGINATED,snapshot.rules.flow)
+                assertEquals(1.6,snapshot.rules.lineHeight,0.0)
+                // The legacy per-book style stays in its row (asserted above) but no longer applies: rules are app-wide.
+                assertEquals(16f,snapshot.rules.fontSize);assertEquals("white",snapshot.rules.theme)
+                assertEquals(ReaderFlow.PAGINATED,snapshot.rules.flow)
                 assertEquals(Locator.Text("history",50,1,3,0.5),snapshot.bookmarks.single().locator)
                 val content=requireNotNull(db.content(id))
                 assertEquals("旧书$id",content.title);assertEquals("作者",content.author);assertEquals("hash$id",content.hash)
@@ -87,6 +89,33 @@ class SchemaFourTest {
             SQLiteDatabase.openDatabase(backup.path,null,SQLiteDatabase.OPEN_READONLY).use { saved -> saved.rawQuery("SELECT COUNT(*) FROM books",null).use { assertTrue(it.moveToFirst());assertEquals(2,it.getInt(0)) } }
             db.close();SQLiteDatabase.deleteDatabase(source)
         }
+    }
+    @Test fun newTypographyDefaultsAndExistingPreferencesSurviveReopenAndVersionFourUpgrade() {
+        val db=helper();val store=SqliteReadingStore(db)
+        assertEquals(1.4,store.effectiveRules().rules.lineHeight,0.0)
+        for(id in listOf("a","b"))db.insert(TxtRecord(id,"自有$id","作者","hash$id",3,99,0,"UTF-8","rev$id",1,3,Locator.Text("rev$id",0,0),0,16f,"white"),"original.txt")
+        store.patchRules(RulesPatch(lineHeight=FieldUpdate.Set(1.6)))
+        // Typography is shared: a write made while reading book "a" is what book "b" shows too.
+        store.patchRules("a","reva",RulesPatch(lineHeight=FieldUpdate.Set(1.9)))
+        db.close()
+        val reopened=SqliteReadingStore(helper())
+        assertEquals(1.9,reopened.effectiveRules().rules.lineHeight,0.0)
+        assertEquals(1.9,reopened.loadSnapshot("a").rules.lineHeight,0.0)
+        assertEquals(1.9,reopened.loadSnapshot("b").rules.lineHeight,0.0)
+        helpers.forEach {it.close()};SQLiteDatabase.deleteDatabase(context.getDatabasePath("library.db"))
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath("library.db"),null).use { old ->
+            LibraryDb.SCHEMA.map {it.replace(",hidden_from_continue INTEGER NOT NULL DEFAULT 0 CHECK(hidden_from_continue IN (0,1))","").replace(",canonical_characters INTEGER","")}.forEach(old::execSQL)
+            old.execSQL("INSERT INTO reader_defaults(scope,theme,flow,prefs_revision) VALUES('app','white','paginated',0)")
+            for(scope in listOf("txt","epub"))old.execSQL("INSERT INTO reader_defaults(scope,font_size,line_height,margin,font_family,columns,epub_style_mode,prefs_revision) VALUES(?,16,1.6,'M','default','auto','AUTHOR',0)",arrayOf(scope))
+            old.execSQL("INSERT INTO contents(id,format,revision,title,author,hash,bytes,imported_at) VALUES('owned','txt','rev','自有','作者','hash',3,1)")
+            old.execSQL("INSERT INTO reading_settings(content_id,line_height) VALUES('owned',1.9)")
+            old.version=4
+        }
+        val migrated=helper();val oldStore=SqliteReadingStore(migrated)
+        assertEquals(5,migrated.writableDatabase.version)
+        // Installs from before shared settings keep their format default; a stray per-book override no longer wins.
+        assertEquals(1.6,oldStore.effectiveRules().rules.lineHeight,0.0)
+        assertEquals(1.6,oldStore.effectiveRules("owned").rules.lineHeight,0.0)
     }
     @Test fun committedWalBackupIsStandaloneOnEverySupportedAndroidVersion() {
         val source=fixture()
@@ -153,47 +182,47 @@ class SchemaFourTest {
         try { helper().writableDatabase;fail("unknown version") } catch(_: IllegalArgumentException) { }
         SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READONLY).use { assertEquals(99,it.version) }
     }
-    @Test fun patchesAreAtomicClearOnlyChosenFieldsAndPreserveEofRawExtent() {
+    @Test fun patchesAreAtomicShareAcrossBooksAndPreserveEofRawExtent() {
         fixture();val db=helper();val store=SqliteReadingStore(db)
         store.patchRules("a","reva",RulesPatch(fontSize=FieldUpdate.Set(28f)))
-        store.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,RulesPatch(theme=FieldUpdate.Set("paper")))
-        assertEquals(28f,store.effectiveRules("a").rules.fontSize);assertEquals("paper",store.effectiveRules("b").rules.theme)
-        assertEquals(ReaderFlow.SCROLLED,store.effectiveRules("b").rules.flow)
-        db.writableDatabase.rawQuery("SELECT theme,flow,font_size FROM reading_settings WHERE content_id='a'",null).use { assertTrue(it.moveToFirst());assertTrue(it.isNull(0));assertEquals("paginated",it.getString(1));assertEquals(28f,it.getFloat(2)) }
-        store.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,RulesPatch(flow=FieldUpdate.Set(ReaderFlow.PAGINATED),theme=FieldUpdate.Set("white")))
+        store.patchRules(RulesPatch(theme=FieldUpdate.Set("paper")))
+        assertEquals(28f,store.effectiveRules("b").rules.fontSize);assertEquals("paper",store.effectiveRules("b").rules.theme)
         assertEquals(ReaderFlow.PAGINATED,store.effectiveRules("b").rules.flow)
-        store.patchRules("a","reva",RulesPatch(theme=FieldUpdate.Set("white")))
-        store.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,RulesPatch(theme=FieldUpdate.Set("white")))
-        assertEquals(RuleOrigin.APP,store.effectiveRules("a").origins["theme"])
+        db.writableDatabase.rawQuery("SELECT theme,font_size FROM reading_settings WHERE content_id='a'",null).use { assertTrue(it.moveToFirst());assertEquals("dark",it.getString(0));assertEquals(17.7,it.getDouble(1),0.0) } // legacy columns are never written again
+        store.patchRules(RulesPatch(flow=FieldUpdate.Set(ReaderFlow.PAGINATED),theme=FieldUpdate.Set("white")))
+        assertEquals(ReaderFlow.PAGINATED,store.effectiveRules("b").rules.flow)
         store.savePosition("a","reva",Locator.Text("reva",100,2,8,1.0),TxtReadingExtent("reva",100))
         assertEquals(1.0,db.contents().single { it.id=="a" }.fraction,0.0)
         assertEquals(1.0,db.contents().single { it.id=="a" }.furthestFraction,0.0)
         val before=store.loadSnapshot("a")
-        store.resetBookRules("a","reva")
+        // Fixed-layout view state is the only per-book rule.
+        store.patchRules("a","reva",RulesPatch(fxlZoom=FieldUpdate.Set("fit-width")))
+        assertEquals("fit-width",store.effectiveRules("a").rules.fxlZoom);assertEquals("fit-page",store.effectiveRules("b").rules.fxlZoom)
         val after=store.loadSnapshot("a")
         assertEquals(before.current,after.current);assertEquals(before.furthest,after.furthest);assertEquals(before.bookmarks,after.bookmarks)
-        assertEquals(16f,after.rules.fontSize)
-        try { store.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,RulesPatch(theme=FieldUpdate.Set("dark"),fontSize=FieldUpdate.Set(99f)));fail("invalid multi-field patch") } catch(_: IllegalArgumentException) { }
-        assertEquals("white",store.defaults().rules.theme)
+        try { store.patchRules(RulesPatch(fxlZoom=FieldUpdate.Set("fit-width")));fail("zoom is per book") } catch(_: IllegalArgumentException) { }
+        try { store.patchRules(RulesPatch(theme=FieldUpdate.Set("dark"),fontSize=FieldUpdate.Set(99f)));fail("invalid multi-field patch") } catch(_: IllegalArgumentException) { }
+        assertEquals("white",store.effectiveRules().rules.theme)
     }
-    @Test fun concurrentFieldPatchesDoNotReviveClearedOverridesAndNewBooksInherit() {
+    @Test fun concurrentFieldPatchesNeverLoseAnotherFieldAndNewBooksShareSettings() {
         fixture();val db=helper();val first=SqliteReadingStore(db);val second=SqliteReadingStore(db)
         val start=java.util.concurrent.CountDownLatch(1)
         val failure=java.util.concurrent.atomic.AtomicReference<Throwable?>()
         val jobs=listOf(Thread { try { start.await();repeat(20) { first.patchRules("a","reva",RulesPatch(fontSize=FieldUpdate.Set(18f+it%3))) } } catch(e: Throwable) { failure.set(e) } },
-            Thread { try { start.await();repeat(20) { second.patchRules(null,null,ContentFormat.TXT,RulesScope.GLOBAL,RulesPatch(theme=FieldUpdate.Set("paper"))) } } catch(e: Throwable) { failure.set(e) } })
+            Thread { try { start.await();repeat(20) { second.patchRules(RulesPatch(theme=FieldUpdate.Set("paper"))) } } catch(e: Throwable) { failure.set(e) } })
         jobs.forEach { it.start() };start.countDown();jobs.forEach { it.join(10000);assertFalse(it.isAlive) }
         failure.get()?.let { throw AssertionError("concurrent patch failed",it) }
         val current=first.effectiveRules("a")
-        assertEquals(19f,current.rules.fontSize);assertEquals("paper",current.rules.theme);assertEquals(RuleOrigin.APP,current.origins["theme"])
+        assertEquals(19f,current.rules.fontSize);assertEquals("paper",current.rules.theme)
         assertEquals(current.preferencesRevision,first.preferencesRevision.value)
         db.insert(TxtRecord("fresh","新书","作者","fresh-hash",3,99,0,"UTF-8","fresh-rev",1,3,Locator.Text("fresh-rev",0,0),0,16f,"white"),"original.txt")
         assertEquals("paper",first.loadSnapshot("fresh").rules.theme)
+        assertEquals(19f,first.loadSnapshot("fresh").rules.fontSize)
         assertEquals("original.txt",requireNotNull(db.content("fresh")).originalName)
         db.writableDatabase.rawQuery("SELECT font_size,theme,flow FROM reading_settings WHERE content_id='fresh'",null).use { assertTrue(it.moveToFirst());repeat(3) { column -> assertTrue(it.isNull(column)) } }
         first.patchRules("a","reva",RulesPatch(lineHeight=FieldUpdate.Set(1.75),fontFamily=FieldUpdate.Set("serif")))
-        assertEquals(1.75,first.effectiveRules("a").lineHeight,0.0)
-        assertEquals("serif",first.effectiveRules("a").fontFamily)
+        assertEquals(1.75,first.effectiveRules("b").rules.lineHeight,0.0)
+        assertEquals("serif",first.effectiveRules("b").rules.fontFamily)
     }
     @Test fun unknownFormatPayloadsRoundTripWithoutPretendingToOpenEpub() {
         val db=helper();val database=db.writableDatabase
@@ -231,7 +260,7 @@ class SchemaFourTest {
             val retryDeadline=android.os.SystemClock.uptimeMillis()+10000
             while(model.state.value.error!=null && android.os.SystemClock.uptimeMillis()<retryDeadline) Thread.sleep(25)
             assertNull(model.state.value.error)
-            preferences.defaults()
+            preferences.effectiveRules()
             SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READONLY).use { db -> assertEquals(5,db.version) }
         } finally { instrumentation.runOnMainSync { models.clear() } }
     }

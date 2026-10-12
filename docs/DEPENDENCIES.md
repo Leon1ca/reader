@@ -25,8 +25,6 @@ SQLite 使用 Android 平台提供的 SQLiteOpenHelper，不额外接入 Room �
 
 MIT 上游许可、源 / 打包 / patch 哈希与重放补丁位于 `app/src/main/assets/reader/vendor/foliate/`。仅打包 paginator.js，四项必要补丁为禁正文脚本、全局 view 上限及补偿淘汰、释放 view 的 observer / iframe、关闭 paginator 的 container observer；更新必须跑浏览器与真机定位 / 资源回归。Playwright / Chromium 只用于外部开发测试，不是 APK 运行依赖。
 
-R1b adds `org.json:json:20260814` for JVM tests only. Production uses Android platform `org.json`; no Room/KSP dependency is added. The official Maven Central POM was retrieved through the existing macOS proxy and retained in the task work directory.
+JVM 单元测试额外使用 `org.json:json:20260814`（生产代码使用 Android 平台自带的 `org.json`）。
 
-R2 fixes jsoup 1.23.2 and the NIO desugaring specification 2.1.5. Their official POMs were retrieved from Maven Central and Google Maven; jsoup's Java 8 classfiles and HTML/progressive parser were checked in an isolated JVM probe. Android compatibility and the full EPUB consumer pipeline require the R2 device gate; dependency installation alone does not indicate EPUB support.
-
-R3B adds the independently pinned MIT `fixed-layout.js` module from the same 341dc63 commit. No additional runtime dependency is introduced. Its upstream / packaged / unified-patch hashes are listed in `manifest.modules`, with offline replay supported by `verify-vendor.py --upstream-dir`. The original host implements page-coordinate and gesture policy; no AGPL Readest application implementation is copied. Android API29 uses its public WEBP compression enum only inside a documented compatibility branch; API30+ uses WEBP_LOSSY.
+`fixed-layout.js` 与 paginator.js 来自同一 foliate-js 提交（341dc63），按 `manifest.modules` 分别固定上游、打包与补丁哈希，可用 `scripts/tests/verify-vendor.py --upstream-dir` 离线重放。没有引入其他运行时依赖；Readest AGPL 应用代码一律未复制。

@@ -51,6 +51,28 @@ class LibraryPersistenceTest {
         fixtureUris += uri
         return uri
     }
+    @Test fun positionWritesDoNotDecodeBookmarksAndWalReadersRemainAvailable() {
+        val result=repository.import(fixture("Chapter 1\nA readable paragraph for minimal saves.\n".toByteArray()))
+        val id=requireNotNull(result.bookId);val book=requireNotNull(repository.db.txt(id))
+        val locator=repository.engine(book).use { engine -> engine.block(1).let { Locator.Text(book.version,it.sourceOffset+2,1,2) } }
+        assertTrue(repository.db.writableDatabase.isWriteAheadLoggingEnabled)
+        repository.db.addBookmark(id,locator,"owned")
+        // Unrelated bookmark payloads must never be read by the per-second position save.
+        repository.db.writableDatabase.execSQL("UPDATE bookmarks SET locator_json='invalid-json' WHERE content_id=?",arrayOf(id))
+        val store=com.localreader.app.data.SqliteReadingStore(repository.db)
+        store.savePosition(id,book.version,locator,com.localreader.app.formats.txt.TxtReadingExtent(book.version,locator.sourceOffset))
+        repository.db.writableDatabase.rawQuery("SELECT locator_json FROM positions WHERE content_id=?",arrayOf(id)).use { c -> assertTrue(c.moveToFirst());assertEquals(locator,LocatorCodec.decode(c.getString(0))) }
+        repository.db.writableDatabase.rawQuery("SELECT locator_json FROM bookmarks WHERE content_id=?",arrayOf(id)).use { c -> assertTrue(c.moveToFirst());assertEquals("invalid-json",c.getString(0)) }
+    }
+    @Test fun missingPrivateOriginalFailsReadablyAndPreservesMetadataAndPosition() = kotlinx.coroutines.runBlocking {
+        val id=requireNotNull(repository.import(fixture("Chapter 1\nOwned missing-file fixture.\n".toByteArray())).bookId)
+        val book=requireNotNull(repository.db.txt(id));val original=File(repository.directory(book).parentFile!!.parentFile,"original.txt")
+        assertTrue(original.delete())
+        repository.db.close();repository=LibraryRepository(context);repository.recover()
+        assertNotNull(repository.content(id));assertEquals(book.current,requireNotNull(repository.db.txt(id)).current)
+        try { com.localreader.app.data.LibraryOpenedBookFactory(repository).open(id);fail("Missing original must not silently open a stale cache") }
+        catch(error: IllegalStateException) { assertTrue(error.message.orEmpty().contains("重新导入"));assertTrue(error.message.orEmpty().contains("阅读记录已保留")) }
+    }
     @Test fun privateCopyDuplicateAndRestartPreserveProgressBookmarksAndStyles() {
         val text = "第一章 开始\n" + "这是一段正文。\n".repeat(300)
         val source = fixture(text.toByteArray())
@@ -61,7 +83,7 @@ class LibraryPersistenceTest {
         repository.db.savePosition(book.id, anchor)
         repository.db.savePosition(book.id, anchor.copy(sourceOffset = 40, paragraph = 4))
         repository.db.addBookmark(book.id, anchor, "正文书签")
-        repository.db.setStyle(book.id, 28f, "dark")
+        repository.db.setStyle(28f, "dark")
         val duplicate = repository.import(fixture(text.toByteArray()))
         assertEquals(book.id, duplicate.bookId); assertEquals(1, repository.db.contents().size)
         assertEquals(1, context.contentResolver.delete(fixtureUris.first(), null, null))
@@ -89,6 +111,7 @@ class LibraryPersistenceTest {
         repository.db.close(); repository = LibraryRepository(context); repository.recover()
         assertFalse(File(context.filesDir, "import-staging/killed-task").exists())
         assertFalse(File(context.filesDir, "library/orphan-book").exists())
+        repository.cleanupRetiredVersions() // deferred until after the first shelf publication in production
         assertFalse(File(context.filesDir, "library/${book.id}/versions/uncommitted-index").exists())
         assertNotNull(repository.db.txt(book.id))
         repository.engine(book).use { assertEquals("序言", it.block(0).text) }
@@ -431,7 +454,8 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
-                        is RendererEvent.Interaction -> Unit
+                        is RendererEvent.Tap, is RendererEvent.Selection -> Unit
+            is RendererEvent.Interaction -> Unit
                         is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
@@ -529,7 +553,8 @@ class LibraryPersistenceTest {
                         is RendererEvent.Error -> error.set(event.message)
                         is RendererEvent.Crashed -> error.set(event.message)
                         is RendererEvent.Ready -> ready.set(true)
-                        is RendererEvent.Interaction -> Unit
+                        is RendererEvent.Tap, is RendererEvent.Selection -> Unit
+            is RendererEvent.Interaction -> Unit
                         is RendererEvent.Zoom -> Unit
                         is RendererEvent.Notice -> Unit
                         RendererEvent.Loading -> ready.set(false)
@@ -569,12 +594,13 @@ class LibraryPersistenceTest {
                     source.block(80).sourceOffset
             }
             repository.db.savePosition(id,anchors.first,anchors.second)
-            repository.db.setStyle(id,22f,"paper"); repository.db.setFlow(id,flow)
+            repository.db.setStyle(22f,"paper"); repository.db.setFlow(flow)
             repository.db.addBookmark(id,anchors.first,"原书签")
             repository.db.addBookmark(id,anchors.first.copy(version = "retained-old",fallbackFraction = 0.8),"旧版本书签")
             val original = requireNotNull(repository.db.txt(id))
             val bookmarks = repository.db.bookmarks(id)
-            val rawFiles = repository.directory(book).listFiles().orEmpty().associate { it.name to it.readBytes().toList() }
+            val rawFiles = repository.directory(book).listFiles().orEmpty().filter { it.name in setOf("text.bin","index.bin","meta.bin") }.associate { it.name to it.readBytes().toList() }
+            val originalBytes=java.io.File(repository.directory(book).parentFile!!.parentFile,"original.txt").readBytes()
             val opened = factory.open(id)
             val snapshot = store.loadSnapshot(id)
             assertEquals(original.current,snapshot.current)
@@ -599,7 +625,8 @@ class LibraryPersistenceTest {
                     assertEquals(old,kept)
                 }
                 assertTrue(restored.publication.target(after.bookmarks.single { it.locator.version == "retained-old" }.locator).nearby)
-                assertEquals(rawFiles,repository.directory(book).listFiles().orEmpty().associate { it.name to it.readBytes().toList() })
+                assertEquals(rawFiles,repository.directory(book).listFiles().orEmpty().filter { it.name in setOf("text.bin","index.bin","meta.bin") }.associate { it.name to it.readBytes().toList() })
+                assertArrayEquals(originalBytes,java.io.File(repository.directory(book).parentFile!!.parentFile,"original.txt").readBytes())
                 try { store.savePosition(id,"wrong",normalized,after.furthest); fail("foreign revision must be rejected") } catch (_: IllegalArgumentException) { }
                 try { store.addBookmark(id,restored.revision,Locator.Article(restored.revision,"0",0),"invalid"); fail("foreign format must be rejected") } catch (_: IllegalArgumentException) { }
             } finally { restored.close() }
@@ -659,6 +686,10 @@ class LibraryPersistenceTest {
                 models.clear() // source closure must not depend on the now-cancelled VM scope
                 assertTrue(closed.get())
                 assertFalse(model.rendererEvent(session.generation,RendererEvent.Position(session.snapshot.current)))
+            }
+            // Retired source closure runs on the independent serial IO scope even after VM clear.
+            waitUntil {
+                try { session.document.section(0); false } catch (_: java.io.IOException) { true }
             }
             try { session.document.section(0); fail("retired source must already be closed") } catch (_: java.io.IOException) { }
         } finally { instrumentation.runOnMainSync { models.clear() }; actual.db.txt(id)?.let(actual::delete) }
@@ -742,6 +773,47 @@ class LibraryPersistenceTest {
             actual.db.txt(id)?.let(actual::delete)
         }
     }
+    @Test fun asynchronousCloseSerializesOldProgressBeforeReopenAndRejectsLateOldEvents() {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val app=instrumentation.targetContext.applicationContext as ReaderApplication
+        val actual=app.repository
+        val id=requireNotNull(actual.import(fixture(("Owned close barrier ${UUID.randomUUID()}\n"+"Readable paragraph.\n".repeat(150)).toByteArray())).bookId)
+        val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+        val first=java.util.concurrent.atomic.AtomicBoolean(true);val mainWrite=java.util.concurrent.atomic.AtomicBoolean(false)
+        val reads=java.util.concurrent.atomic.AtomicInteger()
+        val delayed=object: ReadingStore by app.readingStore {
+            override fun loadSnapshot(contentId: String): ReadingSnapshot { reads.incrementAndGet();return app.readingStore.loadSnapshot(contentId) }
+            override fun savePosition(contentId: String,revision: String,current: Locator,furthest: ReadingExtent) {
+                if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())mainWrite.set(true)
+                if(contentId==id && first.compareAndSet(true,false)) { entered.countDown();check(release.await(10,java.util.concurrent.TimeUnit.SECONDS)) }
+                app.readingStore.savePosition(contentId,revision,current,furthest)
+            }
+        }
+        val models=ViewModelStore();lateinit var model: ReaderViewModel
+        try {
+            instrumentation.runOnMainSync {model=ReaderViewModel(app,delayed);models.put("async-close",model)}
+            waitUntil {!model.state.value.loading}
+            instrumentation.runOnMainSync {model.open(id)}
+            waitUntil {model.state.value.reader!=null && !model.state.value.busy}
+            val old=requireNotNull(model.state.value.reader);val book=requireNotNull(actual.db.txt(id))
+            val anchors=actual.engine(book).use { engine -> listOf(30,100).map { p -> engine.block(p).let { Locator.Text(book.version,it.sourceOffset,p) } } }
+            instrumentation.runOnMainSync {assertTrue(model.position(anchors[0]));model.closeReader();model.open(id)}
+            assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS));assertFalse(mainWrite.get())
+            assertNull(model.state.value.reader);assertEquals(1,reads.get())
+            release.countDown()
+            waitUntil {model.state.value.reader!=null && !model.state.value.busy}
+            assertEquals(anchors[0],requireNotNull(model.state.value.reader).snapshot.current)
+            instrumentation.runOnMainSync {
+                assertTrue(model.position(anchors[1]))
+                assertFalse(model.rendererEvent(old.generation,RendererEvent.Position(anchors[0],"late-old-owner")))
+            }
+            waitUntil {actual.db.txt(id)?.current==anchors[1]}
+            assertFalse(mainWrite.get());assertEquals(anchors[1],actual.db.txt(id)?.current)
+        } finally {
+            release.countDown();instrumentation.runOnMainSync {models.clear()}
+            actual.content(id)?.let(actual::delete)
+        }
+    }
     @Test fun failedClosedProgressBlocksSameBookUntilRetryBeforeSnapshotButAllowsOtherBook() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = instrumentation.targetContext.applicationContext as ReaderApplication
@@ -798,6 +870,53 @@ class LibraryPersistenceTest {
             failing.set(false)
             instrumentation.runOnMainSync { models.clear() }
             listOf(id,otherId).forEach { actual.db.txt(it)?.let(actual::delete) }
+        }
+    }
+
+    @Test fun openingAndBatchDeletionShareBarrierUntilRealSourceAndDatabaseWorkComplete() {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val app=instrumentation.targetContext.applicationContext as ReaderApplication
+        val repository=app.repository
+        val id=requireNotNull(repository.import(fixture(("OPEN DELETE ${UUID.randomUUID()}\n"+"Original text.\n".repeat(100)).toByteArray())).bookId)
+        val snapshotEntered=java.util.concurrent.CountDownLatch(1);val snapshotRelease=java.util.concurrent.CountDownLatch(1)
+        val deleteEntered=java.util.concurrent.CountDownLatch(1);val deleteRelease=java.util.concurrent.CountDownLatch(1)
+        val deleteDone=java.util.concurrent.CountDownLatch(1);val snapshotReads=java.util.concurrent.atomic.AtomicInteger()
+        val store=object: ReadingStore by app.readingStore {
+            override fun loadSnapshot(contentId: String): ReadingSnapshot {
+                snapshotReads.incrementAndGet();snapshotEntered.countDown()
+                check(snapshotRelease.await(10,java.util.concurrent.TimeUnit.SECONDS))
+                return app.readingStore.loadSnapshot(contentId)
+            }
+        }
+        val contents=object: ContentRepository by repository {
+            override fun deleteDetailed(book: ContentRecord): ContentDeletion {
+                deleteEntered.countDown()
+                try { check(deleteRelease.await(10,java.util.concurrent.TimeUnit.SECONDS));return repository.deleteDetailed(book) }
+                finally { deleteDone.countDown() }
+            }
+        }
+        val models=ViewModelStore();lateinit var model: ReaderViewModel
+        try {
+            instrumentation.runOnMainSync { model=ReaderViewModel(app,store,app.readingStore,contents);models.put("open-delete",model) }
+            waitUntil { !model.state.value.loading }
+            instrumentation.runOnMainSync { model.open(id) }
+            assertTrue(snapshotEntered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(model.state.value.busy);assertNull(model.state.value.reader)
+            instrumentation.runOnMainSync { model.shelfController.deleteBooks(setOf(id)) }
+            assertFalse(model.shelfController.deletions.value.running)
+            assertFalse(model.shelfController.deletions.value.results.single().success)
+            assertEquals(1L,deleteEntered.count);assertNotNull(repository.content(id))
+            snapshotRelease.countDown();waitUntil { model.state.value.reader!=null && !model.state.value.busy }
+            instrumentation.runOnMainSync { model.closeReader();model.shelfController.dismissDeletions();model.shelfController.deleteBooks(setOf(id)) }
+            assertTrue(deleteEntered.await(5,java.util.concurrent.TimeUnit.SECONDS));assertTrue(model.shelfController.deletions.value.running)
+            instrumentation.runOnMainSync { model.open(id) }
+            assertNull(model.state.value.reader);assertFalse(model.state.value.busy);assertEquals(1,snapshotReads.get())
+            deleteRelease.countDown();waitUntil { !model.shelfController.deletions.value.running }
+            assertTrue(model.shelfController.deletions.value.results.single().success)
+            assertNull(model.state.value.reader);assertNull(repository.content(id))
+        } finally {
+            snapshotRelease.countDown();deleteRelease.countDown();deleteDone.await(2,java.util.concurrent.TimeUnit.SECONDS)
+            instrumentation.runOnMainSync { models.clear() };repository.content(id)?.let(repository::delete)
         }
     }
 

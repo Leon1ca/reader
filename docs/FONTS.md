@@ -1,10 +1,8 @@
-# 正文字体来源、许可与一致性核验
+# 正文字体来源与许可
 
 核验日期：2026-10-04。对应 Readest 0.12.10，官方 commit `8a56831af61841175b49cc2740bffcde57b470b0`。
 
 本轮已独立从字体官方仓库/发布页取得五个字体文件，未从 Readest APK 复制任何字体或代码。实现角色已将它们放入 `app/src/main/assets/fonts/`；规划角色核对了五个打包文件与下载原件的 SHA-256 完全相同。机器可读完整清单为 [FONTS_MANIFEST.json](FONTS_MANIFEST.json)。
-
-**已证实：来源、许可、版本、文件完整性，以及默认字重 400 下与本次取得的 Readest 公共字体分包的共有字形轮廓和 advance width 一致。尚未证实：手机 Readest 每个字形实际使用这些文件，或两应用的最终正文像素完全一致。**
 
 ## 1. 打包字体清单
 
@@ -36,76 +34,11 @@ Roboto/Bitter 固定 Google Fonts 官方仓库 commit：`9710da1eacb3be272583c32
 
 OFL 允许字体随软件打包，需保留相应版权和许可；字体本身持续按 OFL 分发，不把本应用的许可套到字体文件上，不单独出售字体。若后续修改字体/子集化，应重新核对对应发行版本的名称与修改条件。本轮完整 TTF 字节均保持官方原件不变。
 
-`lxgw-wenkai-screen-web@1.520.0` 的 package.json 标为 MIT，但字体文件的嵌入许可与来源为 OFL-1.1。不得只凭 npm 顶层 MIT 字段把字库认定为 MIT。本项目当前打包的是官方完整 TTF 与官方 OFL，避开这种元数据歧义。
+`lxgw-wenkai-screen-web@1.520.0` 的 package.json 标为 MIT，但字体文件的嵌入许可与来源为 OFL-1.1；本项目打包的是官方完整 TTF 与官方 OFL。
 
-Readest 应用源码的 AGPL 不因字体许可而变成 OFL 或 MIT；本轮项目 `readest.css` 是实现角色自行写的 `@font-face` 声明，不复制 Readest 的 style.ts。正文行为规格仍按 [READEST_PARITY.md](READEST_PARITY.md) 独立实现和验证。
+## 3. 使用范围
 
-## 3. 和 Readest 实际字体来源的绑定
-
-固定版 Readest [fonts.ts](https://github.com/readest/readest/blob/8a56831af61841175b49cc2740bffcde57b470b0/apps/readest-app/src/styles/fonts.ts) 对 Roboto、Bitter 请求 Google Fonts CSS2 API，normal/italic 均请求 100–900 可变字重。API 返回内容会随日期、UA、上游版本变化；锁 Readest tag 并不会冻结远程字体字节。
-
-本轮使用 Android Chrome 153 UA 在 2026-10-04 取得对应 API CSS 快照：Bitter URL 路径为 v42，内部版本 3.021；Roboto 内部版本 3.015;2026。这与此次固定官方仓库 TTF 内部版本一致。下载了全部 28 个 WOFF2 分包（Roboto 每种样式 9 个；Bitter 每种样式 5 个），并存下请求 CSS、每个分包的源 URL 与 SHA-256。**这仍不能证明手机现有 Readest 缓存的字体就是本日返回的这批文件。**
-
-Readest 的 CJK 字体来源是 [cdnjs 固定 1.520.0 GB Screen CSS](https://cdnjs.cloudflare.com/ajax/libs/lxgw-wenkai-screen-web/1.520.0/lxgwwenkaigbscreen/result.css)。该 CSS 含 248 个 `unicode-range` 分包；注释里的字体版本为 1.520，常规字重 400。npm 对应包的 git commit 为 `65102e6a4a887152b196cfd800f4a52db3bf785a`，已验证 tarball 的 SHA-1 和 SHA-512 registry integrity，且其中 GB Screen CSS 与 cdnjs 返回 CSS **逐字节相同**。
-
-字体选择顺序仍按 READEST_PARITY.md：手机一般无衬线正文首先 Roboto，然后 LXGW WenKai GB Screen 等 fallback；数字没有单独字体类别。TXT/剪藏文章有额外原始字体栈并经过 generic-family 重写，不能忽略 Arial 或系统前置候选。现有阅读器尚需实际字形检查。
-
-## 4. 轮廓与度量核验结果
-
-使用 fontTools 4.60.2 只读解析字体，对 WOFF2 与完整 TTF 的共有 cmap 码点逐个比较展开后的轮廓绘制命令和水平 advance width。Roboto/Bitter 取 `wght=400`，Roboto width 轴默认 100。结果见 [FONT_GLYPH_COMPARISON.json](FONT_GLYPH_COMPARISON.json)。
-
-| 字体 | 网页分包数 | 独立 cmap 码点 | 比较次数（分包可能重复） | 轮廓/字宽差异 |
-| --- | ---: | ---: | ---: | ---: |
-| LXGW GB Screen | 248 | 46501 | 46509 | 0 |
-| Roboto regular | 9 | 897 | 1190 | 0 |
-| Roboto italic | 9 | 897 | 1190 | 0 |
-| Bitter regular | 5 | 871 | 936 | 0 |
-| Bitter italic | 5 | 871 | 936 | 0 |
-
-比较不覆盖所有可变字重、hinting、OpenType shaping/kerning、脚本上下文或最终光栅化；这些需要浏览器与设备对照。它证明默认字形形状/advance 与当前公共分包一致，不能扩展成排版已达标。
-
-### 完整字体比 Google 分包多出字符
-
-完整 Roboto cmap 为 927 码点，比网页分包并集多 30；Bitter 977，比并集多 106。包括部分组合重音、空白或符号，可能让原本走 fallback 的字符改由本字体处理。详细码点与可用于 `@font-face unicode-range` 的实际网页覆盖并集见 [FONT_WEB_COVERAGE.json](FONT_WEB_COVERAGE.json)。
-
-当前实现打包完整 TTF，并已为 Roboto/Bitter 的四个 `@font-face` 加入 FONT_WEB_COVERAGE.json 的精确有效 `unicode-range`，排除上述额外码点；规划角色已逐项核对声明与清单一致，并验证范围确实等于原始分包 cmap 与对应 Google CSS unicode-range 的交集并集。此项覆盖差异已处理；全可变字重、shaping/hinting 和实机一致性仍未验证。LXGW 完整 TTF 和其网页分包的码点并集均为 46501。
-
-## 5. 实现注意事项与缩放证据
-
-- variable fonts 的 `@font-face` 字重范围声明为 100–900，regular/italic 分开。Bitter 字体轴默认 100（内部家族名 Bitter Thin），使用时正文必须明确字重 400；不能因文件名 Regular 就省略权重控制。
-- Roboto 的宽度轴默认为 100；不要默认启用窄体。LXGW 为固定常规 400，粗体/斜体的浏览器合成也要与 Readest 对照。
-- 当前项目已将 `font-display` 对齐为 `swap`，实现角色说明在 `document.fonts.ready` 后恢复/报告位置；仍须设备测试验证字体加载后的重排行为，不以 fallback 首帧作成功证据。本地字体失败要报告，不悄悄给用户显示“已一致”。
-- 手机记录：1200×2670、physical density 520、system font_scale 0.9，WebView `com.google.android.webview 153.0.8010.36`。Readest 未提供生产调试 socket，未连接系统浏览器的调试端口。
-- 已检索固定 Readest Android 原生源代码，未找到 textZoom/fontScale 覆写；Cargo.lock 锁定 Wry 0.56.1，下载其原始 crate 并核对 lock SHA-256 `375becb4aded9913f736443cf88000c6311478db69814cc06070465e4cc44c98`，其 RustWebView Kotlin 也未设 textZoom。此证据支持保留平台默认缩放并实测；不应武断改成 100。
-- Readest 自己的同 tag 历史诊断记录报告 Android 系统 font_scale 会通过 WebView text zoom 影响 CSS 字体；这是上游测试记录，不能当本手机实测值。默认 16×1.25=20 是 **CSS 声明值**；本项目 I0 默认 TXT 后续实测 computed 为18px，见下节。Readest 自身生产正文仍未直接测到，防止将本项目结果外推。
-
-## 6. 研究资源归档
-
-完整下载与证据目录：`/Users/leon1ca/Documents/Codex/2026-10-04/ji-y/work/readest-fonts`。含字体原件/许可、官方 release 元数据、Google 仓库 commit、npm integrity、原始 CSS、原始 Google 28 分包/LXGW GB 248 分包、只读轮廓验证脚本、报告与 SHA256SUMS。该目录的 npm 包/工具源码仅用于核验，不需要全部打入 APK。
-
-项目目前打包的字体/许可及原创声明哈希在 FONTS_MANIFEST.json 中；若实现角色继续改 `readest.css`，必须同步刷新 manifest 的 CSS hash。字体文件的任何替换都要重新做来源、许可、默认字形和设备回归核验。
-
-## 7. I0 真机字体证据（基线 237d478）
-
-父代理已在本项目 WebView 使用 CDP 检查实际渲染字体，记录经规划角色读取核对。证据目录 `work/` 位于研究工作区。以下是具体样本结论，不能外推至 Readest 生产运行或尚未接入的真实文章管线。
-
-| 样本 | 观察 | 结论边界 |
-| --- | --- | --- |
-| 默认 TXT，设置字号16 | 声明20px；computed18px、line-height28.8px、indent40px、上下margin20px，body44px16px；viewport369×576 CSSpx / DPR3.25 | 系统font_scale0.9影响文字；不能将实际字体尺寸与em距离简单等同 |
-| TXT的Arial优先链 | 被测中英文/ASCII数字实际为系统MiSans VF，isCustomFont=false；5个本地fontface均unloaded | 字体未命中，不是加载失败；不能称TXT默认使用Roboto/LXGW |
-| 临时文章字体链诊断 | 中文6glyph及全角数字10glyph命中本地LXGW；英文20glyph和ASCII数字10glyph命中本地Roboto-Regular，isCustomFont=true | 证明本地字体能加载和该配置可选中；是原创探针，不是文章端到端或Readest实际字体证据 |
-| 诊断时字号 | 设置18，对应声明22.5px、computed20.25px | 不是文章默认字号测量，不与默认TXT18px直接作视觉一致比较 |
-
-原始文件：`reader-device-txt-default.json`、`reader-device-typography.json`、`reader-device-article-glyph-probe.json`、`reader-device-article-profile-probe.json`。生产Readest未开放CDP，仍需成对截图/度量和各字符实际字形证据；严格parity未通过。I0构建及有MIUI启动辅助的7项设备测试结果另见 [VALIDATION.md](VALIDATION.md)，不作为新内核阶段的测试成绩。
-
-## 8. 新内核字体接入方式与证据边界
-
-真实paginator阶段保留同一批五个OFL字体和覆盖范围；字体声明由原生读取已打包的原创CSS，改写到session白名单URL后直接注入before样式。该改动解决外部`@import`尚未返回时FontFaceSet为空却过早Ready的竞态，不代表更换字体资产或复制Readest CSS。源码和针对性延迟字体测试已核，最终代码hash/构建/设备结果由冻结验证报告绑定。
-
-本文件第7节实机glyph结果只属于I0对应的TXT/临时文章探针。新内核真实运行和本地字体加载也不能替代Readest生产实际字形与全文排版对照；正文严格parity仍未通过。API29/旧WebView以及完整变量轴、shaping/fallback矩阵仍未验。
-
-## 9. 冻结新内核真实UI默认字形
-
-这次测量使用真实Article开发页面的默认规则，没有临时替换font-family；仅把原首段分为无样式span供CDP按字符组查询，之后恢复DOM。结果（`work/phase2-device-article-glyph-groups.json`）：中文2glyph及全角４５６的3glyph命中`LXGWWenKaiGBScreen`，English7glyph及123的3glyph命中`Roboto-Regular`，均isCustomFont=true。真实页面已Ready，host高608px、可见非零Range；默认computed18px/line-height28.8px。
-
-同一冻结版TXT页面高576px，原8KB书首0:0正常Ready，采样字形仍为系统MiSans VF、isCustomFont=false；未选择的本地fontface为unloaded不代表失败。完整证据为`phase2-device-article-typography-final.json`和`phase2-device-txt-typography-final.json`。这是本项目真实fixture/书籍路径证据，区别于第7节I0临时探针，仍不能证明Readest生产相同字形或完整排版一致。host/vendor/APK冻结hash见CORE_ARCHITECTURE，冻结版本全11项设备复验已通过。
+- 这五个字体只用于**正文渲染**（WebView）。应用自身界面（书架、设置、面板）使用系统界面字体，不加载这些资产。
+- `app/src/main/assets/fonts/readest.css` 声明 `@font-face`（`font-display:block`）。Roboto/Bitter 的 `unicode-range` 等于原 Google 网页分包的有效覆盖；LXGW 不设范围。
+- 字体以固定、与会话无关的地址 `https://appassets.androidplatform.net/fonts/<文件>` 提供，并带长期缓存头；APK 内以不压缩方式存放（`noCompress ttf`），渲染进程只需解码一次。
+- 字体选择：宋体 → Bitter + LXGW；黑体 → Roboto + LXGW；楷体 → LXGW；默认按正文规则档。

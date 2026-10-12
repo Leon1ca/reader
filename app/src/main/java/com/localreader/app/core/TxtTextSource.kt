@@ -9,6 +9,7 @@ data class TxtBlockMetadata(val utf8Bytes: Int, val continuation: Boolean, val s
 
 interface TxtTextSource : java.io.Closeable {
     val version: String
+    val displayDirectory: java.io.File? get()=null
     val index: TextIndex
     fun block(paragraph: Int): TextBlock
     fun resolve(locator: Locator): ResolvedText

@@ -18,14 +18,21 @@ class ContentSafetyTest {
     }
     @Test fun fontsAndCodeAreSeparateExactCapabilitiesAndNeverTopLevelContent() {
         val resources = SessionResources("session",ArticleSamplePublication()) { ByteArrayInputStream(byteArrayOf()) }
-        assertNotNull(resources.resolve(resources.base+"fonts/Roboto-Regular-VF.ttf",false))
+        // Bundled fonts live at one immutable, session-independent URL so the renderer decodes them once.
+        val font=requireNotNull(resources.resolve(SessionResources.FONT_BASE+"Roboto-Regular-VF.ttf",false))
+        assertTrue(font.headers.getValue("Cache-Control").contains("immutable"))
+        assertNull(resources.resolve(resources.base+"fonts/Roboto-Regular-VF.ttf",false))
+        assertNull(resources.resolve(SessionResources.FONT_BASE+"unknown.ttf",false))
+        assertEquals("no-store",requireNotNull(resources.resolve(resources.base+"viewport.js",false)).headers["Cache-Control"])
         assertNotNull(resources.resolve(resources.base+"host.js",false))
         assertNotNull(resources.resolve(resources.base+"viewport.js",false))
         assertNull(resources.resolve(resources.base+"viewport.js",true))
         assertNull(resources.resolve(resources.base.replace("session/","foreign/")+"viewport.js",false))
         assertNull(resources.resolve(resources.base+"fonts/viewport.js",false))
         assertNull(resources.resolve(resources.base+"fonts/host.js",false))
-        assertNull(resources.resolve(resources.base+"fonts/Roboto-Regular-VF.ttf",true))
+        assertNull(resources.resolve(SessionResources.FONT_BASE+"Roboto-Regular-VF.ttf",true))
+        resources.close()
+        assertNull(resources.resolve(SessionResources.FONT_BASE+"Roboto-Regular-VF.ttf",false))
         assertNull(resources.resolve(resources.base+"sections/0.html",true))
         assertNull(resources.resolve(resources.base+"images/host.js",false))
     }

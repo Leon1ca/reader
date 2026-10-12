@@ -11,7 +11,7 @@ const server=http.createServer((req,res)=>{
     const send=()=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-src 'none'"});res.end(`<html><head><meta name="viewport" content="width=${600+i*2},height=${900+i*4}"><script>parent.compromised=true</script><style>html,body{margin:0;width:100%;height:100%;background:hsl(${i*17} 40% 85%)}p{position:absolute;left:20px;top:20px;font:28px serif}</style></head><body data-reader-canonical-length="${text.length}" data-reader-canonical-sha="${sha}"><p>${text}</p></body></html>`)}
     if(i===delaySection)setTimeout(send,600);else send();return
   }
-  if(!['host3.html','host3.js','viewport.js','vendor/foliate/fixed-layout.js'].includes(resource)){res.writeHead(403);res.end();return}
+  if(!['host3.html','host3.js','viewport.js','input.js','vendor/foliate/fixed-layout.js'].includes(resource)){res.writeHead(403);res.end();return}
   res.writeHead(200,{'Content-Type':resource.endsWith('.js')?'text/javascript':'text/html'});res.end(fs.readFileSync(path.join(assets,resource)))
 })
 ;(async()=>{
@@ -23,7 +23,7 @@ const server=http.createServer((req,res)=>{
   const pages=Array.from({length:30},(_,index)=>({index,width:600+index*2,height:900+index*4,pageSpread:'',spread:'auto'})),target=(section,x=0,y=0)=>({kind:'PAGE',section,x,y})
   let rules={zoom:'fit-page',spread:'SINGLE',theme:'white',flow:'scrolled',paginationBase:'fixed-source-render-font-css-textZoom'}
   function wire(type,payload){return{protocol:2,sessionId:'fixed',revision:'revision',commandId:++id,layoutEpoch:['next','prev'].includes(type)?epoch:++epoch,intentToken:`cmd-${id}`,intentCause:['next','prev'].includes(type)?'UserNavigation':type==='setRules'?'Reflow':type==='goTo'?'ProgrammaticJump':'Restore',type,payload}}
-  async function send(type,payload,wait=true){const cmd=wire(type,payload);console.error(`fixed command ${cmd.commandId}: ${type} ${payload.target?.section??''}`);await page.evaluate(c=>readerHost.command(c),cmd);if(wait)await ready(cmd.commandId);return cmd.commandId}
+  async function send(type,payload,wait=true){const cmd=wire(type,payload);console.error(`fixed command ${cmd.commandId}: ${type} ${payload.target?.section??''}`);await page.evaluate(c=>readerHost.command(c),cmd);if(wait)await ready(cmd.commandId);if(type==='open')await page.evaluate(()=>window.reusedEngine=document.getElementById('renderer'));else assert.equal(await page.evaluate(()=>window.reusedEngine===document.getElementById('renderer')),true,'goTo/setRules/page commands retain the fixed engine');return cmd.commandId}
   async function ready(commandId){await page.waitForFunction(id=>readerHost.diagnostics().events.some(e=>e.commandId===id&&['ready','error'].includes(e.type)),commandId,{timeout:15000});const diag=await page.evaluate(()=>readerHost.diagnostics());assert.equal(diag.events.find(e=>e.commandId===commandId&&e.type==='error'),undefined,JSON.stringify(diag));assert(diag.anchorGeometry.visible,JSON.stringify(diag));assert(diag.activeViews<=4,JSON.stringify(diag));assert(diag.contents.every(c=>c.validated),JSON.stringify(diag));peak=Math.max(peak,diag.allocatedFrames);console.error(`fixed ready ${commandId}`);return diag}
   try{
     await page.goto(`http://127.0.0.1:${server.address().port}${base}host3.html`);await page.waitForFunction(()=>window.readerHost)
@@ -102,7 +102,7 @@ const server=http.createServer((req,res)=>{
       await page.waitForTimeout(180)
       const loading=await page.evaluate(()=>({d:readerHost.diagnostics(),contents:document.querySelector('foliate-fxl').getContents().map(c=>({index:c.index,marked:Boolean(c.doc?.body?.hasAttribute('data-reader-canonical-sha'))}))}))
       assert(!loading.d.events.some(e=>e.commandId===single&&e.type==='ready'),'a real loading source is not discarded as blank')
-      assert(loading.contents.some(c=>!c.marked),JSON.stringify(loading))
+      assert(loading.d.frameAdmissions.some(c=>['pending','verifying'].includes(c.state)),JSON.stringify(loading));assert(loading.contents.every(c=>c.marked),'only admitted documents are exposed as loaded content')
       diag=await ready(single)
       assert.deepEqual(diag.visiblePages,[0]);assert.equal(diag.contents.length,1);assert.equal(diag.allocatedFrames,2,'blank partner still counts against the frame lease budget')
       delaySection=-1

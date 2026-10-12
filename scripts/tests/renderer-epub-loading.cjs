@@ -19,7 +19,7 @@ const server=http.createServer((req,res)=>{
     setTimeout(()=>res.end(nodes.slice(2).join('')+'</body></html>'),400)
     return
   }
-  if(!['host2.html','host2.js','viewport.js','vendor/foliate/paginator.js'].includes(resource)){res.writeHead(403);res.end();return}
+  if(!['host2.html','host2.js','viewport.js','input.js','vendor/foliate/paginator.js'].includes(resource)){res.writeHead(403);res.end();return}
   res.writeHead(200,{'Content-Type':resource.endsWith('.js')?'text/javascript':'text/html'});res.end(fs.readFileSync(path.join(assets,resource)))
 })
 ;(async()=>{

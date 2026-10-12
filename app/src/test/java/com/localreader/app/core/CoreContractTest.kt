@@ -84,18 +84,38 @@ class CoreContractTest {
         assertTrue(gate.ready(second));gate.fail();assertFalse(gate.ready);assertFalse(gate.ready(second))
         val third = gate.command();assertTrue(gate.ready(third))
     }
-    @Test fun ruleProfilesKeepTxtAndArticleFontStacksSeparateAndImageElementIsAStableAnchor() {
+    @Test fun ruleProfilesPreferObservedSansFontsAndImageElementIsAStableAnchor() {
         val url = "https://appassets.androidplatform.net/reader/session/rev/fonts/readest.css"
         val faces = "@font-face{src:url('Roboto-Regular-VF.ttf')}"
         val txt = RuleCompiler.compile(WebContentKind.TXT,ReaderRules(),url,faces)
         val article = RuleCompiler.compile(WebContentKind.ARTICLE,ReaderRules(fontSize = 24f,theme = "dark"),url,faces)
-        assertTrue(txt.afterAuthor.contains("font-family:Arial,"));assertFalse(article.afterAuthor.contains("font-family:Arial,"))
-        assertTrue(article.afterAuthor.contains("font-size:30.0px"));assertTrue(article.afterAuthor.contains("#19201c"))
+        assertTrue(txt.afterAuthor.contains("font-family:Roboto,"));assertFalse(txt.afterAuthor.contains("font-family:Arial,"));assertFalse(article.afterAuthor.contains("font-family:Arial,"))
+        assertTrue(article.afterAuthor.contains("font-size:30.0px"));assertTrue(article.afterAuthor.contains("#1a1917"))
         assertFalse(txt.beforeAuthor.contains("@import"));assertTrue(txt.beforeAuthor.contains(url.substringBeforeLast('/')+"/Roboto-Regular-VF.ttf"))
         val publication = ArticleSamplePublication()
         val image = publication.locator(0,"image-1",0) as Locator.Article
         assertTrue(image.element);assertEquals("image-1",publication.target(image).blockId)
         assertTrue(publication.section(0).html.contains("<table>"));assertTrue(publication.section(0).html.contains("<figcaption>"))
+    }
+    @Test fun observedLayoutDefaultsKeepUserOverridesAndWideTxtColumns() {
+        val url="https://appassets.androidplatform.net/session/fonts/readest.css"
+        assertEquals(1.4,ReaderRules().lineHeight,0.0)
+        for(kind in listOf(WebContentKind.TXT,WebContentKind.EPUB)) {
+            val defaults=RuleCompiler.compile(kind,ReaderRules(epubStyleMode="CUSTOM"),url)
+            assertEquals(2,defaults.geometry.maxColumns)
+            assertTrue(defaults.afterAuthor.contains("margin:0.6em 0"))
+            assertTrue(defaults.afterAuthor.contains("line-height:1.4"))
+            assertTrue(defaults.afterAuthor.contains("text-align:left"))
+            assertTrue(defaults.afterAuthor.contains("text-indent:0"))
+            val explicit=RuleCompiler.compile(kind,ReaderRules(columns="one",lineHeight=1.9,epubStyleMode="CUSTOM"),url)
+            assertEquals(1,explicit.geometry.maxColumns)
+            assertTrue(explicit.afterAuthor.contains("line-height:1.9"))
+        }
+        val author=RuleCompiler.compile(WebContentKind.EPUB,ReaderRules(),url)
+        assertTrue(author.beforeAuthor.contains(":where(p){margin:0.6em 0;}"))
+        assertTrue(author.beforeAuthor.contains("text-indent:0;text-align:left"))
+        assertFalse(author.afterAuthor.contains("text-indent"))
+        assertFalse(author.afterAuthor.contains("line-height"))
     }
     @Test fun pageCommandAckChangesCommandIdentityWithoutChangingLayoutEpoch() {
         val gate=RendererEventGate("epub","revision")
@@ -104,6 +124,14 @@ class CoreContractTest {
         assertEquals(opened.layoutEpoch,page.layoutEpoch);assertEquals(opened.commandId+1,page.commandId)
         assertFalse(gate.ready(opened));assertTrue(gate.ready(page))
         assertEquals(page.layoutEpoch+1,gate.command().layoutEpoch)
+    }
+
+    @Test fun slowSelectionCompletionIsRevokedByClearNewSelectionAndCommand() {
+        val gate=RendererEventGate("s","r");val identity=gate.command();assertTrue(gate.ready(identity))
+        val a=gate.beginSelection(identity)!!;gate.clearSelection();assertFalse(gate.acceptsSelection(identity,a))
+        val b=gate.beginSelection(identity)!!;val c=gate.beginSelection(identity)!!
+        assertFalse(gate.acceptsSelection(identity,b));assertTrue(gate.acceptsSelection(identity,c))
+        gate.command();assertFalse(gate.acceptsSelection(identity,c));gate.fail();assertNull(gate.beginSelection(identity))
     }
 
 }

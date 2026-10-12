@@ -31,7 +31,7 @@
      if (viewport?.width && viewport.height) return viewport
  
      // if no viewport (possibly with image directly in spine), get image size
-@@ -230,6 +233,44 @@
+@@ -230,6 +233,110 @@
      static observedAttributes = ['zoom', 'scale-factor', 'spread', 'flow', 'scroll-gap', 'scroll-direction', 'lock-pan-x']
      #root = this.attachShadow({ mode: 'open' })
      #observer = new ResizeObserver(() => this.#render())
@@ -48,8 +48,62 @@
 +        if (this.#frames.size >= 4) throw new Error('Fixed renderer frame budget exhausted')
 +        this.#frames.set(element, null)
 +        const iframe = document.createElement('iframe')
-+        this.#frames.set(element, { iframe, abort: null })
++        this.#frames.set(element, { iframe, abort: null, state: 'pending', index: null })
 +        return iframe
++    }
++    getFrameDiagnostics() {
++        return [...this.#frames.values()].filter(Boolean).map(lease => ({
++            index: lease.index, state: lease.state, connected: lease.iframe.isConnected,
++            documentState: lease.iframe.contentDocument?.readyState ?? 'absent',
++        }))
++    }
++    // Host verification is awaited before a live source becomes published or interactive.
++    #admitFrame(element, iframe, index, dimensions) {
++        const lease = this.#frames.get(element)
++        lease.index = index
++        const controller = new AbortController()
++        return new Promise((resolve, reject) => {
++            let settled = false
++            const abort = () => {
++                if (settled) return
++                settled = true
++                controller.abort()
++                iframe.removeEventListener('load', loaded)
++                this.#releaseFrame(element)
++                reject(new DOMException('Fixed frame closed', 'AbortError'))
++            }
++            const loaded = async () => {
++                if (settled) return
++                iframe.removeEventListener('load', loaded)
++                const doc = iframe.contentDocument
++                try {
++                    if (this.#dead || this.#frames.get(element) !== lease) return abort()
++                    lease.state = 'verifying'
++                    await this.book.beforeDocumentPublish?.({ doc, index, signal: controller.signal })
++                    if (settled || controller.signal.aborted || this.#dead ||
++                        this.#frames.get(element) !== lease || iframe.contentDocument !== doc) return abort()
++                    this.#applyPanLock(doc)
++                    iframe.dataset.sectionIndex = index
++                    lease.state = 'loaded'
++                    settled = true
++                    lease.abort = null
++                    this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
++                    const { width, height } = getViewport(doc, this.defaultViewport)
++                    resolve({ element, iframe, width: parseFloat(width), height: parseFloat(height), ...dimensions })
++                } catch (error) {
++                    if (settled || controller.signal.aborted || this.#dead || this.#frames.get(element) !== lease) return
++                    lease.state = 'failed'
++                    settled = true
++                    lease.abort = null
++                    controller.abort()
++                    this.dispatchEvent(new CustomEvent('documenterror', { detail: { index, error } }))
++                    this.#releaseFrame(element)
++                    reject(error)
++                }
++            }
++            lease.abort = abort
++            iframe.addEventListener('load', loaded, { once: true })
++        })
 +    }
 +    #releaseFrame(element) {
 +        if (!element) return
@@ -73,10 +127,22 @@
 +            }, error => { clear(); reject(error) })
 +        })
 +    }
++    cancelNavigation() {
++        for (const abort of [...this.#pending]) abort()
++        for (const page of this.#scrollPages) if (page.state === 'loading') this.#teardownScrollPage(page)
++        for (const [element, lease] of [...this.#frames])
++            if (lease.state !== 'loaded' && lease.state !== 'placeholder') this.#releaseFrame(element)
++    }
++    #backgroundNavigation(promise) {
++        promise.catch(error => {
++            if (error?.name !== 'AbortError' && !this.#dead)
++                this.dispatchEvent(new CustomEvent('documenterror', { detail: { error } }))
++        })
++    }
      #spreads
      #index = -1
      defaultViewport
-@@ -254,7 +295,7 @@
+@@ -254,7 +361,7 @@
      // Counter for the keys stale cached spreads move to on a regroup.
      #staleSpreads = 0
      #maxConcurrentPreloads = 1
@@ -85,7 +151,7 @@
      #maxCachedSpreads = 2
      #overlayers = new Map()
      #pageColors = {}
-@@ -270,11 +311,11 @@
+@@ -270,11 +377,11 @@
      // Live rendered-canvas cap. Each PDF page canvas is sized to the on-screen
      // page box × devicePixelRatio (~7 MB at dpr 3), so this is the dominant
      // memory ceiling — keep it just above the visible window plus preload lead.
@@ -99,7 +165,7 @@
      #scrollLoadingCount = 0
      #scrollIdleTimer = null
      #scrollCurrentIndex = -1
-@@ -428,6 +469,7 @@
+@@ -428,6 +535,7 @@
              touch-action: pan-y;
          }
          :host([flow="scrolled"]) .scroll-container {
@@ -107,7 +173,7 @@
              display: flex;
              flex-direction: column;
              align-items: center;
-@@ -466,6 +508,7 @@
+@@ -466,6 +574,7 @@
          this.#observer.observe(this)
      }
      attributeChangedCallback(name, _, value) {
@@ -115,7 +181,7 @@
          switch (name) {
              case 'zoom':
                  this.#zoom = value !== 'fit-width' && value !== 'fit-page'
-@@ -540,7 +583,7 @@
+@@ -540,7 +649,7 @@
          const element = document.createElement('div')
          element.setAttribute('dir', 'ltr')
          element.style.position = 'relative'
@@ -124,7 +190,7 @@
          element.append(iframe)
          Object.assign(iframe.style, {
              border: '0',
-@@ -549,7 +592,7 @@
+@@ -549,7 +658,7 @@
          })
          // `allow-scripts` is needed for events because of WebKit bug
          // https://bugs.webkit.org/show_bug.cgi?id=218086
@@ -133,57 +199,52 @@
          iframe.setAttribute('scrolling', 'no')
          iframe.setAttribute('part', 'filter')
          this.#root.append(element)
-@@ -562,9 +605,27 @@
+@@ -562,30 +671,21 @@
              })
          }
  
 -        if (!src) return { blank: true, element, iframe }
 -        return new Promise(resolve => {
 -            iframe.addEventListener('load', () => {
+-                const doc = iframe.contentDocument
+-                this.#applyPanLock(doc)
+-                iframe.dataset.sectionIndex = index
+-                this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
+-                const { width, height } = getViewport(doc, this.defaultViewport)
+-                resolve({
+-                    element, iframe,
+-                    width: parseFloat(width),
+-                    height: parseFloat(height),
+-                    onZoom,
+-                    detached,
+-                })
+-            }, { once: true })
+-            if (data) {
+-                iframe.srcdoc = data
+-            } else {
+-                iframe.src = src
+-            }
+-        })
+-    }
 +        if (!src) {
 +            // A spread boundary reserves an inert decorative frame, not a
 +            // source document. It still owns a lease until release.
 +            iframe.dataset.readerPlaceholder = 'blank'
++            this.#frames.get(element).state = 'placeholder'
 +            return { blank: true, element, iframe }
 +        }
-+        return new Promise((resolve, reject) => {
-+            let settled = false
-+            const abort = () => {
-+                if (settled) return
-+                settled = true
-+                iframe.removeEventListener('load', loaded)
-+                this.#releaseFrame(element)
-+                reject(new DOMException('Fixed frame closed', 'AbortError'))
-+            }
-+            const loaded = () => {
-+                if (settled) return
-+                if (this.#dead) return abort()
-+                settled = true
-+                this.#frames.get(element).abort = null
-+                iframe.removeEventListener('load', loaded)
-                 const doc = iframe.contentDocument
-                 this.#applyPanLock(doc)
-                 iframe.dataset.sectionIndex = index
-@@ -577,7 +638,9 @@
-                     onZoom,
-                     detached,
-                 })
--            }, { once: true })
-+            }
-+            this.#frames.get(element).abort = abort
-+            iframe.addEventListener('load', loaded, { once: true })
-             if (data) {
-                 iframe.srcdoc = data
-             } else {
-@@ -586,6 +649,7 @@
-         })
-     }
++        const admitted = this.#admitFrame(element, iframe, index, { onZoom, detached })
++        if (data) iframe.srcdoc = data
++        else iframe.src = src
++        return admitted
++    }
++
      #render(side = this.#side, pageTurn = false) {
 +        if (this.#dead) return []
          if (this.#scrollMode) {
              this.#renderScrollMode()
              return []
-@@ -767,6 +831,12 @@
+@@ -767,6 +867,12 @@
          return renderPromises
      }
      async #showSpread({ left, right, center, side, spreadIndex }) {
@@ -196,7 +257,7 @@
          this.#left = null
          this.#right = null
          this.#center = null
-@@ -881,7 +951,7 @@
+@@ -881,7 +987,7 @@
              el.className = 'scroll-page'
              el.dataset.index = i
              this.#scrollContainer.append(el)
@@ -205,7 +266,7 @@
          })
  
          this.#renderScrollMode()
-@@ -924,19 +994,25 @@
+@@ -924,19 +1030,25 @@
      // honouring the concurrency and in-memory caps. Re-run whenever visibility or
      // load state changes so a finished load immediately pulls in the next page.
      #scheduleScrollPages() {
@@ -244,7 +305,16 @@
      }
      #handleScrollEvent = () => {
          // Drop iframe interaction while the host is actively scrolling so the
-@@ -1041,22 +1117,41 @@
+@@ -1025,7 +1137,7 @@
+                     const spread = this.getSpreadOf(section)
+                     if (spread) {
+                         this.#index = -1
+-                        this.goToSpread(spread.index, spread.side, 'page')
++                        this.#backgroundNavigation(this.goToSpread(spread.index, spread.side, 'page'))
+                     }
+                 }
+             }
+@@ -1041,42 +1153,35 @@
          const element = document.createElement('div')
          element.setAttribute('dir', 'ltr')
          element.style.position = 'relative'
@@ -266,52 +336,46 @@
 -        if (!src) return { blank: true, element, iframe }
 -        return new Promise(resolve => {
 -            iframe.addEventListener('load', () => {
+-                const doc = iframe.contentDocument
+-                this.#applyPanLock(doc)
+-                iframe.dataset.sectionIndex = pageData.index
+-                this.dispatchEvent(new CustomEvent('load', { detail: { doc, index: pageData.index } }))
+-                const { width, height } = getViewport(doc, this.defaultViewport)
+-                resolve({
+-                    element, iframe,
+-                    width: parseFloat(width),
+-                    height: parseFloat(height),
+-                    onZoom,
+-                })
+-            }, { once: true })
+-            if (data) {
+-                iframe.srcdoc = data
+-            } else {
+-                iframe.src = src
+-            }
+-        })
+-    }
 +        pageData.pendingElement = element
 +
 +        if (!src) {
 +            // A spread boundary reserves an inert decorative frame, not a
 +            // source document. It still owns a lease until release.
 +            iframe.dataset.readerPlaceholder = 'blank'
++            this.#frames.get(element).state = 'placeholder'
 +            return { blank: true, element, iframe }
 +        }
-+        return new Promise((resolve, reject) => {
-+            let settled = false
-+            const abort = () => {
-+                if (settled) return
-+                settled = true
-+                iframe.removeEventListener('load', loaded)
-+                this.#releaseFrame(element)
-+                reject(new DOMException('Fixed frame closed', 'AbortError'))
-+            }
-+            const loaded = () => {
-+                if (settled) return
-+                if (this.#dead) return abort()
-+                settled = true
-+                this.#frames.get(element).abort = null
-+                iframe.removeEventListener('load', loaded)
-                 const doc = iframe.contentDocument
-                 this.#applyPanLock(doc)
-                 iframe.dataset.sectionIndex = pageData.index
-@@ -1068,7 +1163,9 @@
-                     height: parseFloat(height),
-                     onZoom,
-                 })
--            }, { once: true })
-+            }
-+            this.#frames.get(element).abort = abort
-+            iframe.addEventListener('load', loaded, { once: true })
-             if (data) {
-                 iframe.srcdoc = data
-             } else {
-@@ -1077,6 +1174,7 @@
-         })
-     }
++        const admitted = this.#admitFrame(element, iframe, pageData.index, { onZoom })
++        if (data) iframe.srcdoc = data
++        else iframe.src = src
++        return admitted
++    }
++
      async #loadScrollPage(pageData) {
 +        if (this.#dead) return
          if (pageData.state !== 'idle') return
          pageData.state = 'loading'
          this.#scrollLoadingCount++
-@@ -1086,10 +1184,10 @@
+@@ -1086,10 +1191,10 @@
          this.#scrollLoadGen.set(pageData.index, gen)
  
          try {
@@ -325,7 +389,7 @@
                  return
              }
              // No content for this page: mark terminal so the post-completion
-@@ -1099,9 +1197,9 @@
+@@ -1099,9 +1204,9 @@
  
              const frame = await this.#createScrollFrame(pageData, src)
              // Bail if cancelled during frame creation
@@ -338,8 +402,13 @@
                  return
              }
  
-@@ -1168,16 +1266,17 @@
-             console.warn('Failed to load scroll page', pageData.index, e)
+@@ -1165,19 +1270,21 @@
+                 }, { passive: true })
+             }
+         } catch (e) {
+-            console.warn('Failed to load scroll page', pageData.index, e)
++            if (e?.name !== 'AbortError' && !this.#dead)
++                this.dispatchEvent(new CustomEvent('documenterror', { detail: { index: pageData.index, error: e } }))
              // Terminal state: leaving it 'idle' would let the post-completion
              // reschedule retry a persistently failing page in a tight async loop.
 -            pageData.state = 'error'
@@ -358,7 +427,7 @@
          // Bump generation to cancel any in-progress load
          const gen = (this.#scrollLoadGen.get(pageData.index) || 0) + 1
          this.#scrollLoadGen.set(pageData.index, gen)
-@@ -1185,10 +1284,23 @@
+@@ -1185,10 +1292,23 @@
          if (pageData.frame) {
              const idx = pageData.index
              this.#overlayers.delete(idx)
@@ -384,7 +453,7 @@
      }
      #renderScrollMode() {
          const { width: hostWidth, height: hostHeight } = this.getBoundingClientRect()
-@@ -1202,9 +1314,7 @@
+@@ -1202,9 +1322,7 @@
          const pinchAnchor = this.#pinchAnchor
          const scrollAnchor = pinchAnchor ? null : this.#captureScrollModeAnchor()
          for (const page of this.#scrollPages) {
@@ -395,7 +464,7 @@
              page.el.style.width = `${page.vpWidth * scale}px`
              page.el.style.height = `${page.vpHeight * scale}px`
              if (page.state === 'loaded' && page.frame) {
-@@ -1222,9 +1332,7 @@
+@@ -1222,9 +1340,7 @@
          const { width: hostWidth, height: hostHeight } = this.getBoundingClientRect()
          if (!(this.#scrollHorizontal ? hostHeight : hostWidth) || !pageData.frame) return
          const { vpWidth: vw, vpHeight: vh, frame } = pageData
@@ -406,7 +475,7 @@
  
          if (frame.onZoom) {
              const p = frame.onZoom({
-@@ -1293,6 +1401,7 @@
+@@ -1293,6 +1409,7 @@
          return closest
      }
      #reportScrollLocation() {
@@ -414,7 +483,7 @@
          const index = this.#getScrollIndex()
          if (index < 0) return
          this.#scrollCurrentIndex = index
-@@ -1343,7 +1452,7 @@
+@@ -1343,7 +1460,7 @@
                  return spread
              }
              if (pageSpread === 'center') {
@@ -423,7 +492,7 @@
                  spread.center = section
              }
              else if (pageSpread === 'left') {
-@@ -1376,10 +1485,10 @@
+@@ -1376,16 +1493,16 @@
          this.#preloadCache.clear()
          for (const frames of this.#prerenderedSpreads.values()) {
              if (frames.center) {
@@ -437,7 +506,14 @@
              }
          }
          this.#prerenderedSpreads.clear()
-@@ -1480,6 +1589,7 @@
+         this.#spreadAccessTime.clear()
+         this.#overlayers.clear()
+-        this.goToSpread(index, this.rtl ? 'right' : 'left', 'page')
++        this.#backgroundNavigation(this.goToSpread(index, this.rtl ? 'right' : 'left', 'page'))
+     }
+     // A section can find out as it loads that it is a spread of its own: a
+     // streamed comic measures a page when its image arrives, and a wide one
+@@ -1480,6 +1597,7 @@
          return this.#index >= this.#spreads.length - 1
      }
      #reportLocation(reason) {
@@ -445,7 +521,7 @@
          this.dispatchEvent(new CustomEvent('relocate', { detail:
              { reason, range: null, index: this.index, fraction: 0, size: 1 } }))
      }
-@@ -1524,15 +1634,15 @@
+@@ -1524,15 +1642,15 @@
          } else {
              if (spread.center) {
                  const sectionIndex = this.book.sections.indexOf(spread.center)
@@ -464,7 +540,7 @@
                  this.#regroup()
                  if (this.#spreads[index] !== spread) return this.#goToPageOf(spread, side, reason)
                  const left = { index: indexL, src: srcL }
-@@ -1576,6 +1686,7 @@
+@@ -1576,6 +1694,7 @@
      }
  
      async #processPreloadQueue() {
@@ -472,7 +548,7 @@
          while (this.#preloadQueue.length > 0 && this.#activePreloads < this.#maxConcurrentPreloads) {
              const task = this.#preloadQueue.shift()
              if (!task) break
-@@ -1589,14 +1700,14 @@
+@@ -1589,14 +1708,14 @@
              Promise.resolve().then(async () => {
                  try {
                      if (spread.center) {
@@ -489,7 +565,7 @@
  
                          this.#prerenderedSpreads.set(cacheKey, { center: frame })
                          this.#touchSpread(cacheKey)
-@@ -1605,8 +1716,8 @@
+@@ -1605,8 +1724,8 @@
                              frame.onZoom({ doc, scale: this.#totalScaleFactor, pageColors: this.#pageColors })
                          }
                      } else {
@@ -500,7 +576,7 @@
                          this.#regroup()
                          if (isStale()) return this.#preloadNextSpreads()
                          this.#preloadCache.set(cacheKey, { left: srcL, right: srcR })
-@@ -1616,8 +1727,8 @@
+@@ -1616,8 +1735,8 @@
                          const leftFrame = await this.#createFrame({ index: indexL, src: srcL, detached: true })
                          const rightFrame = await this.#createFrame({ index: indexR, src: srcR, detached: true })
                          if (isStale()) {
@@ -511,7 +587,7 @@
                              return
                          }
  
-@@ -1671,12 +1782,12 @@
+@@ -1671,12 +1790,12 @@
                  if (frames) {
                      if (frames.center) {
                          this.#removeOverlayerForFrame(frames.center)
@@ -527,7 +603,7 @@
                      }
                  }
  
-@@ -1707,7 +1818,7 @@
+@@ -1707,7 +1826,7 @@
          const isVisible = frame.element?.parentNode
              && frame.element.style.visibility !== 'hidden'
          if (!isVisible) return
@@ -536,7 +612,7 @@
          this.#overlayers.delete(index)
          const doc = frame.iframe.contentDocument
          if (!doc) return
-@@ -1726,7 +1837,7 @@
+@@ -1726,7 +1845,7 @@
          // TODO
      }
      async goTo(target) {
@@ -545,15 +621,18 @@
          if (this.#scrollMode) {
              const page = this.#scrollPages[resolved.index]
              if (page) {
-@@ -1818,6 +1929,7 @@
+@@ -1818,8 +1937,9 @@
          }
          return Array.from(this.#root.querySelectorAll('iframe'))
              .filter(frame => {
 +                if (frame.dataset.readerPlaceholder === 'blank') return false
                  const parent = frame.parentElement
-                 return parent && parent.style.visibility !== 'hidden'
+-                return parent && parent.style.visibility !== 'hidden'
++                return parent && parent.style.visibility !== 'hidden' && this.#frames.get(parent)?.state === 'loaded'
              })
-@@ -1935,7 +2047,12 @@
+             .map(frame => {
+                 const index = frame.dataset.sectionIndex != null
+@@ -1935,7 +2055,12 @@
          return 'width'
      }
      destroy() {
@@ -567,7 +646,7 @@
          if (this.#scrollMode) {
              this.removeEventListener('scroll', this.#handleScrollEvent)
              this.removeEventListener('wheel', this.#handleScrollWheel)
-@@ -1960,10 +2077,10 @@
+@@ -1960,10 +2085,10 @@
          }
          for (const frames of this.#prerenderedSpreads.values()) {
              if (frames.center) {

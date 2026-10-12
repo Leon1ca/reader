@@ -12,6 +12,8 @@ import java.io.InputStream
 
 /** Import-only batches: completed subtrees are detached before parsing more source bytes. */
 internal object EpubStream {
+    // Source sanitization batches define stable element IDs, independent of renderer cuts.
+    const val SANITIZE_TARGET_BYTES=384*1024
     const val BATCH_LIMIT=8L*1024*1024
     private const val HEAD_LIMIT=256*1024
     fun read(zip: EpubZip,spine: EpubSpine,sanitizer: EpubSanitizer,checkpoint: () -> Unit,emit: (SanitizedSpine) -> Unit) {
@@ -44,11 +46,11 @@ internal object EpubStream {
                 val nextShell=shell(body)
                 body.childNodes().toList().forEach { node ->
                     val bytes=node.outerHtml().toByteArray().size
-                    if(pendingBytes>0 && pendingBytes+bytes>EpubParts.TARGET_BYTES)flush()
+                    if(pendingBytes>0 && pendingBytes+bytes>SANITIZE_TARGET_BYTES)flush()
                     if(pending==null)pending=nextShell.clone()
                     require(bytes<=BATCH_LIMIT-HEAD_LIMIT) { "EPUB 单个元素超过 8 MB 解析预算" }
                     pending!!.selectFirst("body")!!.appendChild(node);pendingBytes+=bytes
-                    if(pendingBytes>=EpubParts.TARGET_BYTES)flush()
+                    if(pendingBytes>=SANITIZE_TARGET_BYTES)flush()
                     if(node===until)return
                 }
             }
@@ -113,13 +115,13 @@ internal object EpubStream {
         while(parser.eventType!=XmlPullParser.END_DOCUMENT) {
             checkpoint()
             when(parser.eventType) {
-                XmlPullParser.DOCDECL -> error("EPUB XML 不允许 DTD 或外部实体")
+                XmlPullParser.DOCDECL -> EpubXmlRules.doctype(parser.text)
                 XmlPullParser.START_TAG -> {
                     require(++nodes<=100000 && parser.depth<=128 && parser.attributeCount<=256) { "EPUB XML 结构超过限制" }
                     for(i in 0 until parser.attributeCount)require(parser.getAttributeValue(i).length<=8192) { "EPUB XML 属性超过限制" }
                 }
                 XmlPullParser.END_TAG -> it.consumed=0
-                XmlPullParser.ENTITY_REF -> require(parser.name in setOf("amp","lt","gt","apos","quot") || parser.name.startsWith("#")) { "EPUB XML 含自定义实体" }
+                XmlPullParser.ENTITY_REF -> EpubXmlRules.entity(parser.name,parser.text)
             }
             parser.nextToken()
         }

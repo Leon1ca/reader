@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Pin the validated AGP 9.3.3 / Gradle 9.5.1 chain. This is solely the
+         latest-version advisory at the wrapper declaration, not a minimum
+         compatibility, safety, deprecated API or other source-check exception.
+         Official rationale and upgrade conditions: docs/BUILD_TOOLCHAIN.md. -->
+    <issue id="AndroidGradlePluginVersion">
+        <ignore path="gradle/wrapper/gradle-wrapper.properties" />
+    </issue>
+</lint>

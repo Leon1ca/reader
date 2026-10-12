@@ -1,21 +1,23 @@
 # 阅读内核改造与 EPUB 闭环 · 执行版 PRD（供 AI 执行）
 
+> **状态（2026-10-07）**：本文已执行完毕，仅作为接口与契约参考。后续开发以 `docs/NEXT_DEVELOPMENT_PRD.md` 为准；两者冲突时以后者为准（其第 2 节汇总了已确认的产品决策，例如 EPUB 作者/自定义样式、应用界面使用系统字体）。
+
 - 文档编号：KERNEL-EPUB-PRD v1.1（相对 v1.0：新增**固定版式 EPUB** 支持，参照 Readest/foliate-js，任务 E-13…E-15；单章过大改为“1 MiB 阈值 + 384 KiB 目标分段”折中方案，见 E-5；同步修改第 1/2/3/4/5/6/8/9/10/11 节与附录 B/C/D）
 - 日期：2026-10-04
 - 适用仓库：`/Users/leon1ca/Documents/reader`（Kotlin + Jetpack Compose，minSdk 29，compile/target 35）
-- 上游文档：`docs/CODE_AUDIT_AND_UI_PLAN.md`（审核结论与已确认决策）、`docs/Android_Local_Reader_PRD_v0.1.md`（产品 PRD，只读）、`docs/CORE_ARCHITECTURE.md`（现有内核架构）
+- 上游文档：`docs/NEXT_DEVELOPMENT_PRD.md`（审核结论与已确认决策）、`docs/PRODUCT_PRD.md`（产品 PRD，只读）、`docs/CORE_ARCHITECTURE.md`（现有内核架构）
 - 本文范围：**阶段 1（内核改造）+ 阶段 2（EPUB 完整闭环）**。UI 替换不在本文范围，见 `docs/UI_REPLACEMENT_PRD.md`；但本文第 5 节定义了 UI 将依赖的稳定接口（`ReaderController`），必须按此交付
 
 ---
 
 ## 0. 给执行者（AI）的工作约定
 
-1. **先读后改**。开工前通读：`README.md`、`docs/CODE_AUDIT_AND_UI_PLAN.md`、`docs/CORE_ARCHITECTURE.md`、`docs/READER_CORE.md`，以及本文第 2 节列出的现有源码。
+1. **先读后改**。开工前通读：`README.md`、`docs/NEXT_DEVELOPMENT_PRD.md`、`docs/CORE_ARCHITECTURE.md`、`docs/READER_CORE.md`，以及本文第 2 节列出的现有源码。
 2. **一个任务一个提交**，提交信息以任务编号开头，如 `K3-2: protocol v2 gate semantics`。任务之间严格按第 9 节依赖顺序。
 3. **每个任务完成后**必须运行：`./scripts/build.sh`（= `assembleDebug testDebugUnitTest lintDebug`）并保证通过；涉及 WebView/设备行为的任务还须按 README 步骤运行设备测试和 `scripts/tests/*`。**不得以“环境限制”为由跳过而宣称通过**：无法运行的验证项，在提交说明和第 11 节交接清单里单列为“未验证”。
 4. **不得削弱安全不变量**（第 3 节）。任何改动与之冲突时，停止并向人类提问，不要自行折中。
 5. **不得做范围外重构**。第 1.3 节列出的非目标一律不做；发现新问题记入 `docs/KERNEL_EPUB_FINDINGS.md`，不要顺手修。
-6. **不要修改** `docs/Android_Local_Reader_PRD_v0.1.md`；不要提交 `.local/`、`.gradle/`、`build/`。
+6. **不要修改** `docs/PRODUCT_PRD.md`；不要提交 `.local/`、`.gradle/`、`build/`。
 7. **依赖变更**：每新增或升级一个依赖，必须固定版本号（不得动态版本），先确认该版本在 Google Maven / Maven Central 上真实存在，并同步更新 `docs/DEPENDENCIES.md`（名称、版本、许可证、用途）。
 8. **遇到下列情况停止并报告，不要继续猜**：工具链版本不兼容且一次尝试内无法解决；需要新增权限（尤其 `INTERNET`）；需要改变第 3 节不变量；真机/模拟器不可用而任务验收依赖它；与本文冲突的现有测试需要“改断言才能过”（先说明理由）。
 9. 本文中的 Kotlin/JSON 片段是**契约**（名称、字段、语义必须一致），具体实现细节可以自行决定。
@@ -26,7 +28,7 @@
 
 - 内核骨架可保留：`SessionResources`（会话级资源白名单）、`RendererEventGate`（会话/revision/epoch/command 门禁）、host 协议骨架（`host.js`）、TXT 索引（28 字节记录）、`RuleCompiler`（规则编译与渲染分离）、导入流水线（暂存→fsync→重命名→事务入库）。
 - 但整体是 **TXT/HTML 专用栈**：`ReaderViewModel`/`UiState` 直接持有 `TxtEngine`；进度、书签、`Book.current` 全是 `Locator.Text`；UI 直接 new `WebReaderAdapter`；`ReaderPublication.target()` 只有 `block+character`；`host.js` 的 `rangeFor/targetFor` 硬编码 `[data-block]`；`SessionResources` 只允许 `reader/sample/` 下的资源；没有页码数据通路；没有点击区；`Scaffold` 顶底栏会改变 WebView 高度；旋转/折叠会重建 Activity。
-- 阶段 0（P0/P1/P2/P3 缺陷修复）已在工作区完成但**尚未编译、未提交**，见 `docs/CODE_AUDIT_AND_UI_PLAN.md` 第 9 节。**任务 K0-1 先验证它。**
+- 阶段 0（P0/P1/P2/P3 缺陷修复）已在工作区完成但**尚未编译、未提交**，见 `docs/NEXT_DEVELOPMENT_PRD.md` 第 9 节。**任务 K0-1 先验证它。**
 
 ### 1.2 目标
 
@@ -460,6 +462,7 @@ data class FxlViewState(val zoom: FxlZoom, val scale: Double, val spreadActive: 
 - 验收（设备测试，使用附录 A 的**真实 v3 DDL** 构造库并填充数据）：迁移后书目、进度（含最远位置）、书签、单本设置、定位备份逐项一致；旧书 `flow` 仍为 `scrolled`；迁移失败（人为注入异常）时原库不变；`library.db.v3.bak` 存在。含空库、仅书无书签、书签引用已旧版本的三种夹具。
 
 **K2-2 `ReaderSettingsStore` 与单本覆盖**（依赖 K1-5、K2-1）
+> **2026-10-11 修订**：单本覆盖已取消。字体、字号、行距、边距、背景、翻页方式对所有图书统一生效，`effectiveRules(contentId?)` 只读全局值；仅 `fxl_zoom`、`spread_pref` 仍按书保存。`resetBookRules`、`RulesScope`、`RuleOrigin` 与 `FieldUpdate.Clear` 已移除（见 `NEXT_DEVELOPMENT_PRD.md` F-11）。以下条目保留为历史设计。
 - 做：全局默认 + 单本覆盖；`effectiveRules(contentId)` = 全局默认被单本非空字段覆盖；`resetBookOverride`。
 - 验收：单测覆盖叠加规则与重置；改全局默认不影响已覆盖字段，影响未覆盖书。
 

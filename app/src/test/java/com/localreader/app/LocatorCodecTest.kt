@@ -33,7 +33,8 @@ class LocatorCodecTest {
         val decoded = LocatorCodec.decode(LocatorCodec.encode(locator)) as Locator.Epub
         assertEquals("a".repeat(47),decoded.quote)
         assertEquals(LocatorCodec.key(locator),LocatorCodec.key(locator.copy(progression=0.9)))
-        assertNotEquals(RulesPatch(),RulesPatch(theme=FieldUpdate.Clear))
-        assertNotEquals(RulesPatch(theme=FieldUpdate.Clear),RulesPatch(theme=FieldUpdate.Set("white")))
+        assertNotEquals(RulesPatch(),RulesPatch(theme=FieldUpdate.Set("white")))
+        assertFalse(RulesPatch(theme=FieldUpdate.Set("white")).touchesBook)
+        assertTrue(RulesPatch(fxlZoom=FieldUpdate.Set("fit-width")).touchesBook)
     }
 }

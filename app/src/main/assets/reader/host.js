@@ -1,4 +1,5 @@
-import {textIntervals,mergeIntervals,visibleFrame,fontGeometry,compactSignature,visibleCaret,compactTextRanges,compactElements} from './viewport.js'
+import {installInput,applyInsets} from './input.js'
+import {textIntervals,mergeIntervals,visibleFrame,fontGeometry,compactSignature,visibleCaret,compactTextRanges,compactElements,paginationOffset} from './viewport.js'
 // Original host protocol. Only this trusted top-level document can call the native port.
 import './vendor/foliate/paginator.js'
 let paginator = document.getElementById('renderer'), initialized = false, publicationCount = 0
@@ -29,17 +30,39 @@ function userIntent(event) {
 for (const type of ['wheel','touchmove','pointerdown','keydown']) addEventListener(type,userIntent,{capture:true,passive:true})
 let stabilizedSequence = 0, relocationDraft, latestRequestedId = 0
 const superseded = Symbol('superseded')
-let operationDeadline = 0
-function bounded(promise) {
-    const id = commandId
+let operationDeadline = 0, operationPhase = 'idle'
+function bounded(promise,phaseName) {
+    if(phaseName)operationPhase=phaseName
+    const id = commandId, owner = paginator
     return new Promise((resolve,reject) => {
         const timer = setInterval(() => {
-            if (closed || id !== latestRequestedId) { clearInterval(timer); reject(superseded) }
-            else if (performance.now() >= operationDeadline) { clearInterval(timer); reject(new Error('Reader operation timed out')) }
+            if (closed || id !== latestRequestedId) { clearInterval(timer); owner.cancelNavigation(); reject(superseded) }
+            else if (performance.now() >= operationDeadline) { clearInterval(timer); owner.cancelNavigation(); reject(new Error('Reader operation timed out')) }
         }, 40)
         Promise.resolve(promise).then(value => {clearInterval(timer);resolve(value)},error => {clearInterval(timer);reject(error)})
     })
 }
+// Only the requested section and the frames actually on screen gate an open or a
+// page turn; preloaded neighbours finish in the background and are checked once visible.
+function relevant(contents,target) {
+    const rect=paginator.getBoundingClientRect()
+    const list=contents.filter(({index,doc})=>{
+        if(index===target?.section)return true
+        try {return Boolean(doc?.body)&&visibleFrame(doc,rect)} catch {return false}
+    })
+    return list.length?list:contents
+}
+// The renderer stays transparent until the first stable, font-ready layout, so a
+// book never flashes in a fallback face or at a provisional position.
+function conceal() { document.documentElement.dataset.readerPending = '' }
+function reveal() { delete document.documentElement.dataset.readerPending }
+// Warm the shared CJK face once per renderer: section documents then reuse the decoded font.
+if (location.origin === 'https://appassets.androidplatform.net') {
+    const preload = document.createElement('link')
+    Object.assign(preload,{rel:'preload',as:'font',type:'font/ttf',crossOrigin:'anonymous',href:'/fonts/LXGWWenKaiGBScreen.ttf'})
+    document.head.append(preload)
+}
+
 const events = []
 function emit(type, payload = {}) {
     if(type==='relocated'){try{payload.viewport=readingViewport()}catch(error){emit('error',{message:String(error.message)});return}}
@@ -108,8 +131,11 @@ function readingViewport() {
         const size=paginator.size/(paginator.scrolled?1:paginator.columnCount),length=frame[side]
         if(!(size>0&&length>0))continue
         const backwards=side==='width'&&(vertical?style.writingMode.endsWith('-rl'):style.direction==='rtl')
-        const delta=side==='height'?rect.top-frame.top:backwards?frame.right-rect.right:rect.left-frame.left
-        const units=paginator.scrolled?Math.max(.000001,length/size):Math.max(1,Math.round(length/size)),offset=Math.max(0,Math.min(units-.000001,delta/size))
+        const delta=paginationOffset(paginator,frame,backwards)
+        // Paginated tiles are discrete. Native scroll positions quantize to CSS
+        // pixels (e.g. 692 instead of a 692.42px tile); choose the actual tile,
+        // while continuous scrolling retains its fractional coordinate.
+        const units=paginator.scrolled?Math.max(.000001,length/size):Math.max(1,Math.round(length/size)),offset=Math.max(0,Math.min(units-.000001,paginator.scrolled?delta/size:Math.round(delta/size)))
         samples.push({section:index,page:Math.min(Math.ceil(units),Math.floor(offset+1e-6)+1),pages:Math.ceil(units),units,offset:paginator.scrolled?offset:Math.min(Math.ceil(units)-1,Math.floor(offset+1e-6)),scrolled:paginator.scrolled,estimated:paginator.scrolled,signature:compactSignature([paginator.columnCount,fontGeometry([doc])])})
     }
     return {base:paginationBase,signature:compactSignature([rect.width,rect.height,paginator.getAttribute('flow')]),currentSection:current,samples,ranges:ranges.length<=256?ranges:[],...(ranges.length>256?{rangeGroups:compactTextRanges(ranges)}:{}),elements:elements.length<=256?elements:[],...(elements.length>256?{elementGroups:compactElements(elements)}:{}),points,visiblePages:[],atEnd:Boolean(paginator.atEnd&&visible.some(x=>x.index===publicationCount-1))}
@@ -128,19 +154,50 @@ function anchorGeometry(target) {
         return {left,top,width:rect.width,height:rect.height,visible:left+rect.width>viewport.left && left<viewport.right && top+rect.height>viewport.top && top<viewport.bottom}
     } catch {return {visible:false}}
 }
+// A real frame boundary, with stale/closed/deadline cancellation supplied by
+// bounded(). Background documents cannot publish a visible Reader position.
+const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve))
+function pageSignature(target) {
+    const contents=relevant(paginator.getContents(),target)
+    return JSON.stringify([stabilizedSequence,contents.map(({index,doc})=>[index,doc.fonts.status,doc.body?.scrollWidth,doc.body?.scrollHeight]),target,anchorGeometry(target)])
+}
+async function settleLoadedPage(target) {
+    let signature, equalFrames=0
+    for(let frame=0;frame<6;frame++) {
+        if(closed || commandId!==latestRequestedId)throw superseded
+        if(syncViewport())return false
+        const contents=relevant(paginator.getContents())
+        if(!contents.length || contents.some(({doc})=>!loadedPageDocument(doc)))return false
+        await bounded(nextFrame(), 'pageFrame')
+        if(closed || commandId!==latestRequestedId)throw superseded
+        if(syncViewport() || relevant(paginator.getContents()).some(({doc})=>!loadedPageDocument(doc)))return false
+        const visible=target ?? relocationDraft
+        if(!visible || !anchorGeometry(visible).visible)return false
+        const next=pageSignature(visible)
+        equalFrames=next===signature ? equalFrames+1 : 0
+        signature=next
+        if(equalFrames>=2)return true
+    }
+    return false
+}
+function loadedPageDocument(doc) {
+    return doc.readyState==='complete' && Boolean(doc.querySelector('[data-block]')) &&
+        doc.fonts.status==='loaded' && [...doc.images].every(image=>image.complete&&image.naturalWidth>0)
+}
 async function stable(target) {
+    const requestedId = commandId
     const deadline = performance.now() + 12000
     let signature, frames = 0, anchored = false
     while (!closed && performance.now() < deadline) {
         if (commandId !== latestRequestedId) throw superseded
         if (syncViewport()) anchored = false
-        const contents = paginator.getContents()
+        const contents = relevant(paginator.getContents(),target)
         if (!contents.length || contents.some(({doc}) => !doc.querySelector('[data-block]'))) {
             // A preloader exposes an about:blank view before its section's load event.
             await new Promise(resolve => setTimeout(resolve,50))
             continue
         }
-        await bounded(Promise.all(contents.map(({doc}) => doc.fonts.ready)))
+        await bounded(Promise.all(contents.map(({doc}) => doc.fonts.ready)), 'fonts')
         const listeners = new AbortController()
         try {
             await bounded(Promise.all(contents.flatMap(({doc}) => [...doc.images].map(image => image.complete ? Promise.resolve() :
@@ -152,11 +209,15 @@ async function stable(target) {
         if (contents.some(({doc}) => [...doc.images].some(image => !image.naturalWidth))) throw new Error('Article image failed to load')
         if (target && !anchored) {
             anchored = true
-            await bounded(paginator.goTo({ index: target.section, anchor: doc => rangeFor(doc, target) }))
+            // Fonts can reflow the section after the initial navigation; re-anchor only then.
+            if (!anchorGeometry(target).visible) await bounded(paginator.goTo({ index: target.section, anchor: doc => {
+                if (closed || commandId !== requestedId || latestRequestedId !== requestedId) throw superseded
+                return rangeFor(doc, target)
+            } }), 'anchorGoTo')
         }
-        await new Promise(resolve => setTimeout(resolve, 50))
-        const now = paginator.getContents()
-        const next = JSON.stringify([stabilizedSequence, now.map(({index,doc}) => [index,doc.fonts.status,doc.body?.scrollWidth,doc.body?.scrollHeight]),target ? anchorGeometry(target) : null])
+        await bounded(nextFrame(), 'layoutFrame')
+        const now = relevant(paginator.getContents(),target)
+        const next = pageSignature(target)
         frames = next === signature ? frames + 1 : 0
         signature = next
         if (frames >= 3 && now.every(({doc}) => doc.fonts.status === 'loaded') && (!target || anchorGeometry(target).visible)) return
@@ -166,6 +227,25 @@ async function stable(target) {
 function installListeners(instance) {
 instance.addEventListener('load', ({ detail: { doc, index } }) => {
     if (instance !== paginator || closed) return
+    installInput(doc,{active:()=>instance===paginator&&!opening&&!closed,flow:()=>paginator.getAttribute('flow'),direction:()=> 'ltr',emit})
+    let selectionTimer=0
+    const selection=()=>{
+        if(opening||closed||instance!==paginator)return
+        const selected=doc.getSelection()
+        if(!selected||selected.isCollapsed||!selected.rangeCount){emit('selectionCleared');return}
+        const range=selected.getRangeAt(0)
+        const anchor=(node,offset)=>{
+            const el=(node.nodeType===1?node:node.parentElement)?.closest('[data-block]');if(!el)return null
+            const prefix=doc.createRange();prefix.selectNodeContents(el);prefix.setEnd(node,offset)
+            return {section:index,blockId:el.dataset.block,character:Math.min(Number(el.dataset.length),prefix.toString().length)}
+        }
+        const a=anchor(range.startContainer,range.startOffset),b=anchor(range.endContainer,range.endOffset),text=selected.toString()
+        if(a&&b&&text.length>0&&text.length<=2000)emit('blockSelectionRequested',{start:a,end:b,text})
+    }
+    for(const name of ['pointerup','selectionchange'])doc.addEventListener(name,e=>{
+        if(!e.isTrusted||performance.now()>userInteractionUntil)return
+        clearTimeout(selectionTimer);selectionTimer=setTimeout(selection,200)
+    },true)
     // Content is inert even when it has same-origin DOM access for Range measurement.
     doc.addEventListener('click', event => {
         if (event.target.closest?.('a')) event.preventDefault()
@@ -192,9 +272,10 @@ instance.addEventListener('relocate', ({ detail }) => {
     // Never send Range/page fractions as durable locators; only stable source block offsets.
     reportTimer = setTimeout(() => emit('relocated', { target, reason: detail.reason ?? 'scroll' }), 50)
 })
-instance.addEventListener('stabilized', () => { if (instance === paginator && !closed) { stabilizedSequence++; emit('stabilized', { activeViews: paginator.getContents().length }) } })
+instance.addEventListener('stabilized', () => { if (instance === paginator && !closed) stabilizedSequence++ })
 }
 installListeners(paginator)
+installInput(document,{active:()=>!opening&&!closed,flow:()=>paginator.getAttribute('flow'),direction:()=>'ltr',emit})
 function replacePaginator() {
     const previous = paginator
     const next = document.createElement('foliate-paginator')
@@ -214,11 +295,19 @@ async function execute(command) {
     operationDeadline = performance.now() + 12000
     try {
         const payload = command.payload
+        const requestedTarget = payload.target
+        const requestedId = command.commandId
+        const requestedAnchor = doc => {
+            if (closed || commandId !== requestedId || latestRequestedId !== requestedId) throw superseded
+            return rangeFor(doc, requestedTarget)
+        }
+        applyInsets(payload)
         if(payload.paginationBase)paginationBase=payload.paginationBase
         currentProfile = payload.profileId ?? currentProfile
         if (!Array.prototype.at || !Array.prototype.findLastIndex || !globalThis.ResizeObserver) throw new Error('请更新系统 WebView 以使用阅读内核')
         const rebuildForFlow = command.type === 'setRules' && payload.flow !== paginator.getAttribute('flow')
         if (command.type === 'open' || rebuildForFlow) {
+            conceal()
             if (initialized) replacePaginator()
             initialized = true
             if (command.type === 'open') publicationCount = payload.sectionCount
@@ -241,11 +330,11 @@ async function execute(command) {
             paginator.setAttribute('flow', payload.flow)
             paginator.setStyles([payload.beforeAuthor, payload.afterAuthor])
             lastTarget = payload.target
-            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }))
+            await bounded(paginator.goTo({ index: lastTarget.section, anchor: requestedAnchor }), 'initialGoTo')
             await stable(lastTarget)
         } else if (command.type === 'goTo') {
             lastTarget = payload.target
-            await bounded(paginator.goTo({ index: lastTarget.section, anchor: doc => rangeFor(doc, lastTarget) }))
+            await bounded(paginator.goTo({ index: lastTarget.section, anchor: requestedAnchor }), 'initialGoTo')
             await stable(lastTarget)
         } else if (command.type === 'setRules') {
             lastTarget = payload.target
@@ -255,16 +344,17 @@ async function execute(command) {
             await stable(lastTarget)
         } else if (command.type === 'next' || command.type === 'prev') {
             await bounded(paginator[command.type]())
-            await stable()
+            if(!await settleLoadedPage())await stable()
             if (relocationDraft) lastTarget = relocationDraft
         } else throw new Error('Unknown renderer command')
         if (commandId !== latestRequestedId || closed) throw superseded
         opening = false
+        reveal()
         emit('ready', { profileId: currentProfile, activeViews: paginator.getContents().length, nearby:Boolean(lastTarget?.nearby) })
         // For explicit anchoring, preserve the requested character within its visible page.
         // Normal page turns/scroll events continue to report first visible characters.
         emit('relocated', { target: lastTarget, reason: command.type === 'next' || command.type === 'prev' ? 'page' : 'anchor' })
-    } catch (error) { if (error !== superseded && !closed && commandId === latestRequestedId) { opening = false;emit('error', { message: String(error?.message ?? error).slice(0, 300) }) } }
+    } catch (error) { if (error !== superseded && !closed && commandId === latestRequestedId) { opening = false;reveal();emit('error', { message: String(error?.message ?? error).slice(0, 300) }) } }
 }
 globalThis.readerHost = Object.freeze({
     command(command) {
@@ -276,7 +366,7 @@ globalThis.readerHost = Object.freeze({
     // Read-only diagnostics shared by device and desktop tests; no content/native privileges.
     diagnostics() {
         return { protocol: 1, identity, layoutEpoch: epoch, commandId, loaded: true, flow: paginator.getAttribute('flow'),
-            activeViews: paginator.getContents().length, target: lastTarget, actualVisibleTarget: relocationDraft, anchorGeometry:anchorGeometry(lastTarget), events: [...events],
+            operationPhase, activeViews: paginator.getContents().length, target: lastTarget, actualVisibleTarget: relocationDraft, anchorGeometry:anchorGeometry(lastTarget), events: [...events],
             contents: paginator.getContents().map(({ index, doc }) => ({ section: index, blocks: doc.querySelectorAll('[data-block]').length,
                 textLength: doc.body?.textContent.length ?? 0, url: doc.URL, state: doc.readyState, scriptExecuted: doc.defaultView?.attacked === true,
                 fontSize: doc.body ? getComputedStyle(doc.body).fontSize : '', fontFamily: doc.body ? getComputedStyle(doc.body).fontFamily : '' })) }

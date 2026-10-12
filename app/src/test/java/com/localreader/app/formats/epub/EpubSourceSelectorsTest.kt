@@ -34,8 +34,10 @@ class EpubSourceSelectorsTest {
         assertTrue(result.text.startsWith("@media screen{"));assertTrue(result.text.contains("color:red!important"))
         assertTrue(result.text.contains(":is(#reader-unused,*)"));assertTrue(result.text.contains(":is(.reader-unused.reader-unused,*)"));assertTrue(result.text.contains(":is(reader-unused,*)::before"))
         assertFalse(result.text.contains("nth-child"));assertTrue(result.warnings.isEmpty())
-        assertThrows(IllegalStateException::class.java) { rules.compile("p:has(+ p:nth-child(2))") }
-        assertThrows(IllegalArgumentException::class.java) { rules.compile("p:nth-child(2 of .note)") }
+        // Unsupported branches are dropped rather than failing the whole import.
+        assertEquals(":not(*)",rules.compile("p:has(+ p:nth-child(2))"))
+        assertEquals(":not(*)",rules.compile("p:nth-child(2 of .note)"))
+        assertFalse(rules.compile("p:nth-child(2 of .note), h1").contains("of .note"))
     }
     @Test fun emptyWordAsciiCaseAndQuotedFunctionalAttributesMatchBrowserSemantics() {
         val rules=EpubSourceSelectors()

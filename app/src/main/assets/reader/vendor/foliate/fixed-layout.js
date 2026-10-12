@@ -246,8 +246,62 @@ export class FixedLayout extends HTMLElement {
         if (this.#frames.size >= 4) throw new Error('Fixed renderer frame budget exhausted')
         this.#frames.set(element, null)
         const iframe = document.createElement('iframe')
-        this.#frames.set(element, { iframe, abort: null })
+        this.#frames.set(element, { iframe, abort: null, state: 'pending', index: null })
         return iframe
+    }
+    getFrameDiagnostics() {
+        return [...this.#frames.values()].filter(Boolean).map(lease => ({
+            index: lease.index, state: lease.state, connected: lease.iframe.isConnected,
+            documentState: lease.iframe.contentDocument?.readyState ?? 'absent',
+        }))
+    }
+    // Host verification is awaited before a live source becomes published or interactive.
+    #admitFrame(element, iframe, index, dimensions) {
+        const lease = this.#frames.get(element)
+        lease.index = index
+        const controller = new AbortController()
+        return new Promise((resolve, reject) => {
+            let settled = false
+            const abort = () => {
+                if (settled) return
+                settled = true
+                controller.abort()
+                iframe.removeEventListener('load', loaded)
+                this.#releaseFrame(element)
+                reject(new DOMException('Fixed frame closed', 'AbortError'))
+            }
+            const loaded = async () => {
+                if (settled) return
+                iframe.removeEventListener('load', loaded)
+                const doc = iframe.contentDocument
+                try {
+                    if (this.#dead || this.#frames.get(element) !== lease) return abort()
+                    lease.state = 'verifying'
+                    await this.book.beforeDocumentPublish?.({ doc, index, signal: controller.signal })
+                    if (settled || controller.signal.aborted || this.#dead ||
+                        this.#frames.get(element) !== lease || iframe.contentDocument !== doc) return abort()
+                    this.#applyPanLock(doc)
+                    iframe.dataset.sectionIndex = index
+                    lease.state = 'loaded'
+                    settled = true
+                    lease.abort = null
+                    this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
+                    const { width, height } = getViewport(doc, this.defaultViewport)
+                    resolve({ element, iframe, width: parseFloat(width), height: parseFloat(height), ...dimensions })
+                } catch (error) {
+                    if (settled || controller.signal.aborted || this.#dead || this.#frames.get(element) !== lease) return
+                    lease.state = 'failed'
+                    settled = true
+                    lease.abort = null
+                    controller.abort()
+                    this.dispatchEvent(new CustomEvent('documenterror', { detail: { index, error } }))
+                    this.#releaseFrame(element)
+                    reject(error)
+                }
+            }
+            lease.abort = abort
+            iframe.addEventListener('load', loaded, { once: true })
+        })
     }
     #releaseFrame(element) {
         if (!element) return
@@ -269,6 +323,18 @@ export class FixedLayout extends HTMLElement {
                 if (this.#dead) return abort()
                 resolve(value)
             }, error => { clear(); reject(error) })
+        })
+    }
+    cancelNavigation() {
+        for (const abort of [...this.#pending]) abort()
+        for (const page of this.#scrollPages) if (page.state === 'loading') this.#teardownScrollPage(page)
+        for (const [element, lease] of [...this.#frames])
+            if (lease.state !== 'loaded' && lease.state !== 'placeholder') this.#releaseFrame(element)
+    }
+    #backgroundNavigation(promise) {
+        promise.catch(error => {
+            if (error?.name !== 'AbortError' && !this.#dead)
+                this.dispatchEvent(new CustomEvent('documenterror', { detail: { error } }))
         })
     }
     #spreads
@@ -609,45 +675,15 @@ export class FixedLayout extends HTMLElement {
             // A spread boundary reserves an inert decorative frame, not a
             // source document. It still owns a lease until release.
             iframe.dataset.readerPlaceholder = 'blank'
+            this.#frames.get(element).state = 'placeholder'
             return { blank: true, element, iframe }
         }
-        return new Promise((resolve, reject) => {
-            let settled = false
-            const abort = () => {
-                if (settled) return
-                settled = true
-                iframe.removeEventListener('load', loaded)
-                this.#releaseFrame(element)
-                reject(new DOMException('Fixed frame closed', 'AbortError'))
-            }
-            const loaded = () => {
-                if (settled) return
-                if (this.#dead) return abort()
-                settled = true
-                this.#frames.get(element).abort = null
-                iframe.removeEventListener('load', loaded)
-                const doc = iframe.contentDocument
-                this.#applyPanLock(doc)
-                iframe.dataset.sectionIndex = index
-                this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
-                const { width, height } = getViewport(doc, this.defaultViewport)
-                resolve({
-                    element, iframe,
-                    width: parseFloat(width),
-                    height: parseFloat(height),
-                    onZoom,
-                    detached,
-                })
-            }
-            this.#frames.get(element).abort = abort
-            iframe.addEventListener('load', loaded, { once: true })
-            if (data) {
-                iframe.srcdoc = data
-            } else {
-                iframe.src = src
-            }
-        })
+        const admitted = this.#admitFrame(element, iframe, index, { onZoom, detached })
+        if (data) iframe.srcdoc = data
+        else iframe.src = src
+        return admitted
     }
+
     #render(side = this.#side, pageTurn = false) {
         if (this.#dead) return []
         if (this.#scrollMode) {
@@ -1101,7 +1137,7 @@ export class FixedLayout extends HTMLElement {
                     const spread = this.getSpreadOf(section)
                     if (spread) {
                         this.#index = -1
-                        this.goToSpread(spread.index, spread.side, 'page')
+                        this.#backgroundNavigation(this.goToSpread(spread.index, spread.side, 'page'))
                     }
                 }
             }
@@ -1135,44 +1171,15 @@ export class FixedLayout extends HTMLElement {
             // A spread boundary reserves an inert decorative frame, not a
             // source document. It still owns a lease until release.
             iframe.dataset.readerPlaceholder = 'blank'
+            this.#frames.get(element).state = 'placeholder'
             return { blank: true, element, iframe }
         }
-        return new Promise((resolve, reject) => {
-            let settled = false
-            const abort = () => {
-                if (settled) return
-                settled = true
-                iframe.removeEventListener('load', loaded)
-                this.#releaseFrame(element)
-                reject(new DOMException('Fixed frame closed', 'AbortError'))
-            }
-            const loaded = () => {
-                if (settled) return
-                if (this.#dead) return abort()
-                settled = true
-                this.#frames.get(element).abort = null
-                iframe.removeEventListener('load', loaded)
-                const doc = iframe.contentDocument
-                this.#applyPanLock(doc)
-                iframe.dataset.sectionIndex = pageData.index
-                this.dispatchEvent(new CustomEvent('load', { detail: { doc, index: pageData.index } }))
-                const { width, height } = getViewport(doc, this.defaultViewport)
-                resolve({
-                    element, iframe,
-                    width: parseFloat(width),
-                    height: parseFloat(height),
-                    onZoom,
-                })
-            }
-            this.#frames.get(element).abort = abort
-            iframe.addEventListener('load', loaded, { once: true })
-            if (data) {
-                iframe.srcdoc = data
-            } else {
-                iframe.src = src
-            }
-        })
+        const admitted = this.#admitFrame(element, iframe, pageData.index, { onZoom })
+        if (data) iframe.srcdoc = data
+        else iframe.src = src
+        return admitted
     }
+
     async #loadScrollPage(pageData) {
         if (this.#dead) return
         if (pageData.state !== 'idle') return
@@ -1263,7 +1270,8 @@ export class FixedLayout extends HTMLElement {
                 }, { passive: true })
             }
         } catch (e) {
-            console.warn('Failed to load scroll page', pageData.index, e)
+            if (e?.name !== 'AbortError' && !this.#dead)
+                this.dispatchEvent(new CustomEvent('documenterror', { detail: { index: pageData.index, error: e } }))
             // Terminal state: leaving it 'idle' would let the post-completion
             // reschedule retry a persistently failing page in a tight async loop.
             if (!this.#dead && this.#scrollLoadGen.get(pageData.index) === gen) pageData.state = 'error'
@@ -1494,7 +1502,7 @@ export class FixedLayout extends HTMLElement {
         this.#prerenderedSpreads.clear()
         this.#spreadAccessTime.clear()
         this.#overlayers.clear()
-        this.goToSpread(index, this.rtl ? 'right' : 'left', 'page')
+        this.#backgroundNavigation(this.goToSpread(index, this.rtl ? 'right' : 'left', 'page'))
     }
     // A section can find out as it loads that it is a spread of its own: a
     // streamed comic measures a page when its image arrives, and a wide one
@@ -1931,7 +1939,7 @@ export class FixedLayout extends HTMLElement {
             .filter(frame => {
                 if (frame.dataset.readerPlaceholder === 'blank') return false
                 const parent = frame.parentElement
-                return parent && parent.style.visibility !== 'hidden'
+                return parent && parent.style.visibility !== 'hidden' && this.#frames.get(parent)?.state === 'loaded'
             })
             .map(frame => {
                 const index = frame.dataset.sectionIndex != null

@@ -36,7 +36,7 @@
 - Readest 会将 generic 字体项接到应用字体变量，再与默认字体、中文字体和正文样式共同级联。必须保留此顺序与覆盖开关，不能把正文全部强制设成一个字体来宣称一致。
 - 默认手机正文设置、实际 CSS 字号、平台 textZoom、字体加载和每个字形的 fallback 分别核验。文章仍可按清洗 HTML + 本地资源存储，不因共用阅读内核就变成书架图书。
 
-具体固定来源与差异见 [READEST_PARITY.md](READEST_PARITY.md)；字体文件、许可、哈希与覆盖范围见 [FONTS.md](FONTS.md)。
+字体文件、许可、哈希与覆盖范围见 [FONTS.md](FONTS.md)；与 Readest 的正文一致性结论见 `docs/READEST_COMPARISON.md`（NEXT-PRD V-4 产出）。
 
 ## 上游更新与补丁流程
 

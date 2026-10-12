@@ -13,6 +13,11 @@ interface ReaderPublication {
     val protocolVersion: Int get() = 1
     val direction: String get() = "ltr"
     val fixedLayout: FixedLayoutInfo? get() = null
+    /** A renderer group retains source locators while bounding one layout backend. */
+    fun renderingPublication(locator: Locator): ReaderPublication = this
+    fun adjacentRenderingLocator(locator: Locator,next: Boolean): Locator? = null
+    val sectionOffset: Int get() = 0
+    val finalRenderingGroup: Boolean get() = true
     val compatibilityNotices: List<String> get() = emptyList()
     fun linkTarget(identity: String): Locator? = null
     fun configure(rules: ReaderRules) { }
@@ -50,27 +55,73 @@ data class ContentTarget(val anchor: RendererAnchor,val nearby: Boolean = false)
 }
 
 /** Bounded resources prefer physical paragraph boundaries; extreme paragraphs retain continuation. */
-class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit = {}) : ReaderPublication {
-    override val revision = source.version
+class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit = {}, private val projection: TxtDisplayProjection?=null) : ReaderPublication {
+    override val sourceRevision=source.version
+    override val revision = source.version + if(projection!=null)"-${TxtDisplayProjection.ALGORITHM}" else ""
     override val kind = WebContentKind.TXT
     // Only compact record metadata is scanned. No book text is decoded for this directory.
-    private val directory: Pair<IntArray,LongArray> = run {
-        val paragraphs=mutableListOf<Int>();val offsets=mutableListOf<Long>()
-        var records = 0; var bytes = 0
-        for (paragraph in 0 until source.index.paragraphs) {
-            if (paragraph % 1024 == 0) checkpoint()
-            val meta = source.metadata(paragraph)
-            if (paragraph==0 || records > 0 && ((records >= 64 || bytes >= 32768) && !meta.continuation || bytes + meta.utf8Bytes > 128 * 1024)) {
-                paragraphs.add(paragraph);offsets.add(meta.sourceOffset);records = 0; bytes = 0
+    private data class Directory(val starts: IntArray,val ends: IntArray,val offsets: LongArray,val records: List<IntArray>,val emptyNatural: BooleanArray)
+    private val directory: Directory = run {
+        val cache=source.displayDirectory?.let { java.io.File(it,"txt-sections-v2-${if(projection==null)"raw" else TxtDisplayProjection.ALGORITHM}.bin") }
+        fun load(): Directory? = try {
+            cache?.takeIf { it.isFile }?.let { file ->
+                val checksum=java.util.zip.CRC32()
+                java.io.DataInputStream(java.util.zip.CheckedInputStream(file.inputStream().buffered(),checksum)).use { input ->
+                require(input.readInt()==0x54534432 && input.readUTF()==source.version && input.readInt()==source.index.paragraphs && input.readLong()==source.index.totalCharacters)
+                val count=input.readInt();require(count in 1..source.index.paragraphs)
+                val starts=IntArray(count);val ends=IntArray(count);val offsets=LongArray(count);val empty=BooleanArray(count)
+                var previous=-1;var totalRecords=0
+                val groups=List(count) { section ->
+                    checkpoint();starts[section]=input.readInt();ends[section]=input.readInt();offsets[section]=input.readLong();empty[section]=input.readBoolean()
+                    val size=input.readInt();totalRecords+=size;require(size in 1..source.index.paragraphs && totalRecords in 1..source.index.paragraphs && starts[section]>previous && ends[section] in starts[section]+1..source.index.paragraphs && offsets[section] in 0 until source.index.totalCharacters)
+                    IntArray(size) { input.readInt().also { record -> require(record>previous && record in starts[section] until ends[section]);previous=record } }.also {
+                        require(it.first()==starts[section] && it.last()+1==ends[section] && source.metadata(it.first()).sourceOffset==offsets[section])
+                    }
+                }
+                val expected=checksum.value;require(input.readLong()==expected && input.read()==-1) { "TXT 分节缓存校验失败" }
+                Directory(starts,ends,offsets,groups,empty)
+            } }
+        } catch(_: java.io.IOException) { null } catch(_: IllegalArgumentException) { null }
+        load()?.let { return@run it }
+
+        val paragraphs=mutableListOf<Int>();val offsets=mutableListOf<Long>();val ends=mutableListOf<Int>()
+        val groups=mutableListOf<MutableList<Int>>();val emptyNatural=mutableListOf<Boolean>()
+        var records=0;var bytes=0
+        for(paragraph in 0 until source.index.paragraphs) {
+            if(paragraph%1024==0)checkpoint()
+            val meta=source.metadata(paragraph)
+            // Fully trimmed physical records have no rendered page. Persistent
+            // raw coordinates still resolve through the projection's neighbors.
+            val display=projection?.slice(paragraph)
+            if(display?.displayedLength==0) {if(display.emptyUnit && emptyNatural.isNotEmpty())emptyNatural[emptyNatural.lastIndex]=true;continue}
+            if(paragraphs.isEmpty() || records>0 && ((records>=64 || bytes>=32768) && !meta.continuation || bytes+meta.utf8Bytes>128*1024)) {
+                paragraphs.add(paragraph);offsets.add(meta.sourceOffset);ends.add(paragraph+1);groups.add(mutableListOf());emptyNatural.add(false);records=0;bytes=0
             }
-            bytes += meta.utf8Bytes; records++
+            ends[ends.lastIndex]=paragraph+1;groups.last().add(paragraph)
+            bytes+=meta.utf8Bytes;records++
         }
-        paragraphs.toIntArray() to offsets.toLongArray()
+        Directory(paragraphs.toIntArray(),ends.toIntArray(),offsets.toLongArray(),groups.map {it.toIntArray()},emptyNatural.toBooleanArray()).also { built ->
+            if(cache!=null) {
+                val stage=java.io.File(cache.parentFile,".${cache.name}-${java.util.UUID.randomUUID()}.stage")
+                try {
+                    java.io.FileOutputStream(stage).use { raw ->
+                        val checksum=java.util.zip.CRC32()
+                        java.io.DataOutputStream(java.util.zip.CheckedOutputStream(java.io.BufferedOutputStream(raw),checksum)).let { out ->
+                        out.writeInt(0x54534432);out.writeUTF(source.version);out.writeInt(source.index.paragraphs);out.writeLong(source.index.totalCharacters);out.writeInt(built.starts.size)
+                        built.starts.indices.forEach { section ->
+                            checkpoint();out.writeInt(built.starts[section]);out.writeInt(built.ends[section]);out.writeLong(built.offsets[section]);out.writeBoolean(built.emptyNatural[section]);out.writeInt(built.records[section].size);built.records[section].forEach(out::writeInt)
+                        }
+                        out.flush();java.io.DataOutputStream(raw).writeLong(checksum.value);raw.fd.sync()
+                    } }
+                    java.nio.file.Files.move(stage.toPath(),cache.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                } finally { stage.delete() }
+            }
+        }
     }
-    private val starts=directory.first
+    private val starts=directory.starts
     override val sectionCount = starts.size
-    override val paginationParts: List<PaginationPart> = directory.second.mapIndexed { index,first ->
-        val end=directory.second.getOrNull(index+1) ?: source.index.totalCharacters
+    override val paginationParts: List<PaginationPart> = directory.offsets.mapIndexed { index,first ->
+        val end=directory.offsets.getOrNull(index+1) ?: source.index.totalCharacters
         PaginationPart(index,end-first,0,first)
     }
     override fun paginationCoordinate(locator: Locator): PaginationBoundary? {
@@ -84,26 +135,32 @@ class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit =
     }
     private fun sectionOf(paragraph: Int): Int = starts.binarySearch(paragraph).let { if (it >= 0) it else -it - 2 }
     override fun target(locator: Locator): ContentTarget {
-        val resolved = source.resolve(locator)
+        val original=source.resolve(locator)
+        val resolved = projection?.target(original) ?: original
         return ContentTarget(sectionOf(resolved.paragraph), resolved.paragraph.toString(), resolved.character, resolved.nearby)
     }
     override fun section(index: Int): ContentSection {
         require(index in 0 until sectionCount)
-        val start = starts[index]
-        val end = starts.getOrElse(index + 1) { source.index.paragraphs }
-        val blocks = (start until end).map(source::block)
+        val blocks=directory.records[index].map(source::block)
         val body = buildString {
+            if(projection!=null && directory.emptyNatural[index])append("<p hidden></p>")
             var tag: String? = null
             blocks.forEach { block ->
                 if (tag == null || !block.continuation) {
                     tag?.let { append("</$it>") }
-                    tag = if (block.heading) "h2" else "p"
+                    val display=projection?.slice(block.index)
+                    if(display?.generatedHeading?.let {it>0}==true)append("<h2 data-generated=\"true\">${display.generatedHeading}</h2>")
+                    tag = if (if(projection==null)block.heading else display?.sourceHeading==true) "h2" else "p"
                     val continuesOutside = block.continues && blocks.last().continues && blocks.last().index >= block.index &&
-                        blocks.dropWhile { it.index < block.index }.drop(1).all { it.continuation }
+                        blocks.dropWhile { it.index < block.index }.drop(1).all { it.continuation } &&
+                        (projection==null || projection.slice(blocks.last().index).retainedLast>blocks.last().index)
                     val classes = listOfNotNull(if (block.continuation) "continuation" else null,if (continuesOutside) "continues" else null).joinToString(" ")
-                    append("<$tag${if (classes.isNotEmpty()) " class=\"$classes\"" else ""}>")
+                    append("<$tag${if (classes.isNotEmpty()) " class=\"$classes\"" else ""}${if(display?.emptyUnit==true)" hidden" else ""}>")
                 }
-                append("<span data-block=\"${block.index}\" data-length=\"${block.text.length}\">${HtmlText.escape(block.text.ifEmpty { "\u200B" })}</span>")
+                val slice=projection?.slice(block.index)
+                val text=if(slice==null)block.text else block.text.substring(slice.start,slice.end)
+                val placeholder=if(text.isEmpty() && (slice==null || !slice.emptyUnit && slice.retainedFirst==block.index && slice.retainedLast==block.index))"\u200B" else text
+                append("<span data-block=\"${block.index}\" data-length=\"${text.length}\">${HtmlText.escape(placeholder)}</span>")
                 if (!block.continues) { append("</$tag>"); tag = null }
             }
             tag?.let { append("</$it>") }
@@ -114,9 +171,11 @@ class TxtPublication(private val source: TxtTextSource, checkpoint: () -> Unit =
         val paragraph = blockId.toIntOrNull() ?: return null
         if (section !in 0 until sectionCount || paragraph !in 0 until source.index.paragraphs || sectionOf(paragraph) != section || character < 0) return null
         val block = source.block(paragraph)
-        if (character > block.text.length) return null
-        val offset = block.sourceOffset + character
-        return Locator.Text(revision, offset, paragraph, character, offset.toDouble() / source.index.totalCharacters.coerceAtLeast(1))
+        val slice=projection?.slice(paragraph)
+        if (character > (slice?.displayedLength ?: block.text.length)) return null
+        val rawCharacter=slice?.sourceCharacter(character) ?: character
+        val offset = block.sourceOffset + rawCharacter
+        return Locator.Text(sourceRevision, offset, paragraph, rawCharacter, offset.toDouble() / source.index.totalCharacters.coerceAtLeast(1))
     }
 }
 

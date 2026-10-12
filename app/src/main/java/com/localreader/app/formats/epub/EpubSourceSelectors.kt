@@ -12,7 +12,14 @@ internal class EpubSourceSelectors {
     data class Rule(val source: String,val token: String,val match: SourceSelector)
     private val registered=linkedMapOf<String,Rule>()
     val rules: List<Rule> get()=registered.values.toList()
-    fun compile(selectorList: String): String = split(selectorList).joinToString(",") { branch ->
+    /**
+     * An unsupported selector branch (e.g. :hover inside a long chapter's CSS) is dropped
+     * instead of failing the whole import; a list with no usable branch never matches.
+     */
+    fun compile(selectorList: String): String = split(selectorList)
+        .mapNotNull { branch -> runCatching { compileBranch(branch) }.getOrNull() }
+        .ifEmpty { listOf(":not(*)") }.joinToString(",")
+    private fun compileBranch(branch: String): String =
         if(!sensitive(branch))branch else {
             require(!Regex(":(?:hover|active|focus|focus-within|focus-visible|visited|target|contains|matches)(?:\\b|\\()",RegexOption.IGNORE_CASE).containsMatchIn(branch)) { "长章节结构规则含暂不支持的动态或文本选择器" }
             val pseudo=Regex("::(?:before|after|first-letter|first-line)$",RegexOption.IGNORE_CASE).find(branch)?.value.orEmpty()
@@ -32,7 +39,6 @@ internal class EpubSourceSelectors {
                 append(pseudo)
             }
         }
-    }
     private fun sensitive(value: String)=Regex("[+~\\[]|:(?:nth-|first-|last-|only-|empty\\b|has\\()",RegexOption.IGNORE_CASE).containsMatchIn(value)
     private fun split(value: String): List<String> {
         val output=mutableListOf<String>();var start=0;var depth=0;var quote='\u0000';var escaped=false

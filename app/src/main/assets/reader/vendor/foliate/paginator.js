@@ -1,3 +1,5 @@
+import { textIntervals } from '../../viewport.js'
+
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 // A microtask (or rAF alone) resumes before paint. Give input and rendering a
@@ -566,6 +568,65 @@ export const isViewVisibleInContainer = (viewRect, containerRect) =>
     && viewRect.bottom > containerRect.top
     && viewRect.top < containerRect.bottom
 
+// Chromium cannot fragment an orthogonal block across horizontal root columns.
+// For a document consisting entirely of same-axis vertical blocks, align the
+// viewer column root with that axis. Mixed horizontal/vertical documents keep
+// their actual body principal flow; no first-child inference is used.
+const alignUniformOrthogonalFlow = doc => {
+    const style = doc.defaultView.getComputedStyle(doc.body)
+    if (style.writingMode !== 'horizontal-tb') return
+    let mode = null
+    for (const node of doc.body.childNodes) {
+        if (node.nodeType === 3) { if (node.textContent.trim()) return; continue }
+        if (node.nodeType !== 1 || ['script', 'style'].includes(node.localName)) continue
+        const childStyle = doc.defaultView.getComputedStyle(node)
+        if (childStyle.display === 'none') continue
+        if (!['vertical-rl', 'vertical-lr'].includes(childStyle.writingMode)) return
+        if (mode && mode !== childStyle.writingMode) return
+        mode = childStyle.writingMode
+    }
+    if (mode) {
+        setStylesImportant(doc.documentElement, { 'writing-mode': mode })
+        setStylesImportant(doc.body, { 'writing-mode': mode })
+    }
+}
+
+// An orthogonal block cannot fragment along the horizontal body's scrolling
+// axis. Keep its authored height/mode and expose its excess width locally.
+const orthogonalPorts = new WeakMap()
+const configureOrthogonalPorts = (doc, enabled, width) => {
+    let saved = orthogonalPorts.get(doc)
+    if (!saved) orthogonalPorts.set(doc, saved = new Map())
+    for (const [node, styles] of saved) {
+        for (const [key, value, priority] of styles) {
+            if (value) node.style.setProperty(key, value, priority)
+            else node.style.removeProperty(key)
+        }
+        node.removeAttribute('data-reader-orthogonal-scroll')
+    }
+    saved.clear()
+    if (!enabled || getDirection(doc).vertical) return
+    for (const node of doc.body.children) {
+        const style = doc.defaultView.getComputedStyle(node)
+        if (style.display === 'none' || !['vertical-rl', 'vertical-lr'].includes(style.writingMode)) continue
+        const keys = ['max-width', 'overflow-x', 'box-sizing']
+        saved.set(node, keys.map(key => [key, node.style.getPropertyValue(key), node.style.getPropertyPriority(key)]))
+        setStylesImportant(node, { 'max-width': `min(100%, ${width}px)`, 'overflow-x': 'auto', 'box-sizing': 'border-box' })
+        node.setAttribute('data-reader-orthogonal-scroll', '')
+    }
+}
+const revealOrthogonalAnchor = anchor => {
+    let node = anchor.startContainer ?? anchor
+    if (node?.nodeType === 3) node = node.parentElement
+    const port = node?.closest?.('[data-reader-orthogonal-scroll]')
+    if (!port) return
+    const box = port.getBoundingClientRect(), rect = uncollapse(anchor)?.getBoundingClientRect?.()
+    if (!rect) return
+    const left = box.left + port.clientLeft, right = left + port.clientWidth
+    if (rect.right > right) port.scrollLeft += rect.right - right
+    else if (rect.left < left) port.scrollLeft += rect.left - left
+}
+
 export const getDirection = doc => {
     const { defaultView } = doc
     // A view's iframe document can be blank/detached while a section loads or
@@ -573,18 +634,11 @@ export const getDirection = doc => {
     // throws "parameter 1 is not of type 'Element'" (READEST-2X). Fall back to
     // horizontal-ltr until real content is present.
     if (!defaultView || !doc.body) return { vertical: false, rtl: false }
-    let { writingMode, direction } = defaultView.getComputedStyle(doc.body)
-    // Some EPUBs set writing-mode on the first child of body instead of body itself
-    if (!writingMode || writingMode === 'horizontal-tb') {
-        const firstChild = doc.body.querySelector(':scope > :not([cfi-inert])')
-        if (firstChild) {
-            const childStyle = defaultView.getComputedStyle(firstChild)
-            if (childStyle.writingMode === 'vertical-rl'
-                || childStyle.writingMode === 'vertical-lr') {
-                writingMode = childStyle.writingMode
-            }
-        }
-    }
+    const { writingMode, direction } = defaultView.getComputedStyle(doc.body)
+    // CSS Writing Modes principal flow comes from body, not the first child.
+    // A vertical paragraph inside a horizontal document is an orthogonal block;
+    // selecting it as the publication axis makes root columns use a different
+    // axis from the paginator, clipping this paragraph and later mixed content.
     const vertical = writingMode === 'vertical-rl'
         || writingMode === 'vertical-lr'
     // `vertical-rl` (Japanese/Chinese vertical) advances columns right-to-left
@@ -595,7 +649,7 @@ export const getDirection = doc => {
         || doc.body.dir === 'rtl'
         || direction === 'rtl'
         || doc.documentElement.dir === 'rtl'
-    return { vertical, rtl }
+    return { vertical, rtl, writingMode }
 }
 
 // The spine's `page-progression-direction` is a publication-wide declaration,
@@ -697,6 +751,10 @@ class View {
     #observer = new ResizeObserver(() => this.expand())
     #element = document.createElement('div')
     #iframe = document.createElement('iframe')
+    #loadCompletion = Promise.resolve()
+    #cancelLoad
+    #loadAbort
+    #dead = false
     #contentRange = document.createRange()
     #overlayer
     #vertical = false
@@ -760,23 +818,36 @@ class View {
     get contentPages() {
         return this.#contentPages
     }
-    async load(src, data, afterLoad, beforeRender, waitForIdle) {
+    get loadedDocument() { return this.#loadedDoc }
+    get loadCompletion() { return this.#loadCompletion }
+    async load(src, data, afterLoad, beforeRender, waitForIdle, observe) {
+        const mark = name => { try { observe?.(name) } catch { /* diagnostic only */ } }
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
-        return new Promise(resolve => {
+        if (this.#dead) return
+        this.#loadedDoc = null
+        this.#loadAbort = new AbortController()
+        this.#loadCompletion = new Promise((resolve, reject) => {
+            this.#cancelLoad = resolve
             this.#iframe.addEventListener('load', async () => {
+                try {
+                mark('iframeLoadEvent')
                 // A background fetch can finish after a swipe has started.
                 // Defer its style/layout work, not just the start of preloading.
                 if (waitForIdle) await waitForIdle()
                 const doc = this.document
-                if (!doc?.documentElement || !doc.body) return resolve()
+                if (this.#dead || !doc?.documentElement || !doc.body) return resolve()
+                mark('afterLoadStart')
                 await afterLoad?.(doc)
+                mark('afterLoadDone')
                 await yieldToFrame()
-                if (this.document !== doc) return resolve()
+                mark('viewYieldDone')
+                if (this.#dead || this.document !== doc) return resolve()
 
                 this.#iframe.setAttribute('aria-label', doc.title)
                 // it needs to be visible for Firefox to get computed style
                 this.#iframe.style.visibility = 'visible'
-                const { vertical, rtl } = getDirection(doc)
+                alignUniformOrthogonalFlow(doc)
+                const { vertical, rtl, writingMode } = getDirection(doc)
                 this.docBackground = getBackground(doc)
                 doc.body.style.background = 'none'
                 // Resolve the body background image's natural size BEFORE the
@@ -815,17 +886,19 @@ class View {
                     // that fires neither load nor error) can never block the
                     // section from rendering.
                     let timer
+                    mark('backgroundWaitStart')
                     await Promise.race([
                         waited,
                         new Promise(res => { timer = setTimeout(res, 3000) }),
                     ])
                     clearTimeout(timer)
+                    mark('backgroundWaitDone')
                     if (waitForIdle) await waitForIdle()
                 }
                 // Awaiting the background image yields control, so the view may
                 // have been torn down or reloaded meanwhile — don't render into
                 // a stale document.
-                if (this.document !== doc) return resolve()
+                if (this.#dead || this.document !== doc) return resolve()
                 this.#iframe.style.visibility = 'hidden'
 
                 this.#vertical = vertical
@@ -836,25 +909,36 @@ class View {
                 this.#loadedDoc = doc
 
                 this.#contentRange.selectNodeContents(doc.body)
-                const layout = beforeRender?.({ vertical, rtl })
+                mark('beforeRenderStart')
+                const layout = beforeRender?.({ vertical, rtl, writingMode })
                 this.#iframe.style.visibility = 'visible'
                 this.render(layout)
+                mark('renderDone')
                 bgRendered = true
                 this.#observer.observe(doc.body)
 
                 // the resize observer above doesn't work in Firefox
                 // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1832939)
                 // until the bug is fixed we can at least account for font load
-                this.fontReady = fontsReady(doc).then(() => this.expand())
+                mark('fontReadyRegistered')
+                this.fontReady = fontsReady(doc).then(() => {
+                    mark('fontReadyResolved')
+                    mark('fontExpandStart')
+                    this.expand()
+                    mark('fontExpandDone')
+                })
 
                 resolve()
-            }, { once: true })
+                } catch (error) { reject(error) }
+            }, { once: true, signal: this.#loadAbort.signal })
+            mark('srcAssigned')
             if (data) {
                 this.#iframe.srcdoc = data
             } else {
                 this.#iframe.src = src
             }
         })
+        return this.#loadCompletion
     }
     render(layout) {
         if (!layout || !this.document?.documentElement) return
@@ -881,6 +965,7 @@ class View {
         // so leave it — as scrolled flow, which has no columns to order, does.
         this.#setProgressionDirection(
             this.#column && !this.#vertical ? this.#rtl ? 'rtl' : 'ltr' : null)
+        configureOrthogonalPorts(this.document, !this.#column, layout.columnWidth)
         if (this.#column) this.columnize(layout)
         else this.scrolled(layout)
     }
@@ -1399,6 +1484,9 @@ class View {
     }
     destroy() {
         // Local Reader lifecycle patch: cancel observation and pending iframe navigation.
+        this.#dead = true
+        this.#loadAbort?.abort()
+        this.#cancelLoad?.()
         this.#observer.disconnect()
         this.destroyLoupe()
         this.#iframe.remove()
@@ -1421,6 +1509,7 @@ export class Paginator extends HTMLElement {
     #footer
     #views = new Map() // Map<sectionIndex, View>
     #primaryIndex = -1
+    #verticalRL = false
     #vertical = false
     #rtl = false
     #marginTop = 0
@@ -1428,6 +1517,9 @@ export class Paginator extends HTMLElement {
     #anchor = 0 // anchor view to a fraction (0-1), Range, or Element
     #justAnchored = false
     #locked = false // while true, prevent any further navigation
+    #navigationSequence = 0
+    #navigationOwner = null
+    #navigationObserver = null
     #styles
     #styleMap = new WeakMap()
     #mediaQuery = matchMedia('(prefers-color-scheme: dark)')
@@ -1790,6 +1882,28 @@ export class Paginator extends HTMLElement {
         }
         this.#mediaQuery.addEventListener('change', this.#mediaQueryListener)
     }
+    // Optional trusted-host diagnostics cannot affect navigation.
+    setNavigationObserver(observer) { this.#navigationObserver = observer }
+    cancelNavigation() {
+        const owner = this.#navigationOwner
+        this.#stabilizing = false
+        if (!owner) return
+        ++this.#navigationSequence
+        this.#navigationOwner = null
+        if (owner.view && this.#views.get(owner.index) === owner.view && !owner.view.loadedDocument)
+            this.#destroyView(owner.index)
+        if (this.#views.has(owner.previousIndex)) this.#primaryIndex = owner.previousIndex
+        this.#container.style.opacity = '1'
+    }
+    #ownsNavigation(owner, view = owner?.view) {
+        return this.#navigationOwner === owner && owner?.sequence === this.#navigationSequence
+            && (!view || this.#views.get(owner.index) === view)
+    }
+    #navigationPhase(owner, name) {
+        if (!owner || owner.sequence !== this.#navigationSequence
+            || owner.view && this.#views.get(owner.index) !== owner.view) return
+        try { owner.observe?.(name) } catch { /* diagnostic only */ }
+    }
     get #primaryView() {
         return this.#views.get(this.#primaryIndex)
     }
@@ -1936,7 +2050,7 @@ export class Paginator extends HTMLElement {
         this.#views.delete(index)
         if (before) {
             const correction = Math.max(0, start - removedSize) - this.#renderedStart
-            this.containerPosition += (this.#vertical ? -1 : 1) * correction
+            this.containerPosition += (this.#vertical && this.#verticalRL ? -1 : 1) * correction
         }
         this.sections[index]?.unload?.()
     }
@@ -1952,7 +2066,7 @@ export class Paginator extends HTMLElement {
     // Returns true if same or unknown (not yet cached).
     #isSameDirection(index) {
         if (!this.#directionCache.has(index)) return true
-        return this.#directionCache.get(index) === this.#vertical
+        return this.#directionCache.get(index) === (this.#vertical ? this.#verticalRL ? 'vertical-rl' : 'vertical-lr' : 'horizontal-tb')
     }
     // Read the theme/texture style off the primary section's <html> and return a
     // resolver that maps a view's raw background onto the active theme. This is a
@@ -2077,17 +2191,18 @@ export class Paginator extends HTMLElement {
         if (!ctx) return
         this.#paintPaginatedBackground(ctx, atPosition)
     }
-    #beforeRender({ vertical, rtl: documentRTL }) {
+    #beforeRender({ vertical, rtl: documentRTL, writingMode }) {
         // If writing-mode is about to change, destroy all non-primary
         // views BEFORE updating global state. This prevents stale views
         // with the wrong direction from remaining in the container while
         // flex-direction / scrollProp / sideProp flip.
-        if (this.#rendered && vertical !== this.#vertical) {
+        if (this.#rendered && (vertical !== this.#vertical || vertical && (writingMode === 'vertical-rl') !== this.#verticalRL)) {
             for (const [i] of this.#views) {
                 if (i !== this.#primaryIndex) this.#destroyView(i)
             }
         }
         this.#vertical = vertical
+        this.#verticalRL = writingMode === 'vertical-rl'
         // One scroll container holds the views of several sections at once, so
         // the progression cannot be per-document: a section that flipped it
         // would reverse the sections mounted beside it. The publication-wide
@@ -2116,18 +2231,31 @@ export class Paginator extends HTMLElement {
         const flow = this.getAttribute('flow')
         const hostRect = this.getBoundingClientRect()
         const hostSize = vertical ? hostRect.height : hostRect.width
-        const divisor = flow === 'scrolled'
+        let divisor = flow === 'scrolled'
             ? 1
             : Math.min(
-                maxColumnCount + (vertical ? 1 : 0),
+                Math.max(1, maxColumnCount),
                 Math.ceil(Math.floor(hostSize) / Math.floor(maxInlineSize)),
             )
         // Set --_column-count BEFORE measuring the container so the read
         // below reflects the grid template that will actually be used.
         this.#top.style.setProperty('--_column-count', divisor)
 
-        const { width, height } = this.#container.getBoundingClientRect()
-        const size = vertical ? height : width
+        let { width, height } = this.#container.getBoundingClientRect()
+        let size = vertical ? height : width
+        // Authored vertical text uses the same declared maximum as horizontal
+        // text. Re-measure the actual grid when reducing an infeasible count:
+        // View.columnize truncates to whole px, so a sub-pixel width is invalid.
+        if (vertical && flow !== 'scrolled') {
+            while (divisor > 1 && Math.trunc(size / divisor - 1.5 * (marginTop + marginBottom)) <= 0) {
+                divisor--
+                this.#top.style.setProperty('--_column-count', divisor)
+                ;({ width, height } = this.#container.getBoundingClientRect())
+                size = height
+            }
+            if (Math.trunc(size / divisor - 1.5 * (marginTop + marginBottom)) <= 0)
+                throw new Error('Vertical content area has no usable column')
+        }
 
         const g = parseFloat(style.getPropertyValue('--_gap')) / 100
         // The gap will be a percentage of the #container, not the whole view.
@@ -2150,8 +2278,7 @@ export class Paginator extends HTMLElement {
         const gap = -g / (g - 1) * size
 
         if (flow === 'scrolled') {
-            // FIXME: vertical-rl only, not -lr
-            this.setAttribute('dir', vertical ? 'rtl' : 'ltr')
+            this.setAttribute('dir', vertical && this.#verticalRL ? 'rtl' : 'ltr')
             this.#top.style.padding = '0'
             const columnWidth = maxInlineSize
 
@@ -2203,14 +2330,15 @@ export class Paginator extends HTMLElement {
         return layout
     }
     render() {
+        // A pending target has not supplied its anchor yet. View.load renders
+        // it using the current viewport; re-anchoring the old document here
+        // would mix that document's Range with the new target's geometry.
+        if (this.#navigationOwner && !this.#navigationOwner.anchorResolved) return
         if (this.#views.size === 0) return
         const primaryView = this.#primaryView
         if (!primaryView) return
         this.#stabilizing = true
-        const layout = this.#beforeRender({
-            vertical: this.#vertical,
-            rtl: this.#rtl,
-        })
+        const layout = this.#beforeRender(getDirection(primaryView.document))
         for (const [, view] of this.#views) {
             if (view.document) view.render(layout)
         }
@@ -3108,12 +3236,14 @@ export class Paginator extends HTMLElement {
     // allows one to process rects as if they were LTR and horizontal
     #getRectMapper(view) {
         if (this.scrolled) {
-            const size = view ? view.element.getBoundingClientRect()[this.sideProp] : this.#renderedViewSize
+            const targetView = view ?? this.#primaryView
+            const size = targetView ? targetView.element.getBoundingClientRect()[this.sideProp] : this.#renderedViewSize
             const marginTop = this.#marginTop
             const marginBottom = this.#marginBottom
             return this.#vertical
-                ? ({ left, right }) =>
-                    ({ left: size - right - marginTop, right: size - left - marginBottom })
+                ? this.#verticalRL
+                    ? ({ left, right }) => ({ left: size - right - marginTop, right: size - left - marginBottom })
+                    : ({ left, right }) => ({ left: left - marginTop, right: right - marginBottom })
                 : ({ top, bottom }) => ({ left: top - marginTop, right: bottom - marginBottom })
         }
         // For RTL the mapper mirrors a rect within the iframe-local
@@ -3172,8 +3302,7 @@ export class Paginator extends HTMLElement {
             this.#afterScroll(reason)
             return
         }
-        // FIXME: vertical-rl only, not -lr
-        if (this.scrolled && this.#vertical) offset = -offset
+        if (this.scrolled && this.#vertical && this.#verticalRL) offset = -offset
         if ((reason === 'snap' || smooth) && this.hasAttribute('animated') && !this.hasAttribute('eink')) {
             // Layered turn styles: snapshot the outgoing page and animate it
             // over the live, stationary incoming page (readest#555). Works
@@ -3355,6 +3484,7 @@ export class Paginator extends HTMLElement {
     }
     async #scrollToAnchor(anchor, reason = 'anchor', smooth = false) {
         this.#anchor = anchor
+        revealOrthogonalAnchor(anchor)
         const rects = uncollapse(anchor)?.getClientRects?.()
         // if anchor is an element or a range
         if (rects) {
@@ -3434,6 +3564,17 @@ export class Paginator extends HTMLElement {
         if (!targetView?.document) return
         const viewOffset = this.#getViewOffset(this.#primaryIndex)
         if (this.scrolled) {
+            const node = this.#anchor?.startContainer
+            const port = (node?.nodeType === 3 ? node.parentElement : node)?.closest?.('[data-reader-orthogonal-scroll]')
+            if (port) {
+                const first = textIntervals(targetView.document, this.getBoundingClientRect()).find(value => port.contains(value.node))
+                if (first) {
+                    const range = targetView.document.createRange()
+                    range.setStart(first.node, first.start)
+                    range.setEnd(first.node, first.end)
+                    return { range, index: this.#primaryIndex }
+                }
+            }
             // In scrolled mode several sections can share the viewport at a
             // section boundary, and the primary view may even be scrolled out
             // of view. Prefer the view that covers the viewport centre — that
@@ -3558,6 +3699,9 @@ export class Paginator extends HTMLElement {
         }
     }
     #afterScroll(reason) {
+        // A passive scroll from the previous page can arrive after the target
+        // load started. It does not own this navigation's primary or anchor.
+        if (this.#navigationOwner && !['anchor', 'navigation', 'selection'].includes(reason)) return
         // In multi-view, detect which section is primary
         if (this.#views.size > 1 && reason !== 'anchor' && reason !== 'navigation') {
             this.#detectPrimaryView()
@@ -3614,15 +3758,18 @@ export class Paginator extends HTMLElement {
         if (!this.scrolled) this.#replaceBackground()
         this.dispatchEvent(new CustomEvent('relocate', { detail }))
     }
-    async #display(promise) {
+    async #display(promise, owner) {
         this.#stabilizing = true
         this.#container.style.opacity = '0'
         const { index, src, data, anchor, onLoad, select } = await promise
+        if (!this.#ownsNavigation(owner)) return
         this.#primaryIndex = index
         this.#syncA11y()
         const hasFocus = this.#primaryView?.document?.hasFocus()
         if (src) {
             const view = this.#createView(index)
+            owner.view = view
+            this.#navigationPhase(owner, 'targetViewCreated')
             const afterLoad = doc => {
                 if (doc.head) {
                     const $styleBefore = doc.createElement('style')
@@ -3635,9 +3782,15 @@ export class Paginator extends HTMLElement {
                 }
                 return onLoad?.({ doc, index })
             }
-            const beforeRender = this.#beforeRender.bind(this)
-            await view.load(src, data, afterLoad, beforeRender)
-            if (this.#views.get(index) !== view) return
+            const beforeRender = direction => {
+                if (!this.#ownsNavigation(owner, view)) throw new Error('Navigation superseded')
+                this.#primaryIndex = index
+                return this.#beforeRender(direction)
+            }
+            await view.load(src, data, afterLoad, beforeRender, undefined,
+                name => this.#navigationPhase(owner, name))
+            if (!this.#ownsNavigation(owner, view)) return
+            this.#navigationPhase(owner, 'viewLoadResolved')
             if (!view.document?.documentElement || !view.document.body) {
                 this.#destroyView(index)
                 this.#primaryIndex = this.#sortedViews[0]?.[0] ?? -1
@@ -3649,7 +3802,7 @@ export class Paginator extends HTMLElement {
             // Cache direction for future preload boundary checks
             if (view.document) {
                 const dir = getDirection(view.document)
-                this.#directionCache.set(index, dir.vertical)
+                this.#directionCache.set(index, dir.writingMode)
             }
             this.dispatchEvent(new CustomEvent('create-overlayer', {
                 detail: {
@@ -3662,7 +3815,10 @@ export class Paginator extends HTMLElement {
         // - Short primary alignment (section shorter than one spread)
         // - Scrolled mode with anchor in top half — so the user can
         //   scroll backward into the previous section immediately
-        const primaryView = this.#primaryView
+        const primaryView = owner.view
+        if (!this.#ownsNavigation(owner, primaryView) || !primaryView?.loadedDocument
+            || primaryView.document !== primaryView.loadedDocument) return
+        this.#primaryIndex = index
         if (!this.noPreload && !this.noContinuousScroll && primaryView) {
             const needsPrev = (primaryView.contentPages > 0 && primaryView.contentPages < this.columnCount)
             if (needsPrev || this.scrolled) {
@@ -3676,9 +3832,15 @@ export class Paginator extends HTMLElement {
                 }
             }
         }
+        if (!this.#ownsNavigation(owner, primaryView)) return
+        this.#primaryIndex = index
         const resolvedAnchor = (typeof anchor === 'function'
             ? anchor(primaryView.document) : anchor) ?? 0
+        owner.anchorResolved = true
+        this.#navigationPhase(owner, 'targetAnchorResolved')
         await this.scrollToAnchor(resolvedAnchor, select)
+        if (!this.#ownsNavigation(owner, primaryView)) return
+        this.#navigationPhase(owner, 'targetScrollDone')
         if (hasFocus) this.focusView()
         // Reveal content now that primary section is positioned
         this.#container.style.opacity = '1'
@@ -3692,10 +3854,11 @@ export class Paginator extends HTMLElement {
         // preserves position when content is added above/below.
         this.#fillPromise = this.#fillVisibleArea(
             { reanchor: !this.scrolled })
-        this.#fillPromise.then(() => { this.#stabilizing = false })
+        this.#fillPromise.then(() => { if (owner.sequence === this.#navigationSequence) this.#stabilizing = false })
     }
     // Load an adjacent section without changing primary index
     async #loadAdjacentSection(index) {
+        const sequence = this.#navigationSequence
         if (this.#views.has(index) || !this.#canGoToIndex(index)) return
         const section = this.sections[index]
         if (!section || section.linear === 'no') return
@@ -3711,6 +3874,9 @@ export class Paginator extends HTMLElement {
         try {
             const src = await section.load()
             const data = await section.loadContent?.()
+            // A navigation may have claimed this section while preload awaited I/O.
+            // Never replace its live target view or publish a stale layout.
+            if (sequence !== this.#navigationSequence || this.#views.has(index)) return
             const view = this.#createView(index)
             const afterLoad = async doc => {
                 if (doc.head) {
@@ -3755,10 +3921,14 @@ export class Paginator extends HTMLElement {
             // Cache direction for future preload boundary checks
             if (view.document) {
                 const dir = getDirection(view.document)
-                this.#directionCache.set(index, dir.vertical)
+                this.#directionCache.set(index, dir.writingMode)
+                // Navigation may claim this preloader's view while iframe load
+                // completes. Let that owner resolve the fresh direction and rebuild;
+                // destroying it here would leave the target with no live frame.
+                if (sequence !== this.#navigationSequence && this.#navigationOwner?.view === view) return
                 // Destroy views with a different writing-mode immediately.
                 // Mixed-direction views corrupt scroll/page calculations.
-                if (dir.vertical !== this.#vertical) {
+                if (dir.vertical !== this.#vertical || dir.vertical && (dir.writingMode === 'vertical-rl') !== this.#verticalRL) {
                     this.#destroyView(index)
                     return
                 }
@@ -3772,7 +3942,7 @@ export class Paginator extends HTMLElement {
                 const addedSize = view.element.getBoundingClientRect()[this.sideProp]
                 const correction = startBefore + addedSize - this.#renderedStart
                 if (Math.abs(correction) > 0.5)
-                    this.containerPosition += (this.#vertical ? -1 : 1) * correction
+                    this.containerPosition += (this.#vertical && this.#verticalRL ? -1 : 1) * correction
             }
             this.dispatchEvent(new CustomEvent('create-overlayer', {
                 detail: {
@@ -3861,8 +4031,22 @@ export class Paginator extends HTMLElement {
         return index >= 0 && index <= this.sections.length - 1
     }
     async #goTo({ index, anchor, select }) {
+        const navigation = ++this.#navigationSequence
         const section = this.sections[index]
         if (!section) return
+        const owner = { sequence: navigation, index, previousIndex: this.#primaryIndex, view: null, anchorResolved: false, observe: this.#navigationObserver }
+        this.#navigationOwner = owner
+        try {
+        // A preloader registers its View before the iframe's HTTP load finishes.
+        // Resolve an anchor only against that same completed source document.
+        const cached = this.#views.get(index)
+        if (cached) {
+            owner.view = cached
+            await cached.loadCompletion
+            if (navigation !== this.#navigationSequence || this.#views.get(index) !== cached) return
+            if (!cached.loadedDocument || cached.document !== cached.loadedDocument)
+                throw new Error('Target section did not complete loading')
+        }
         // Check if the target section has a different writing-mode.
         // If direction changes, we must destroy all views and do a full
         // rebuild via #display — mixed-direction views cannot coexist.
@@ -3870,11 +4054,11 @@ export class Paginator extends HTMLElement {
         if (this.#views.has(index)) {
             const view = this.#views.get(index)
             if (view?.document) {
-                const { vertical } = getDirection(view.document)
-                directionChanged = vertical !== this.#vertical
+                const { vertical, writingMode } = getDirection(view.document)
+                directionChanged = vertical !== this.#vertical || vertical && (writingMode === 'vertical-rl') !== this.#verticalRL
             }
         } else if (this.#directionCache.has(index)) {
-            directionChanged = this.#directionCache.get(index) !== this.#vertical
+            directionChanged = !this.#isSameDirection(index)
         }
         // When direction is unknown (not cached), #beforeRender will
         // detect and clean up stale views if a change actually occurs.
@@ -3900,9 +4084,11 @@ export class Paginator extends HTMLElement {
                     if (i !== index) this.#destroyView(i)
                 }
             }
-            const primaryView = this.#primaryView
+            const primaryView = cached
+            if (!this.#ownsNavigation(owner, primaryView)) return
             const resolvedAnchor = (typeof anchor === 'function'
                 ? anchor(primaryView.document) : anchor) ?? 0
+            this.#navigationPhase(owner, 'targetAnchorResolved')
             // Pre-load the previous section so the user can move backward right
             // away: a short paginated primary needs it to fill the leading
             // columns; scrolled mode needs it so scrolling up reveals the
@@ -3924,14 +4110,20 @@ export class Paginator extends HTMLElement {
                     await this.#loadAdjacentSection(prevIdx)
             }
             if (!this.scrolled) await loadPrev()
+            if (!this.#ownsNavigation(owner, primaryView)) return
+            this.#primaryIndex = index
+            owner.anchorResolved = true
             await this.scrollToAnchor(resolvedAnchor, select)
+            if (!this.#ownsNavigation(owner, primaryView)) return
+            this.#navigationPhase(owner, 'targetScrollDone')
             if (this.scrolled) await loadPrev()
+            if (!this.#ownsNavigation(owner, primaryView)) return
             if (blank) this.#container.style.opacity = '1'
             if (hasFocus) this.focusView()
             // Load remaining adjacent sections progressively;
             // keep #stabilizing true until fill completes
             this.#fillPromise = this.#fillVisibleArea()
-            this.#fillPromise.then(() => { this.#stabilizing = false })
+            this.#fillPromise.then(() => { if (owner.sequence === this.#navigationSequence) this.#stabilizing = false })
         } else {
             // When direction changes, clear ALL views — no reuse possible
             // across writing-mode boundaries. When direction is unknown
@@ -3939,6 +4131,7 @@ export class Paginator extends HTMLElement {
             // clean up if the loaded section turns out to differ.
             if (directionChanged) {
                 this.#destroyAllViews()
+                owner.view = null // the cached lease was discarded; #display owns the replacement
             } else {
                 const keep = new Set([index])
                 if (!this.noContinuousScroll) {
@@ -3953,7 +4146,9 @@ export class Paginator extends HTMLElement {
                 if (oldIndex >= 0 && !this.#views.has(oldIndex))
                     this.sections[oldIndex]?.unload?.()
                 this.#applyStyles(detail.doc)
+                this.#navigationPhase(owner, 'stylesApplied')
                 await yieldToFrame()
+                this.#navigationPhase(owner, 'onLoadYieldDone')
                 if (this.#views.get(index)?.document !== detail.doc) return
                 this.dispatchEvent(new CustomEvent('load', { detail }))
             }
@@ -3965,7 +4160,10 @@ export class Paginator extends HTMLElement {
                     console.warn(e)
                     console.warn(new Error(`Failed to load section ${index}`))
                     return {}
-                }))
+                }), owner)
+        }
+        } finally {
+            if (this.#navigationOwner === owner) this.#navigationOwner = null
         }
     }
     async goTo(target) {
@@ -4000,16 +4198,34 @@ export class Paginator extends HTMLElement {
         if (page >= pages) return true
         return this.#scrollToPage(page, 'page', true)
     }
+    #orthogonalPortHasRoom(dir) {
+        if (!this.scrolled || this.#vertical) return false
+        const doc = this.#primaryView?.document
+        if (!doc) return false
+        const frame = doc.defaultView.frameElement.getBoundingClientRect()
+        const viewport = this.#container.getBoundingClientRect()
+        const anchorNode = this.#anchor?.startContainer
+        const activePort = (anchorNode?.nodeType === 3 ? anchorNode.parentElement : anchorNode)?.closest?.('[data-reader-orthogonal-scroll]')
+        if (!activePort) return false
+        for (const port of [activePort]) {
+            const box = port.getBoundingClientRect()
+            if (box.bottom + frame.top <= viewport.top || box.top + frame.top >= viewport.bottom) continue
+            const rtl = doc.defaultView.getComputedStyle(port).writingMode === 'vertical-rl'
+            const offset = rtl ? -port.scrollLeft : port.scrollLeft
+            if (dir > 0 ? port.scrollWidth - port.clientWidth - offset > 1 : offset > 1) return true
+        }
+        return false
+    }
     get atStart() {
         const sorted = this.#sortedViews
         const firstIndex = sorted[0]?.[0] ?? this.#primaryIndex
-        if (this.scrolled) return this.#adjacentIndex(-1, firstIndex) == null && this.#renderedStart <= 0
+        if (this.scrolled) return this.#adjacentIndex(-1, firstIndex) == null && this.#renderedStart <= 0 && !this.#orthogonalPortHasRoom(-1)
         return this.#adjacentIndex(-1, firstIndex) == null && this.#renderedPage <= 0
     }
     get atEnd() {
         const sorted = this.#sortedViews
         const lastIndex = sorted[sorted.length - 1]?.[0] ?? this.#primaryIndex
-        if (this.scrolled) return this.#adjacentIndex(1, lastIndex) == null && this.#renderedViewSize - this.#renderedEnd <= 2
+        if (this.scrolled) return this.#adjacentIndex(1, lastIndex) == null && this.#renderedViewSize - this.#renderedEnd <= 2 && !this.#orthogonalPortHasRoom(1)
         return this.#adjacentIndex(1, lastIndex) == null && this.#renderedPage >= this.#renderedPages - 1
     }
     #adjacentIndex(dir, fromIndex) {
@@ -4017,9 +4233,32 @@ export class Paginator extends HTMLElement {
         for (let index = fromIndex + dir; this.#canGoToIndex(index); index += dir)
             if (this.sections[index]?.linear !== 'no') return index
     }
+    #turnOrthogonalPort(dir) {
+        if (!this.scrolled || this.#vertical) return false
+        const doc = this.#primaryView?.document
+        if (!doc) return false
+        const frame = doc.defaultView.frameElement.getBoundingClientRect()
+        const viewport = this.#container.getBoundingClientRect()
+        const anchorNode = this.#anchor?.startContainer
+        const activePort = (anchorNode?.nodeType === 3 ? anchorNode.parentElement : anchorNode)?.closest?.('[data-reader-orthogonal-scroll]')
+        if (!activePort) return false
+        for (const port of [activePort]) {
+            const box = port.getBoundingClientRect()
+            if (box.bottom + frame.top <= viewport.top || box.top + frame.top >= viewport.bottom || port.scrollWidth <= port.clientWidth + 1) continue
+            const old = port.scrollLeft
+            const rtl = doc.defaultView.getComputedStyle(port).writingMode === 'vertical-rl'
+            port.scrollLeft += dir * (rtl ? -1 : 1) * Math.max(1, port.clientWidth - 20)
+            if (Math.abs(port.scrollLeft - old) > 1) {
+                this.#afterScroll('page')
+                return true
+            }
+        }
+        return false
+    }
     async #turnPage(dir, distance) {
         if (this.#locked) return
         this.#locked = true
+        if (this.#turnOrthogonalPort(dir)) { this.#locked = false; return }
         const prev = dir === -1
         const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
         if (shouldGo) {
@@ -4036,7 +4275,11 @@ export class Paginator extends HTMLElement {
                 anchor: prev ? () => 1 : () => 0,
             })
         }
-        if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+        // Scroll/navigation above already awaits the actual operation. A fixed
+        // 100ms lock imposed that delay on every non-animated page. Retain a real
+        // rendering turn before releasing the lock; animated operations still
+        // await their original animation completion in #scrollTo.
+        if (shouldGo || !this.hasAttribute('animated')) await yieldToFrame()
         this.#locked = false
     }
     async prev(distance) {
@@ -4116,6 +4359,9 @@ export class Paginator extends HTMLElement {
         this.#primaryView?.destroyLoupe()
     }
     destroy() {
+        ++this.#navigationSequence
+        this.#navigationOwner = null
+        this.#navigationObserver = null
         const transition = (this.#vtDrag ?? this.#vtFinishing)?.transition
             ?? this.#vtProgrammatic?.transition
         this.#vtDrag = null

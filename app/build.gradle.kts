@@ -2,15 +2,39 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+val splitKiB = providers.gradleProperty("localValidationSplitKiB").orNull ?: "384"
+require(splitKiB in setOf("256", "384", "512")) { "localValidationSplitKiB must be 256, 384 or 512" }
+require(splitKiB == "384" || providers.gradleProperty("localValidationReleaseSign").orNull == "true") {
+    "Nondefault split budgets are restricted to explicitly signed local validation builds"
+}
 android {
     namespace = "com.localreader.app"
     compileSdk { version = release(37) { minorApiLevel = 0 } }
-    defaultConfig { applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 7; versionName = "0.4.0-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { buildConfigField("int", "EPUB_SPLIT_KIB", splitKiB); applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 7; versionName = "0.4.0-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // This switch is for same-certificate local QA, never an implicit distribution key.
+            if (providers.gradleProperty("localValidationReleaseSign").orNull == "true") signingConfig = signingConfigs.getByName("debug")
+        }
+    }
     buildFeatures { compose = true; buildConfig = true }
+    // Bundled fonts are streamed to WebView; stored uncompressed they need no per-read inflation.
+    androidResources { noCompress.add("ttf") }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
-    lint { warningsAsErrors = true }
+    lint { warningsAsErrors = true; lintConfig = rootProject.file("lint.xml") }
 }
 kotlin { compilerOptions { allWarningsAsErrors.set(true) } }
+val generateUiLicenses = tasks.register<Exec>("generateUiLicenses") {
+    inputs.files(rootProject.file("docs/DEPENDENCIES.md"),rootProject.file("scripts/ui/gen_licenses.py"))
+    inputs.files(fileTree("src/main/assets/fonts") {include("*-OFL.txt")},file("src/main/assets/reader/vendor/foliate/LICENSE"),fileTree("src/main/assets/notices"))
+    outputs.file(file("src/main/assets/licenses.txt"))
+    commandLine("python3",rootProject.file("scripts/ui/gen_licenses.py"))
+}
+tasks.named("preBuild") { dependsOn(generateUiLicenses) }
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("org.jsoup:jsoup:1.23.2")

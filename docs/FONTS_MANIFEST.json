@@ -154,7 +154,7 @@
     "sha256": "e45774f76ef777c6e6ecedd4e9f120e22cfddd2d09b6aee6240192365a06a7be",
     "origin": "Original project declarations; no Readest CSS copied.",
     "font_display": "swap",
-    "webfont_effective_coverage": "Roboto and Bitter normal/italic declarations use exact recorded effective cmap intersect original CSS unicode-range unions; verified against FONT_WEB_COVERAGE.json."
+    "webfont_effective_coverage": "Roboto and Bitter normal/italic declarations use exact recorded effective cmap intersect original CSS unicode-range unions."
   },
   "comparison": [
     {

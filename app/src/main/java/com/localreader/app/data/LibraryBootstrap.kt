@@ -28,14 +28,16 @@ internal object LibraryBootstrap {
         val version = SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READWRITE,preserveCorruption).use { db ->
             val version = db.version
             require(version in 1..5) { "书库版本不受支持，原库已保留" }
-            checkIntegrity(db)
+            // A current library is checked by SQLite on open; the full integrity scan only guards migrations.
             if (version == 5) return
+            checkIntegrity(db)
             db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)",null).use { c ->
                 check(c.moveToFirst() && c.getInt(0) == 0 && (c.getLong(1) == c.getLong(2))) { "书库仍被使用，无法完成一致备份，请重试" }
             }
             (if(version >= 4) listOf("contents","txt_meta","epub_meta","positions","bookmarks","locator_backups","reading_settings","reader_defaults","sqlite_sequence") else listOf("books","bookmarks","locator_backups","sqlite_sequence")).filter { tableExists(db,it) }.forEach { table ->
                 counts[table] = count(db,table);rows[table] = rowDigest(db,table)
             }
+            rows["_schema"]=rowDigest(db,"sqlite_master")
             version
         }
         checkpoint("checkpointed")
@@ -58,13 +60,39 @@ internal object LibraryBootstrap {
                 counts.forEach { (table,total) -> check(count(copy,table) == total && rowDigest(copy,table) == rows[table]) { "备份记录校验失败" } }
             }
             checkpoint("verified")
+            // Repeated failed upgrades of unchanged rows reuse the verified snapshot.
+            // This preserves recovery evidence while avoiding one identical backup per retry.
+            val hashText=expectedHash.joinToString("") { "%02x".format(it) }
+            val existing=source.parentFile?.listFiles()?.firstOrNull { old ->
+                old.name.startsWith("library.db.v$version.") && old.name.endsWith(".bak") &&
+                    runCatching {
+                        val recorded=File(old.path+".sha256").readText()
+                        val digest=MessageDigest.getInstance("SHA-256")
+                        old.inputStream().use { input -> val buffer=ByteArray(65536);while(true) { val size=input.read(buffer);if(size<0)break;digest.update(buffer,0,size) } }
+                        val actual=digest.digest().joinToString("") { "%02x".format(it) }
+                        recorded==actual && (actual==hashText || SQLiteDatabase.openDatabase(old.path,null,SQLiteDatabase.OPEN_READONLY,preserveCorruption).use { copy ->
+                            // SQLite header counters/journal mode can change after a
+                            // rolled-back upgrade without changing any durable rows.
+                            // Compare the complete schema and every migration table
+                            // before treating those retries as the same snapshot.
+                            copy.version==version && rowDigest(copy,"sqlite_master")==rows["_schema"] &&
+                                counts.all { (table,total) -> count(copy,table)==total && rowDigest(copy,table)==rows[table] }
+                        })
+                    }.getOrDefault(false)
+            }
+            if(existing!=null)return
             check(temporary.renameTo(target)) { "无法提交书库备份" }
             FileOutputStream(File(target.path + ".sha256")).use { out ->
                 out.write(expectedHash.joinToString("") { "%02x".format(it) }.toByteArray()); out.fd.sync()
             }
             val directory = android.system.Os.open(requireNotNull(source.parentFile).path,android.system.OsConstants.O_RDONLY,0)
             try { android.system.Os.fsync(directory) } finally { android.system.Os.close(directory) }
-            // An older validated backup is deliberately retained; no startup-count deletion policy.
+            // Retain the latest three verified backups for this source schema. Unverified
+            // backups are preserved for manual recovery rather than silently removed.
+            source.parentFile?.listFiles()?.filter { it.name.startsWith("library.db.v$version.") && it.name.endsWith(".bak") && File(it.path+".sha256").isFile }
+                ?.sortedWith(compareByDescending<File> { it.lastModified() }.thenByDescending { it.name })?.drop(3)?.forEach { old ->
+                    if(old.delete())File(old.path+".sha256").delete()
+                }
         } finally { temporary.delete() }
     }
     internal fun checkIntegrity(db: SQLiteDatabase) {

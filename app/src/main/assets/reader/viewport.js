@@ -1,12 +1,36 @@
 // Original trusted geometry adapter. Text is measured in source DOM code units.
+// Public start is measured from the primary section's first tile, whereas the
+// outer host also includes gutters. Other frames retain their own source origin.
+export function paginationOffset(engine,frame,backwards) {
+    const primary=engine.getContents().find(c=>c.index===engine.primaryIndex)?.doc?.defaultView?.frameElement?.getBoundingClientRect()
+    const start=engine.start
+    if(!primary||!Number.isFinite(start))throw Error('Missing primary pagination origin')
+    return start+(engine.sideProp==='height'?primary.top-frame.top:backwards?frame.right-primary.right:primary.left-frame.left)
+}
+// Clip in iframe-local coordinates. A glyph in a locally scrolled authored
+// block is visible only through every ancestor's actual content scrollport.
+export function sourceClip(node, local) {
+    const clip={...local}
+    for(let el=node?.nodeType===1?node:node?.parentElement;el&&el!==el.ownerDocument.body;el=el.parentElement) {
+        const style=el.ownerDocument.defaultView.getComputedStyle(el),box=el.getBoundingClientRect()
+        if(['auto','scroll','hidden','clip'].includes(style.overflowX)){clip.left=Math.max(clip.left,box.left+el.clientLeft);clip.right=Math.min(clip.right,box.left+el.clientLeft+el.clientWidth)}
+        if(['auto','scroll','hidden','clip'].includes(style.overflowY)){clip.top=Math.max(clip.top,box.top+el.clientTop);clip.bottom=Math.min(clip.bottom,box.top+el.clientTop+el.clientHeight)}
+    }
+    return clip
+}
+export function sourceRectVisible(doc,rect,node,viewport) {
+    const frame=doc.defaultView.frameElement.getBoundingClientRect(),clip=sourceClip(node,{left:Math.max(0,viewport.left-frame.left),right:Math.min(frame.width,viewport.right-frame.left),top:Math.max(0,viewport.top-frame.top),bottom:Math.min(frame.height,viewport.bottom-frame.top)})
+    return rect.width>.1&&rect.height>.1&&rect.right>clip.left&&rect.left<clip.right&&rect.bottom>clip.top&&rect.top<clip.bottom
+}
 export function textIntervals(doc, viewport) {
     const frame=doc.defaultView.frameElement.getBoundingClientRect(),ranges=[]
     if(frame.width<=.1||frame.height<=.1||frame.bottom<=viewport.top||frame.top>=viewport.bottom||frame.right<=viewport.left||frame.left>=viewport.right)return ranges
-    const local={left:viewport.left-frame.left,right:viewport.right-frame.left,top:viewport.top-frame.top,bottom:viewport.bottom-frame.top}
-    const intersects=r=>r.width>.1&&r.height>.1&&r.right>local.left&&r.left<local.right&&r.bottom>local.top&&r.top<local.bottom
+    const viewportLocal={left:Math.max(0,viewport.left-frame.left),right:Math.min(frame.width,viewport.right-frame.left),top:Math.max(0,viewport.top-frame.top),bottom:Math.min(frame.height,viewport.bottom-frame.top)}
     const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT)
     for(let node;(node=walker.nextNode());) {
         if(!node.length)continue
+        const local=sourceClip(node,viewportLocal)
+        const intersects=r=>r.width>.1&&r.height>.1&&r.right>local.left&&r.left<local.right&&r.bottom>local.top&&r.top<local.bottom
         const vertical=/^(vertical|sideways)/.test(getComputedStyle(node.parentElement).writingMode)
         const whole=doc.createRange();whole.selectNodeContents(node)
         // Ruby caret hit-testing can select the base or the second annotation
@@ -95,5 +119,6 @@ export function compactSignature(value) {
 // A real caret can have zero width at an empty paragraph or inclusive EOF.
 export function visibleCaret(doc,range,viewport) {
     const frame=doc.defaultView.frameElement.getBoundingClientRect()
-    return [...range.getClientRects()].some(r=>r.height>.1&&r.left+frame.left>=viewport.left&&r.left+frame.left<viewport.right&&r.bottom+frame.top>viewport.top&&r.top+frame.top<viewport.bottom)
+    const clip=sourceClip(range.startContainer,{left:Math.max(0,viewport.left-frame.left),right:Math.min(frame.width,viewport.right-frame.left),top:Math.max(0,viewport.top-frame.top),bottom:Math.min(frame.height,viewport.bottom-frame.top)})
+    return [...range.getClientRects()].some(r=>r.height>.1&&r.left>=clip.left&&r.left<clip.right&&r.bottom>clip.top&&r.top<clip.bottom)
 }

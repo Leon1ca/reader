@@ -136,9 +136,10 @@ object TxtParser {
         val result = TextIndex(encoding, count, total, if (chapters.size < 2) sections else chapters)
         FileOutputStream(File(directory, "meta.bin")).use { raw ->
             val meta = DataOutputStream(raw)
-            meta.writeInt(2); meta.writeUTF(encoding); meta.writeInt(count); meta.writeLong(total)
+            meta.writeInt(3); meta.writeUTF(encoding); meta.writeInt(count); meta.writeLong(total)
             meta.writeInt(result.chapters.size)
             result.chapters.forEach { meta.writeUTF(it.title); meta.writeInt(it.paragraph); meta.writeLong(it.sourceOffset) }
+            meta.writeLong(File(directory,"text.bin").length());meta.writeLong(File(directory,"index.bin").length())
             meta.flush(); raw.fd.sync()
         }
         return result
@@ -146,24 +147,50 @@ object TxtParser {
 }
 
 class TxtEngine(private val directory: File, override val version: String) : TxtTextSource {
+    override val displayDirectory get()=directory
     private var formatVersion = 1
+    private var expectedTextBytes: Long?=null
+    private var expectedIndexBytes: Long?=null
     override val index: TextIndex = DataInputStream(File(directory, "meta.bin").inputStream().buffered()).use { input ->
         formatVersion = input.readInt()
-        require(formatVersion in 1..2) { "未知 TXT 索引版本" }
+        require(formatVersion in 1..3) { "未知 TXT 索引版本" }
         val encoding = input.readUTF(); val count = input.readInt(); val total = input.readLong()
-        val chapters = List(input.readInt()) { Chapter(input.readUTF(), input.readInt(), input.readLong()) }
+        require(encoding in TxtParser.encodings && count in 1..TxtParser.MAX_PARAGRAPHS && total in 1..TxtParser.MAX_BYTES) { "TXT 索引头损坏" }
+        val chapterCount=input.readInt();require(chapterCount in 0..10000)
+        val chapters = List(chapterCount) { Chapter(input.readUTF(), input.readInt(), input.readLong()) }
+        require(chapters.all { it.paragraph in 0 until count && it.sourceOffset in 0 until total })
+        if(formatVersion>=3) {expectedTextBytes=input.readLong();expectedIndexBytes=input.readLong()}
         TextIndex(encoding, count, total, chapters)
     }
     private val text = RandomAccessFile(File(directory, "text.bin"), "r")
+    private val textBytes=text.length()
     private val records = try { RandomAccessFile(File(directory, "index.bin"), "r") } catch (e: Exception) { text.close(); throw e }
     private val cache = object : LinkedHashMap<Int, TextBlock>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, TextBlock>?) = size > 64
     }
-    private val recordBytes = ByteArray(TxtParser.RECORD_SIZE.toInt())
-    /** One positioned read per record (big-endian, matching DataOutputStream). Callers are @Synchronized. */
+    private val mapped = try {
+        require(records.length()==index.paragraphs*TxtParser.RECORD_SIZE && (expectedIndexBytes==null || expectedIndexBytes==records.length()) &&
+            (expectedTextBytes==null || expectedTextBytes==textBytes)) { "TXT 索引长度不匹配" }
+        records.channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY,0,records.length())
+    } catch(error: Throwable) { records.close();text.close();throw error }
+    /** Fixed-size mapped records avoid seek/read system calls; validate before every use. */
     private fun record(paragraph: Int): java.nio.ByteBuffer {
-        records.seek(paragraph * TxtParser.RECORD_SIZE); records.readFully(recordBytes)
-        return java.nio.ByteBuffer.wrap(recordBytes)
+        require(paragraph in 0 until index.paragraphs)
+        val value=mapped.asReadOnlyBuffer();value.position((paragraph*TxtParser.RECORD_SIZE).toInt())
+        val record=value.slice();record.limit(TxtParser.RECORD_SIZE.toInt())
+        val start=record.getLong(0);val length=record.getInt(8);val offset=record.getLong(12);val consumed=record.getInt(20);val flags=record.getInt(24)
+        require(start>=0 && length in 0..(TxtParser.MAX_BLOCK+1)*4 && start<=textBytes-length && offset in 0 until index.totalCharacters &&
+            consumed in 1..TxtParser.MAX_BLOCK+2 && consumed<=index.totalCharacters-offset && flags in 0..7) { "TXT 索引记录损坏" }
+        if(paragraph==0)require(start==0L && offset==0L) { "TXT 索引首记录损坏" }
+        else {
+            val prior=(paragraph-1)*TxtParser.RECORD_SIZE.toInt()
+            val previousStart=mapped.getLong(prior);val previousLength=mapped.getInt(prior+8)
+            val previousOffset=mapped.getLong(prior+12);val previousConsumed=mapped.getInt(prior+20)
+            require(previousStart>=0 && previousLength in 0..(TxtParser.MAX_BLOCK+1)*4 && previousStart+previousLength==start &&
+                previousOffset>=0 && previousConsumed in 1..TxtParser.MAX_BLOCK+2 && previousOffset+previousConsumed==offset) { "TXT 索引记录顺序损坏" }
+        }
+        if(paragraph==index.paragraphs-1)require(start+length==textBytes && offset+consumed==index.totalCharacters) { "TXT 索引末记录损坏" }
+        return record
     }
     @Synchronized override fun block(paragraph: Int): TextBlock {
         require(paragraph in 0 until index.paragraphs)

@@ -13,10 +13,26 @@ data class EpubPartRecord(val index: Int,val spine: Int,val canonicalStart: Int,
 internal data class EpubPartHtml(val author: String,val custom: String,val text: String,val elements: Map<String,Int>)
 
 /** Original structural splitter. Shared head styles remain resource capabilities, not copied CSS. */
+internal class EpubSplitBudget private constructor(val targetKiB: Int) {
+    val targetBytes=targetKiB*1024
+    val maxBytes=targetBytes*4/3
+    val key="split$targetKiB"
+    companion object {
+        fun ofKiB(value: Int): EpubSplitBudget { require(value in setOf(256,384,512));return EpubSplitBudget(value) }
+        val production get()=ofKiB(com.localreader.app.BuildConfig.EPUB_SPLIT_KIB)
+    }
+}
 internal object EpubParts {
-    const val TARGET_BYTES=384*1024
-    const val MAX_BYTES=512*1024
-    private const val MIN_BYTES=64*1024
+    val budget=EpubSplitBudget.production
+    val TARGET_BYTES=budget.targetBytes
+    val MAX_BYTES=budget.maxBytes
+    fun split(safe: SanitizedSpine,budget: EpubSplitBudget=EpubParts.budget)=EpubPartSplitter(budget).split(safe)
+    fun annotated(safe: SanitizedSpine)=EpubPartSplitter(budget).annotated(safe)
+}
+private class EpubPartSplitter(budget: EpubSplitBudget) {
+    private val TARGET_BYTES=budget.targetBytes
+    private val MAX_BYTES=budget.maxBytes
+    private val MIN_BYTES=64*1024
     private data class Piece(val node: Node,val ordinal: Int?=null)
     private fun bytes(node: Node)=node.outerHtml().toByteArray(Charsets.UTF_8).size
     private fun text(node: Node): String=when(node) {
@@ -78,7 +94,7 @@ internal object EpubParts {
                 }
                 element.attr("style",element.attr("style")+";"+rules).attr("data-reader-part-technical",rules)
             }
-            require(bytes(element)<=MAX_BYTES) { "EPUB 分块标记超过 512 KB，请使用较简单结构" }
+            require(bytes(element)<=MAX_BYTES) { "EPUB 分块标记超过 $MAX_BYTES 字节，请使用较简单结构" }
         }
         return result
     }

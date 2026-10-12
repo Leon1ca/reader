@@ -1,9 +1,11 @@
 # UI 替换 · 执行版 PRD（供 AI 执行）
 
+> **状态（2026-10-07）**：本文已执行完毕，仅作为接口与契约参考。后续开发以 `docs/NEXT_DEVELOPMENT_PRD.md` 为准；两者冲突时以后者为准（其第 2 节汇总了已确认的产品决策，例如 EPUB 作者/自定义样式、应用界面使用系统字体）。
+
 - 文档编号：UI-PRD v1.0
 - 日期：2026-10-04
 - 适用仓库：`/Users/leon1ca/Documents/reader`（Kotlin + Jetpack Compose，minSdk 29，compile/target 35）
-- 上游文档：`docs/KERNEL_EPUB_PRD.md`（**内核改造与 EPUB 闭环，v1.1，本文的前置**）、`docs/CODE_AUDIT_AND_UI_PLAN.md`（审核结论、76 张画板分组、已确认决策）、`docs/ui-design/`（设计稿源文件，见第 2 节）
+- 上游文档：`docs/KERNEL_EPUB_PRD.md`（**内核改造与 EPUB 闭环，v1.1，本文的前置**）、`docs/NEXT_DEVELOPMENT_PRD.md`（审核结论、76 张画板分组、已确认决策）、`docs/ui-design/`（设计稿源文件，见第 2 节）
 - 本文范围：**阶段 3 · UI 替换**——用设计稿替换现有朴素 Material 3 界面，覆盖 A 组 21 张 + B 组 18 张 + EPUB 追加 3 张（脚注气泡、图片查看、读完确认），其余入口保留“开发中”。
 - 本文**不含**内核与 EPUB 能力（已在内核 PRD）。但 UI 需要的少量数据层/控制器补充，集中在第 7 节 **UD 系列任务**里，由本文负责。
 
@@ -11,7 +13,7 @@
 
 ## 0. 给执行者（AI）的工作约定
 
-1. **先读后改**。开工前通读：`README.md`、`docs/CODE_AUDIT_AND_UI_PLAN.md`、`docs/KERNEL_EPUB_PRD.md`（尤其第 3、5 节）、本文，以及设计稿的 `UiSpec.dc.html` 与你正在实现的那张画板源文件。
+1. **先读后改**。开工前通读：`README.md`、`docs/NEXT_DEVELOPMENT_PRD.md`、`docs/KERNEL_EPUB_PRD.md`（尤其第 3、5 节）、本文，以及设计稿的 `UiSpec.dc.html` 与你正在实现的那张画板源文件。
 2. **一个任务一个提交**，提交信息以任务编号开头，如 `U3-1: shelf screen (compact)`。严格按第 9 节依赖顺序。
 3. **每个任务完成后**运行 `./scripts/build.sh`（= `assembleDebug testDebugUnitTest lintDebug`）并保证通过；涉及界面的任务还须在设备/模拟器上运行相应的 Compose 仪器测试。**不得以“环境限制”为由跳过而宣称通过**：无法运行的验证项，在提交说明和第 11 节交接清单里单列为“未验证”。
 4. **不得削弱安全不变量**（内核 PRD 第 3 节 INV-01…INV-09 与本文第 3 节 UI-01…UI-10）。冲突时停止并向人类提问。
@@ -502,7 +504,7 @@ interface TxtControls {
 
 **U7-2 性能与稳定性**（依赖 U3、U4）
 - 做：书架 1000 本书冷启动到首屏、滚动帧时间；阅读页打开到首个内容帧；面板开合不触发渲染视图重排（用内核 `diagnostics()` 或布局计数断言）；封面缓存内存上限；配置变更与进程被杀恢复。
-- 验收：数据写入 `docs/UI_FINDINGS.md`：书架首屏 ≤1.0 s（1000 本，中端机）、滚动无连续 >32 ms 帧（Perfetto/`dumpsys gfxinfo`，记录设备型号）；面板开合不改变渲染视图尺寸；不达标项列原因与建议，**不得**为达标削弱 UI-01…UI-10。
+- 验收：数据写入 `docs/UI_FINDINGS.md`：书架首屏 ≤1.0 s（1000 本，现有测试手机）、滚动无连续 >32 ms 帧（Perfetto/`dumpsys gfxinfo`，记录设备型号）；面板开合不改变渲染视图尺寸；不达标项列原因与建议，**不得**为达标削弱 UI-01…UI-10。
 
 **U7-3 逐屏走查与文档**（依赖全部）
 - 做：对照 `BOARD_MAP.json` 逐屏走查，输出 `docs/UI_WALKTHROUGH.md`：每张画板一行（`通过 / 偏差(DV-xx) / 开发中 / 未验证`）及设备截图文件名（截图放 `build/ui-walkthrough/`，**不提交**）；更新 `README.md`（界面、构建与测试）、`docs/CORE_ARCHITECTURE.md`（UI 层依赖关系）、`docs/DEPENDENCIES.md`；重写 `docs/CODE_REVIEW.md` 的 UI 部分。
@@ -543,7 +545,7 @@ U3,U4,U5 → U7-1,U7-2 → U7-3
 | D-U3 | 图片加载 | 自研 `CoverCache`，不引入 Coil |
 | D-U4 | 图标 | 自绘 `ImageVector`，不引入 material-icons-extended |
 | D-U5 | 夜间模式 | 仅阅读器；`UiPrefs.nightMode=SYSTEM` 默认；用 `setThemeOverride` 实现，不改写用户选的阅读背景 |
-| D-U6 | 阅读设置作用域 | 背景/翻页/亮度/夜间＝全局；字号/字体/行距/边距＝单本（设置页“图书默认版式”写全局） |
+| D-U6 | 阅读设置作用域 | **2026-10-11 修订**：背景/翻页/亮度/夜间/字号/字体/行距/边距均为全局，阅读面板与设置页“阅读排版”写同一份；仅固定版式缩放与展开按书保存。原“字号等单本、恢复单本默认”取消 |
 | D-U7 | 继续阅读 | 规则见 6.1.1，最多 20 本 |
 | D-U8 | 界面字体的汉字回退 | 文楷；观感不佳时可退系统 CJK 无衬线并记录 |
 | D-U9 | 毛玻璃 | API ≥31 用 `blur`，否则不透明卡片色底 |

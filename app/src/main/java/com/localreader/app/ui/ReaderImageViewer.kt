@@ -1,5 +1,8 @@
 package com.localreader.app.ui
 
+import com.localreader.app.R
+import com.localreader.app.ui.UiStrings.text as uiText
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -28,16 +31,16 @@ import kotlinx.coroutines.withContext
 /** The original image stays untouched; only this disposable viewer bitmap is sampled. */
 internal object ReaderImageDecoder {
     fun decode(source: ImageSource,checkpoint: ()->Unit): Bitmap {
-        require(source.bytes in 1..32L*1024*1024 && source.mime!="image/svg+xml") { "无法显示这张图片" }
+        require(source.bytes in 1..32L*1024*1024 && source.mime!="image/svg+xml") { uiText(R.string.image_unavailable) }
         checkpoint()
         val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
         source.open().use { BitmapFactory.decodeStream(it,null,bounds) }
-        require(bounds.outWidth>0 && bounds.outHeight>0 && bounds.outWidth.toLong()*bounds.outHeight<=25_000_000) { "图片尺寸超过显示预算" }
+        require(bounds.outWidth>0 && bounds.outHeight>0 && bounds.outWidth.toLong()*bounds.outHeight<=25_000_000) { uiText(R.string.image_dimensions_budget) }
         var sample=1
-        while(((bounds.outWidth+sample-1)/sample).toLong()*((bounds.outHeight+sample-1)/sample)>1_048_576)sample*=2
+        while(((bounds.outWidth.toLong()+sample-1)/sample)*((bounds.outHeight.toLong()+sample-1)/sample)>1_048_576 || (maxOf(bounds.outWidth,bounds.outHeight).toLong()+sample-1)/sample>2048)sample*=2
         checkpoint()
-        val bitmap=source.open().use { BitmapFactory.decodeStream(it,null,BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 }) } ?: error("无法显示这张图片")
-        try { checkpoint();require(bitmap.allocationByteCount<=4*1024*1024) { "图片解码超过 4 MiB 预算" };return bitmap }
+        val bitmap=source.open().use { BitmapFactory.decodeStream(it,null,BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 }) } ?: error(uiText(R.string.image_unavailable))
+        try { checkpoint();require(bitmap.allocationByteCount<=4*1024*1024) { uiText(R.string.image_memory_budget) };return bitmap }
         catch(error: Throwable) { bitmap.recycle();throw error }
     }
 }
@@ -52,21 +55,26 @@ internal object ReaderImageDecoder {
             decoded=withContext(Dispatchers.IO) { ReaderImageDecoder.decode(source) { coroutine.ensureActive() }.also { decoded=it } }
             bitmap=decoded;decoded=null
         } catch(cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-        catch(failure: Exception) { error=failure.message ?: "无法显示这张图片" }
+        catch(failure: Exception) { error=failure.message ?: uiText(R.string.image_unavailable) }
         finally { decoded?.recycle() }
     }
     DisposableEffect(source) { onDispose { bitmap?.recycle();bitmap=null } }
-    Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false)) {
+    Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
+        val native=androidx.compose.ui.platform.LocalView.current
+        SideEffect {(native.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let {window ->
+            androidx.core.view.WindowCompat.getInsetsController(window,native).apply {isAppearanceLightStatusBars=false;isAppearanceLightNavigationBars=false}
+        }}
         BackHandler(onBack=onClose)
-        Surface(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        Surface(Modifier.fillMaxSize(),color=androidx.compose.ui.graphics.Color.Black,contentColor=androidx.compose.ui.graphics.Color.White) { Column(Modifier.fillMaxSize().systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(8.dp),horizontalArrangement=Arrangement.SpaceBetween) {
-                Text(source.index?.let { "当前文档图片 $it / ${source.count ?: "未知"}" } ?: "图片")
-                TextButton(onClick=onClose) { Text("关闭图片") }
+                Text(source.index?.let { uiText(R.string.local_image_index,it,source.count ?: uiText(R.string.unknown)) } ?: uiText(R.string.local_image))
+                TextButton(onClick=onClose) { Text(uiText(R.string.close_image),color=androidx.compose.ui.graphics.Color.White) }
             }
             if(error!=null)Text(requireNotNull(error),Modifier.padding(24.dp))
-            else if(bitmap==null)CircularProgressIndicator(Modifier.padding(24.dp))
+            else if(bitmap==null)CircularProgressIndicator(Modifier.padding(24.dp),color=androidx.compose.ui.graphics.Color.White)
             else AndroidView(factory={ ImagePanView(it).apply { closeAction=onClose } },update={ it.image=bitmap;it.closeAction=onClose },modifier=Modifier.weight(1f).fillMaxWidth())
-            Text(source.alt.ifBlank { "双指缩放，拖动平移；双击切换整图与 2×，整图状态下滑关闭。" },Modifier.padding(16.dp))
+            if(source.alt.isNotBlank())Text(source.alt,Modifier.padding(horizontal=16.dp))
+            Text(uiText(R.string.image_gestures),Modifier.padding(16.dp))
         } }
     }
 }
@@ -94,7 +102,7 @@ internal class ImagePanView @JvmOverloads constructor(context: Context,attrs: At
             return true
         }
     })
-    init { isClickable=true;contentDescription="图片，双指缩放，双击切换整图与两倍" }
+    init { isClickable=true;contentDescription=uiText(R.string.image_accessibility) }
     private fun fit(): Float { val value=image ?: return 1f;return minOf(width.toFloat()/value.width,height.toFloat()/value.height) }
     private fun clamp() { val value=image ?: return;val fit=fit();val maxX=maxOf(0f,(value.width*fit*scale-width)/2);val maxY=maxOf(0f,(value.height*fit*scale-height)/2);panX=panX.coerceIn(-maxX,maxX);panY=panY.coerceIn(-maxY,maxY) }
     override fun onSizeChanged(width: Int,height: Int,oldWidth: Int,oldHeight: Int) { super.onSizeChanged(width,height,oldWidth,oldHeight);clamp() }

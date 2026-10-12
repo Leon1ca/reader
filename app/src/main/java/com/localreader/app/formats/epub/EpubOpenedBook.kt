@@ -17,7 +17,8 @@ object EpubCoordinates {
 }
 
 /** Owns bounded caches and every reading stream. Revoking the backend precedes close(). */
-class EpubSource(val directory: File,val record: EpubCacheRecord): java.io.Closeable {
+class EpubSource @JvmOverloads constructor(val directory: File,val record: EpubCacheRecord,val cacheRoot: File=directory): java.io.Closeable {
+    init { val root=cacheRoot.canonicalFile;val location=directory.canonicalFile;require(location==root || location.toPath().startsWith(root.toPath())) { "EPUB 缓存不属于逻辑书籍根目录" } }
     private val closed=AtomicBoolean(false)
     private val streams=java.util.concurrent.ConcurrentHashMap.newKeySet<InputStream>()
     private val textCache=object: LinkedHashMap<Int,String>(3,0.75f,true) { override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int,String>)=size>2 }

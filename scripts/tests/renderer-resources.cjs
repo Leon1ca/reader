@@ -10,7 +10,7 @@ const server=http.createServer((req,res)=>{
   if(!req.url.startsWith(base)){res.writeHead(403);res.end();return}
   const name=req.url.slice(base.length)
   const send=(mime,file,delay=0)=>setTimeout(()=>{if(!res.destroyed){res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});res.end(fs.readFileSync(file))}},delay)
-  if(['host.html','host.js','viewport.js','vendor/foliate/paginator.js'].includes(name))return send(name.endsWith('.js')?'text/javascript':'text/html',path.join(assets,'reader',name))
+  if(['host.html','host.js','viewport.js','input.js','vendor/foliate/paginator.js'].includes(name))return send(name.endsWith('.js')?'text/javascript':'text/html',path.join(assets,'reader',name))
   if(name==='fonts/Roboto-Regular-VF.ttf'){fontRequests++;return send('font/ttf',path.join(assets,name),700)}
   if(name==='images/landscape.svg'){
     imageRequests++

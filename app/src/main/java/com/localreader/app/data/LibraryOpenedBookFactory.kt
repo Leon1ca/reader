@@ -19,8 +19,9 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
         if(book.format==ContentFormat.EPUB) {
             val coroutine=currentCoroutineContext()
             val (directory,cache)=repository.currentEpubCache(book) { coroutine.ensureActive() }
-            val source=EpubSource(directory,cache)
-            try { return@create if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) }
+            android.util.Log.i("ReaderCache","requestedSplitKiB=${com.localreader.app.BuildConfig.EPUB_SPLIT_KIB} actualTargetBytes=${cache.splitTargetBytes} actualMaxBytes=${cache.splitMaxBytes} parts=${cache.parts.size} schema=${cache.cacheSchema} configurationMatched=${EpubCache.compatibleSplit(cache)} fixed=${cache.layout=="pre-paginated"}")
+            val source=EpubSource(directory,cache,repository.directory(book))
+            try { return@create if(cache.mixed)MixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) else if(cache.layout=="pre-paginated")FixedOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) else EpubOpenedBook(contentId,ContentMetadata(book.title,book.author),source,repository.original(book),repository.searchRoot,book.hash) }
             catch(error: Throwable) { source.close();throw error }
         }
         val source = repository.engine(requireNotNull(repository.db.txt(book.id)))

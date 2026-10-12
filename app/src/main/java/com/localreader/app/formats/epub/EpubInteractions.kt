@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Format policy stays outside the host bridge. Every identity is checked against safe package HTML. */
 class EpubInteractions(private val main: EpubSource,private val original: File,private val hash: String,
     private val mainPublication: ReaderPublication,private val allowNotesImages: Boolean=true): BookInteractions {
+    private val hiddenRanges=object: LinkedHashMap<Int,List<Pair<Int,Int>>>(8,0.75f,true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int,List<Pair<Int,Int>>>?)=size>8
+    }
     private val closed=AtomicBoolean(false)
     private val sources=LinkedHashMap<String,EpubSource>(8,0.75f,true)
     private val publications=LinkedHashMap<Pair<String,Locator>,EpubResourcePublication>(32,0.75f,true)
@@ -20,8 +23,8 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
     private fun checkOpen()=check(!closed.get()) { "书籍交互资源已关闭" }
     private fun mainOrigin(locator: Locator)=if(locator is Locator.EpubResource)locator.returnTo else locator
     private fun validMain(locator: Locator): Boolean = when(locator) {
-        is Locator.Epub -> locator.version==main.record.revision && main.record.layout!="pre-paginated" && main.record.sections.getOrNull(locator.spine)?.let { locator.offset in 0..it.characters && (locator.elementId==null || it.elements[locator.elementId]==locator.offset) }==true
-        is Locator.Page -> locator.version==main.record.revision && main.record.layout=="pre-paginated" && locator.page in main.record.fixedPages.indices && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
+        is Locator.Epub -> locator.version==main.record.revision && (main.record.layout!="pre-paginated" || main.record.mixed) && main.record.sections.getOrNull(locator.spine)?.let { locator.offset in 0..it.characters && (locator.elementId==null || it.elements[locator.elementId]==locator.offset) }==true
+        is Locator.Page -> locator.version==main.record.revision && (main.record.layout=="pre-paginated" || main.record.mixed) && main.record.fixedPages.any { main.record.parts.getOrNull(it.index)?.spine==locator.page } && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
         else -> false
     }
     @Synchronized private fun auxiliary(key: String,returnTo: Locator,checkpoint: ()->Unit): EpubResourcePublication {
@@ -32,13 +35,13 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
             val victim=publications.entries.firstOrNull { it.value!==activePublication } ?: error("附属导航仍被占用")
             publications.remove(victim.key)
         }
-        val source=sources[key] ?: EpubAuxiliary.read(main.directory,main.record.revision,key).let { (directory,record) ->
+        val source=sources[key] ?: EpubAuxiliary.read(main.cacheRoot,main.record.revision,key).let { (directory,record) ->
             require(record.sections.single().characters<=8*1024*1024) { "附属正文超过资源预算" }
             while(sources.size>=8 || sources.values.sumOf { it.record.sections.single().characters.toLong() }+record.sections.single().characters>8L*1024*1024) {
                 val victim=sources.entries.firstOrNull { it.key!=activePublication?.docKey && images.none { image -> image is OwnedImage && image.protects(it.value) } } ?: error("附属正文资源仍被占用，请先关闭图片")
                 sources.remove(victim.key);publications.entries.removeAll { it.key.first==victim.key };victim.value.close()
             }
-            EpubSource(directory,record).also { sources[key]=it }
+            EpubSource(directory,record,main.cacheRoot).also { sources[key]=it }
         }
         return EpubResourcePublication(EpubPublication(source),source,key,returnTo).also { publications[pair]=it }
     }
@@ -46,19 +49,14 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
         checkOpen()
         if(locator is Locator.Epub && validMain(locator)) {
             val target=mainPublication.target(locator)
-            val doc=Jsoup.parse(mainPublication.section(target.section).html)
-            var position=0;var hidden: org.jsoup.nodes.Element?=null
-            fun visit(node: org.jsoup.nodes.Node) {
-                if(node is TextNode) {
-                    if(locator.offset>=position && locator.offset<position+node.wholeText.length)hidden=node.parent()?.let { parent -> (listOf(parent)+parent.parents()).firstOrNull { it.hasAttr("hidden") || it.attr("data-epub-type").split(Regex("\\s+")).any { kind -> kind in setOf("footnote","endnote") } || it.attr("role") in setOf("doc-footnote","doc-endnote") } }
-                    position+=node.wholeText.length
-                } else node.childNodes().forEach(::visit)
+            val section=main.record.sections[locator.spine]
+            val ranges=section.hiddenRanges ?: hiddenRanges.getOrPut(target.section) {
+                val start=main.record.parts[target.section].canonicalStart
+                EpubCache.hiddenTextRanges(Jsoup.parse(mainPublication.section(target.section).html)).map { (a,b) -> (start+a) to (start+b) }
             }
-            // Canonical offsets in split documents include their logical start.
-            position=main.record.parts[target.section].canonicalStart;visit(doc.body())
-            if(hidden!=null) {
+            if(ranges.any { locator.offset>=it.first && locator.offset<it.second }) {
                 val path=main.record.sections[locator.spine].path
-                EpubAuxiliary.prepare(original,main.directory,hash,main.record.revision,path,checkpoint)
+                EpubAuxiliary.prepare(original,main.cacheRoot,hash,main.record.revision,path,checkpoint)
                 val returned=origin?.let(::mainOrigin)?.takeIf { validMain(it) && it!=locator } ?: mainPublication.locator(RendererAnchor.Text(0,0)) ?: error("缺少有效主文返回位置")
                 val aux=auxiliary(EpubAuxiliary.key(path),returned,checkpoint);aux.reveal(locator.offset)
                 return Locator.EpubResource(locator.version,aux.docKey,locator.offset,returned,locator.quote,locator.elementId)
@@ -70,11 +68,11 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
             ?: mainPublication.locator(mainPublication.target(Locator.Epub(main.record.revision,0,0)).anchor) ?: error("无法恢复主文")
         if(locator.version!=main.record.revision)return returned
         return try {
-            if(!EpubAuxiliary.directory(main.directory,locator.docKey).isDirectory) {
+            if(!EpubAuxiliary.directory(main.cacheRoot,locator.docKey).isDirectory) {
                 EpubZip(original,checkpoint).use { zip ->
                     val book=EpubPackages.parse(zip)
                     val item=book.resources.values.firstOrNull { EpubAuxiliary.key(it.path)==locator.docKey && it.mime in setOf("application/xhtml+xml","text/html") } ?: error("附属文档已不存在")
-                    EpubAuxiliary.prepare(original,main.directory,hash,main.record.revision,item.path,checkpoint)
+                    EpubAuxiliary.prepare(original,main.cacheRoot,hash,main.record.revision,item.path,checkpoint)
                 }
             }
             val pub=auxiliary(locator.docKey,returned,checkpoint)
@@ -155,7 +153,7 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
             EpubZip(original,checkpoint).use { zip ->
                 val book=EpubPackages.parse(zip);val item=requireNotNull(book.resources[href.path]) { "链接目标不在清单中" }
                 require(item.mime in setOf("application/xhtml+xml","text/html"))
-                val result=EpubAuxiliary.prepare(original,main.directory,hash,main.record.revision,href.path,checkpoint)
+                val result=EpubAuxiliary.prepare(original,main.cacheRoot,hash,main.record.revision,href.path,checkpoint)
                 require(result.second.sections.single().path==href.path)
             }
             val key=EpubAuxiliary.key(href.path)
@@ -174,7 +172,7 @@ class EpubInteractions(private val main: EpubSource,private val original: File,p
         if(!isNote)return InteractionResult.Navigate(exact)
         var jump=exact
         if(publication !is EpubResourcePublication) {
-            EpubAuxiliary.prepare(original,main.directory,hash,main.record.revision,href.path,checkpoint)
+            EpubAuxiliary.prepare(original,main.cacheRoot,hash,main.record.revision,href.path,checkpoint)
             val key=EpubAuxiliary.key(href.path);val aux=auxiliary(key,returned,checkpoint)
             val coordinate=EpubPublication(requireNotNull(sources[key])).coordinate(href) ?: error("注释目标不存在")
             jump=aux.external(EpubPublication(requireNotNull(sources[key])).position(0,coordinate.offset,coordinate.elementId));aux.reveal(coordinate.offset)

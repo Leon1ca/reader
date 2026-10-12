@@ -8,7 +8,7 @@ data class PaginationSample(val section: Int,val page: Int,val pages: Int,val es
 data class PaginationBoundary(val section: Int,val fraction: Double,val approximate: Boolean=false)
 data class PageEstimate(val page: Int,val estimated: Boolean)
 data class ReadingViewport(val sourceRevision: String,val currentSection: Int,val layoutSig: String,val samples: List<PaginationSample>,val visibleRanges: List<VisibleSourceRange>,
-    val visibleElements: List<Locator>,val visiblePages: List<Int>,val atEnd: Boolean,val visiblePoints: List<Locator> = emptyList())
+    val visibleElements: List<Locator>,val visiblePages: List<Int>,val atEnd: Boolean,val visiblePoints: List<Locator> = emptyList(),val fixedState: FxlViewState?=null)
 data class ReadingProgress(val page: Int,val pages: Int,val pageEstimated: Boolean,val pagesEstimated: Boolean,
     val chapterPagesLeft: Int?,val chapterEstimated: Boolean) {
     val estimated get()=pageEstimated || pagesEstimated || chapterEstimated

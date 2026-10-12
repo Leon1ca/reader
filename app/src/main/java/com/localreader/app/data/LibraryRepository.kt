@@ -16,9 +16,11 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
+class MissingBookFilesException : IllegalStateException("图书的应用内副本或索引缺失，请重新导入；阅读记录已保留")
+
 class ImportCancelled : Exception("导入已取消")
 
-class LibraryRepository(private val context: Context) : ContentRepository {
+class LibraryRepository(private val context: Context,private val deletionCheckpoint: (String)->Unit={}) : ContentRepository {
     val db = LibraryDb(context)
     private val library = File(context.filesDir, "library").apply { mkdirs() }
     private val staging = File(context.filesDir, "import-staging").apply { mkdirs() }
@@ -32,20 +34,35 @@ class LibraryRepository(private val context: Context) : ContentRepository {
     fun recover() = mutate { recoverLocked() }
     private fun recoverLocked() {
         if (recovered) return // every ViewModel/Activity instance shares one repository; run once per process
-        val books = db.contents() // bootstrap/upgrade must succeed before any recovery cleanup
+        val versions = db.recoveryVersions() // bootstrap/upgrade must succeed before any recovery cleanup
         staging.listFiles()?.forEach { it.deleteRecursively() }
+        File(context.cacheDir,"reader-search").listFiles()?.forEach { it.deleteRecursively() }
         // Directories the database does not know are moved to trash, never deleted outright: a rebuilt (empty)
         // database must not erase the user's books. Trash entries are named "<millis>-<id>" and purged after 7 days.
         val now = System.currentTimeMillis()
-        trash.listFiles()?.filter { (it.name.substringBefore('-').toLongOrNull() ?: 0L) < now - TRASH_RETENTION_MS }?.forEach { it.deleteRecursively() }
-        val ids = books.map { it.id }.toSet()
-        library.listFiles()?.filter { it.name !in ids }?.forEach { it.renameTo(File(trash, "$now-${it.name}")) }
-        books.forEach { book ->
-            val keep = db.retainedVersions(book.id) + requireNotNull(db.content(book.id)).revision
-            File(File(library, book.id), "versions").listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
+        val ids = versions.keys
+        // A crash between filesystem retirement and DB deletion leaves a live row.
+        // Restore it before retention cleanup; a committed deletion has no live ID.
+        trash.listFiles()?.forEach { retired ->
+            val id=retired.name.substringAfter('-',"")
+            if(id in ids) {
+                val installed=File(library,id)
+                check(!installed.exists()) { "未提交的删除副本与现有目录冲突，两个副本均保留" }
+                check(retired.renameTo(installed)) { "无法恢复尚未提交的删除，原件保留在回收目录" }
+                syncDirectory(library);syncDirectory(trash)
+            }
         }
+        trash.listFiles()?.filter { (it.name.substringBefore('-').toLongOrNull() ?: 0L) < now - TRASH_RETENTION_MS }?.forEach { it.deleteRecursively() }
+        library.listFiles()?.filter { it.name !in ids }?.forEach { it.renameTo(File(trash, "$now-${it.name}")) }
+
         // Old index versions are retained as locator backups; active books are never auto-deleted.
         recovered = true
+    }
+    /** Rebuildable historical indexes are cleaned after the shelf becomes interactive. */
+    fun cleanupRetiredVersions() = mutate {
+        db.recoveryVersions().forEach { (id,keep) ->
+            File(File(library,id),"versions").listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
+        }
     }
     override fun observeAll() = db.contentsRevision.map { summaries() }.distinctUntilChanged().flowOn(Dispatchers.IO)
     override fun summaries() = db.contents()
@@ -68,14 +85,17 @@ class LibraryRepository(private val context: Context) : ContentRepository {
         },"id=?",arrayOf(id))==1) { "书籍不存在" } };db.notifyContentsChanged()
     }
     override fun detail(id: String) = db.contentsRevision.map {
-        db.transaction { database -> db.content(id)?.let { content ->
-            val summary=db.contents().single { it.id==id }
+        db.read { database -> db.content(id)?.let { content ->
+            val summary=requireNotNull(db.summary(id))
             val chars=if(content.format==ContentFormat.TXT)db.txtMetadata(id)?.characters else database.rawQuery("SELECT canonical_characters FROM epub_meta WHERE content_id=?",arrayOf(id)).use { c -> if(c.moveToFirst() && !c.isNull(0))c.getLong(0) else null }
-            val settings=database.rawQuery("SELECT * FROM reading_settings WHERE content_id=?",arrayOf(id)).use { c -> c.moveToFirst() && (1 until c.columnCount).any { !c.isNull(it) } }
-            BookDetail(content,summary,chars,db.bookmarks(id).size,settings)
+            // Only fixed-layout zoom/spread are stored per book; typography is app-wide.
+            val settings=database.rawQuery("SELECT fxl_zoom,spread_pref FROM reading_settings WHERE content_id=?",arrayOf(id)).use { c -> c.moveToFirst() && (!c.isNull(0) || !c.isNull(1)) }
+            BookDetail(content,summary,chars,database.rawQuery("SELECT COUNT(*) FROM bookmarks WHERE content_id=?",arrayOf(id)).use { it.moveToFirst();it.getInt(0) },settings)
         } }
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
-    fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}")
+    fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}").also {
+        if(!original(book).isFile || !it.isDirectory)throw MissingBookFilesException()
+    }
     fun directory(book: TxtRecord) = File(File(library, book.id), "versions/${book.version}")
     internal fun currentEpubCache(book: ContentRecord,checkpoint: () -> Unit): Pair<File,EpubCacheRecord> = mutate {
         val directory=directory(book)
@@ -83,23 +103,35 @@ class LibraryRepository(private val context: Context) : ContentRepository {
         db.replaceEpubCache(book.id,refreshed.second)
         refreshed
     }
-    fun engine(book: TxtRecord) = TxtEngine(directory(book), book.version)
+    fun engine(book: TxtRecord): TxtEngine {
+        val directory=directory(book)
+        if(!File(File(library,book.id),"original.txt").isFile || !directory.isDirectory)throw MissingBookFilesException()
+        return TxtEngine(directory,book.version)
+    }
 
     /** The Android facade never retains permission or mutates the provider's original file. */
-    fun import(uri: Uri,cancelled: () -> Boolean = { false }): ImportResult {
+    fun importSource(uri: Uri,cancellation: ImportCancellation?=null): ImportSource {
         var name="所选文件";var size: Long?=null
+        val signal=android.os.CancellationSignal()
+        val release=cancellation?.register { signal.cancel() }
         return try {
-            context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE),null,null,null)?.use { c ->
+            cancellation?.check()
+            context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE),null,null,null,signal)?.use { c ->
                 if(c.moveToFirst()) {
                     val n=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(n>=0)name=c.getString(n) ?: name
                     val z=c.getColumnIndex(OpenableColumns.SIZE);if(z>=0 && !c.isNull(z))size=c.getLong(z)
                 }
             }
-            import(ImportSource(name,context.contentResolver.getType(uri).orEmpty(),size) {
+            val mime=context.contentResolver.getType(uri).orEmpty();cancellation?.check()
+            ImportSource(name,mime,size) {
                 context.contentResolver.openInputStream(uri) ?: error("文件不可读取，请通过系统文件选择器重新选择")
-            },cancelled)
-        } catch(e: Exception) { ImportResult(name,e.message?.take(180) ?: "文件不可读取") }
+            }
+        } finally { release?.invoke() }
     }
+    fun import(uri: Uri,cancelled: ()->Boolean={false}): ImportResult = try { import(importSource(uri),cancelled) }
+        catch(error: Exception) { ImportResult("所选文件",error.message ?: "文件不可读取") }
+    fun availableBytes()=StatFs(context.filesDir.absolutePath).availableBytes
+    fun storageStats(checkpoint: ()->Unit={}): StorageStats=scanStorage(listOf(context.filesDir,context.cacheDir,context.getDatabasePath("library.db").parentFile!!),availableBytes(),{ mutationRevision.get()+2L*db.storageWriteRevision() },checkpoint,{ mutationRevision.get()%2L==0L && db.storageWritesIdle() })
     override fun import(source: ImportSource,cancelled: () -> Boolean): ImportResult = mutate { importLocked(source,cancelled) }
     private fun importLocked(source: ImportSource,cancelled: () -> Boolean): ImportResult {
         val name=source.name
@@ -129,7 +161,7 @@ class LibraryRepository(private val context: Context) : ContentRepository {
             } }
             require(copied>0) { "文件为空" }
             val hash=digest.digest().joinToString("") { "%02x".format(it) }
-            db.byHash(hash)?.let { return ImportResult(name,"重复内容，已保留原进度与书签",it.id) }
+            db.byHash(hash)?.let { return ImportResult(name,"重复内容，已保留原进度与书签",it.id,ImportOutcome.DUPLICATE) }
             val guard: () -> Unit={
                 if(cancelled())throw ImportCancelled()
                 require(StatFs(staging.absolutePath).availableBytes>8*1024*1024) { "空间不足，导入已停止" }
@@ -145,13 +177,14 @@ class LibraryRepository(private val context: Context) : ContentRepository {
             val renamed=File(task,if(importer is EpubImporter)"original.epub" else "original.txt")
             check(original.renameTo(renamed));original=renamed
             val prepared=importer.prepare(ImportTask(original,File(task,"versions"),hash,guard))
+            syncTreeDirectories(task)
             val id=UUID.randomUUID().toString()
             val destination=File(library,id)
             val result: String
             when(prepared) {
                 is PreparedContent.Epub -> {
                     val cache=prepared.cache
-                    guard();check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination
+                    guard();check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination;syncDirectory(library);syncDirectory(staging)
                     val record=ContentRecord(id,ContentFormat.EPUB,cache.revision,cache.title,cache.author,hash,copied,System.currentTimeMillis(),0,cache.language,name)
                     db.insertEpub(record,cache)
                     result=if(cache.warnings.isEmpty())"导入成功 · EPUB" else "导入成功 · EPUB，${cache.warnings.size} 项资源已安全降级"
@@ -161,31 +194,46 @@ class LibraryRepository(private val context: Context) : ContentRepository {
                     guard()
                     val book=TxtRecord(id,name.substringBeforeLast('.',name),"作者未知",hash,copied,System.currentTimeMillis(),0,
                         parsed.encoding,version,parsed.paragraphs,parsed.totalCharacters,Locator.Text(version,0,0),0,16f,"white")
-                    check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination
+                    check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" };committed=destination;syncDirectory(library);syncDirectory(staging)
                     db.insert(book,originalName=name)
                     result="导入成功 · ${parsed.encoding}"
                 }
             }
             committed=null;db.notifyContentsChanged()
-            return ImportResult(name,result,id)
+            return ImportResult(name,result,id,ImportOutcome.OK)
         } catch(e: Exception) {
             val reason=when(e) {
                 is ImportCancelled -> "已取消"
                 is java.nio.charset.CharacterCodingException -> "文本编码无法识别；请先用文本编辑器另存为 UTF-8 后重试"
                 else -> e.message?.take(180) ?: "导入失败，请重新选择文件"
             }
-            return ImportResult(name,reason)
+            return ImportResult(name,reason,outcome=if(cancelled() || e is ImportCancelled)ImportOutcome.CANCELED else ImportOutcome.FAILED)
         } finally { task.deleteRecursively();committed?.deleteRecursively() }
     }
 
     fun delete(book: ContentSummary) { delete(requireNotNull(db.content(book.id))) }
     fun delete(book: TxtRecord) { delete(requireNotNull(db.content(book.id))) }
-    override fun delete(book: ContentRecord) = mutate { deleteLocked(book) }
-    private fun deleteLocked(book: ContentRecord) {
-        // Delete metadata first: a failed file removal is an orphan cleaned on next startup, never a ghost book.
-        db.delete(book.id)
-        File(library, book.id).deleteRecursively()
+    override fun delete(book: ContentRecord) { deleteDetailed(book) }
+    override fun deleteDetailed(book: ContentRecord): ContentDeletion = mutate {
+        val source=File(library,book.id)
+        val retired=File(trash,"${System.currentTimeMillis()}-${book.id}")
+        // Move to a recoverable private trash capability before removing metadata.
+        var moved=false
+        try {
+            if(source.exists()) {
+                check(source.renameTo(retired)) { "无法移除应用内副本，图书仍保留" };moved=true
+                deletionCheckpoint("retired")
+                syncDirectory(library);syncDirectory(trash)
+            }
+            db.delete(book.id)
+        } catch(error: Throwable) {
+            if(moved && retired.exists())try { check(retired.renameTo(source)) { "删除失败，副本保留在回收目录" };syncDirectory(library);syncDirectory(trash) }
+                catch(rollback: Throwable) { error.addSuppressed(rollback) }
+            throw error
+        }
+        val removed=runCatching { deletionCheckpoint("committed");!retired.exists() || retired.deleteRecursively() }.getOrDefault(false)
         db.notifyContentsChanged()
+        ContentDeletion(book.id,true,!removed,if(removed)null else "图书已删除，文件保留在回收目录等待清理")
     }
     fun reencode(book: TxtRecord, encoding: String) { reencodePrepared(book, encoding) { Unit } }
     /** Validate/open the new source before the database switches; failure keeps the previous version active. */
@@ -199,8 +247,10 @@ class LibraryRepository(private val context: Context) : ContentRepository {
                 checkpoint()
                 require(StatFs(staging.absolutePath).availableBytes > 8 * 1024 * 1024) { "空间不足，旧索引已保留" }
             }
+            syncTreeDirectories(task)
             val target = File(File(library, book.id), "versions/$version")
             check(task.renameTo(target)) { "无法提交新索引" }; destination = target
+            syncDirectory(requireNotNull(target.parentFile));syncDirectory(staging)
             val fresh = requireNotNull(db.txt(book.id))
             check(fresh.version == book.version) { "书籍版本已改变；保留当前索引" }
             val last = (parsed.totalCharacters - 1).coerceAtLeast(0)
@@ -215,7 +265,16 @@ class LibraryRepository(private val context: Context) : ContentRepository {
             return prepared
         } finally { task.deleteRecursively(); destination?.deleteRecursively() }
     }
-    private fun <T> mutate(work: () -> T): T = synchronized(lock) { work() }
+    private fun syncTreeDirectories(directory: File) {
+        directory.listFiles()?.filter { it.isDirectory }?.forEach(::syncTreeDirectories)
+        syncDirectory(directory)
+    }
+    private fun syncDirectory(directory: File) {
+        val descriptor=android.system.Os.open(directory.path,android.system.OsConstants.O_RDONLY,0)
+        try { android.system.Os.fsync(descriptor) } finally { android.system.Os.close(descriptor) }
+    }
+    private val mutationRevision=java.util.concurrent.atomic.AtomicLong()
+    private fun <T> mutate(work: () -> T): T = synchronized(lock) { mutationRevision.incrementAndGet();try { work() } finally { mutationRevision.incrementAndGet() } }
     private val lock = synchronized(locks) { locks.getOrPut(context.getDatabasePath("library.db").absolutePath) { Any() } }
     private companion object {
         const val TRASH_RETENTION_MS = 7L * 24 * 60 * 60 * 1000

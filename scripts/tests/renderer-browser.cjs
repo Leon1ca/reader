@@ -15,7 +15,7 @@ const server = http.createServer((req,res) => {
     res.end(`<html><head><meta charset="utf-8"></head><body>${Array.from({length:8},(_,i)=>`<p><span data-block="${index*8+i}" data-length="80">${('中文 English 123 '+ index + ':'+i+' ').padEnd(80,'字')}</span></p>`).join('')}<script>window.attacked=true;parent.ReaderEvents.postMessage('attacked')</script><script src="../host.js"></script><svg onload="parent.attacked=true"></svg><a href="javascript:parent.attacked=true" onclick="parent.attacked=true">evil</a></body></html>`)
     return
   }
-  if (!['host.html','host.js','viewport.js','vendor/foliate/paginator.js'].includes(resource)) {res.writeHead(403);res.end();return}
+  if (!['host.html','host.js','viewport.js','input.js','vendor/foliate/paginator.js'].includes(resource)) {res.writeHead(403);res.end();return}
   res.writeHead(200, {'Content-Type':resource.endsWith('.js')?'text/javascript':'text/html','Cache-Control':'no-store'})
   res.end(fs.readFileSync(path.join(root,resource)))
 })
@@ -102,6 +102,20 @@ const server = http.createServer((req,res) => {
     assert((await page.evaluate(()=>readerHost.diagnostics())).anchorGeometry.visible,'late fill after scrolled→paginated must retain the source glyph')
     assert.deepEqual((await page.evaluate(()=>readerHost.diagnostics())).target,flowAnchor,'flow reflow must not persist a different page-start source')
     assert.equal(await page.evaluate(()=>releasedRenders[0].renders),0,'replaced paginator must disconnect its container observer')
+    // New default permits two columns on a wide viewport. Narrow phones remain
+    // one column, and both topology changes retain the exact source glyph.
+    const autoRules={...rules,geometry:{...rules.geometry,'max-column-count':2},beforeAuthor:rules.beforeAuthor.replace('line-height:1.6;margin:1em 0','line-height:1.4;margin:0.6em 0;text-align:left;text-indent:0')}
+    await page.setViewportSize({width:900,height:720})
+    await command('setRules',{...autoRules,target:flowAnchor})
+    const columns=()=>page.evaluate(()=>Number(document.getElementById('renderer').shadowRoot.getElementById('top').style.getPropertyValue('--_column-count')))
+    assert.equal(await columns(),2,'wide TXT default must display two columns')
+    assert.deepEqual((await page.evaluate(()=>readerHost.diagnostics())).target,flowAnchor)
+    assert((await page.evaluate(()=>readerHost.diagnostics())).anchorGeometry.visible)
+    await page.setViewportSize({width:393,height:829})
+    await command('setRules',{...autoRules,target:flowAnchor})
+    assert.equal(await columns(),1,'a narrow phone must remain one column')
+    assert.deepEqual((await page.evaluate(()=>readerHost.diagnostics())).target,flowAnchor)
+    assert((await page.evaluate(()=>readerHost.diagnostics())).anchorGeometry.visible)
     await page.evaluate(()=>{watchReaderRelease();readerHost.close()})
     const count=messages.length
     await page.setViewportSize({width:412,height:720});await page.waitForTimeout(300)
