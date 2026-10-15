@@ -47,5 +47,7 @@ interface ReadingStore {
     fun bookmarks(contentId: String): List<ReaderBookmark>
     fun addBookmark(contentId: String, revision: String, locator: Locator, excerpt: String): Boolean
     fun deleteBookmark(contentId: String, id: Long)
+    /** Undo of a deletion: the same bookmark, same identity, back in place. False if it could not be put back. */
+    fun restoreBookmark(bookmark: ReaderBookmark): Boolean = false
     fun patchRules(contentId: String, revision: String, patch: RulesPatch): ReaderRules
 }

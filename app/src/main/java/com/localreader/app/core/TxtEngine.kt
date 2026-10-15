@@ -30,7 +30,7 @@ object TxtParser {
         reader(file, encoding).use { input -> val buffer = CharArray(8192); while (input.read(buffer) >= 0) checkpoint() }; true
     } catch (_: java.nio.charset.CharacterCodingException) { false }
 
-    private fun reader(file: File, encoding: String): Reader {
+    internal fun reader(file: File, encoding: String): Reader {
         require(encoding in encodings) { "不支持的编码" }
         val input = BufferedInputStream(file.inputStream())
         input.mark(3)
@@ -52,7 +52,35 @@ object TxtParser {
         return bytes.copyOf(count)
     }
 
-    fun build(source: File, directory: File, encoding: String = detect(source), checkpoint: () -> Unit = {}): TextIndex {
+    /**
+     * Applies [rule] to the physical lines of the original, without building anything. A line is considered as the
+     * build would: at most [ChapterRules.MAX_LINE] characters and not ending a sentence. Used for the preview hit count.
+     */
+    fun scanChapters(source: File, encoding: String, rule: ChapterRule, checkpoint: () -> Unit = {}): ChapterScan {
+        ChapterRules.validate(rule)
+        val titles = mutableListOf<String>();var hits = 0;var characters = 0L
+        if (rule is ChapterRule.EveryChars) {
+            reader(source, encoding).use { input -> val buffer = CharArray(8192);while (true) { val n = input.read(buffer);if (n < 0) break;characters += n;checkpoint() } }
+            hits = ((characters + rule.chars - 1) / rule.chars).toInt()
+            return ChapterScan(hits,(1..minOf(hits,8)).map { "分段 $it" },hits > 8)
+        }
+        val matches: (String) -> Boolean = if (rule is ChapterRule.Pattern) ChapterRules.matcher(rule) else { line -> heading.matches(line) }
+        reader(source, encoding).buffered().use { input ->
+            var lines = 0
+            while (true) {
+                val line = input.readLine() ?: break
+                if (++lines % 512 == 0) checkpoint()
+                val trimmed = line.trim()
+                if (trimmed.length in 1..80 && trimmed.last() !in SENTENCE_END && matches(trimmed)) { hits++;if (titles.size < 8) titles += trimmed }
+            }
+        }
+        return ChapterScan(hits,titles,hits > titles.size)
+    }
+
+    fun build(source: File, directory: File, encoding: String = detect(source), checkpoint: () -> Unit = {}, rule: ChapterRule = ChapterRule.Auto): TextIndex {
+        ChapterRules.validate(rule)
+        val matches: ((String) -> Boolean)? = (rule as? ChapterRule.Pattern)?.let(ChapterRules::matcher)
+        val sectionStep = (rule as? ChapterRule.EveryChars)?.chars?.toLong() ?: 40000L
         require(source.length() in 1..MAX_BYTES) { "TXT 为空或超过 128 MB 限制" }
         val signature = source.inputStream().use { input -> ByteArray(80).let { bytes ->
             var count = 0
@@ -85,11 +113,11 @@ object TxtParser {
                 fun flush(text: String, consumed: Int, continues: Boolean = false) {
                     require(count < MAX_PARAGRAPHS) { "段落数超过 400 万，文件不像正常文本" }
                     val cleaned = text.removeSuffix("\r")
-                    val isHeading = !continued && !continues && cleaned.length in 1..80 && heading.matches(cleaned.trim()) &&
-                        cleaned.trim().last() !in SENTENCE_END
+                    val isHeading = rule !is ChapterRule.EveryChars && !continued && !continues && cleaned.length in 1..80 &&
+                        (matches?.invoke(cleaned.trim()) ?: heading.matches(cleaned.trim())) && cleaned.trim().last() !in SENTENCE_END
                     if (isHeading && chapters.size < 10000) chapters += Chapter(cleaned.trim(), count, offset)
                     if (offset >= nextSection && sections.size < 10000) {
-                        sections += Chapter("分段 ${sections.size + 1}", count, offset); nextSection = offset + 40000
+                        sections += Chapter("分段 ${sections.size + 1}", count, offset); nextSection = offset + sectionStep
                     }
                     val bytes = cleaned.toByteArray(Charsets.UTF_8)
                     records.writeLong(byteOffset); records.writeInt(bytes.size); records.writeLong(offset)
@@ -133,7 +161,7 @@ object TxtParser {
                 records.flush(); indexRaw.fd.sync(); out.flush(); raw.fd.sync()
             }
         }
-        val result = TextIndex(encoding, count, total, if (chapters.size < 2) sections else chapters)
+        val result = TextIndex(encoding, count, total, if (rule is ChapterRule.EveryChars || chapters.size < 2) sections else chapters)
         FileOutputStream(File(directory, "meta.bin")).use { raw ->
             val meta = DataOutputStream(raw)
             meta.writeInt(3); meta.writeUTF(encoding); meta.writeInt(count); meta.writeLong(total)

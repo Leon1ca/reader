@@ -7,7 +7,11 @@ import java.nio.charset.CodingErrorAction
 
 val previewEncodings=listOf("UTF-8","UTF-16LE","UTF-16BE","GB18030","Big5","Shift_JIS","ISO-8859-1")
 data class TextPreview(val encoding: String,val detectedEncoding: String?,val chapterCount: Int,val lines: List<String>,val truncated: Boolean)
-fun interface TextPreviewSource { fun preview(encoding: String,lines: Int,checkpoint: ()->Unit): TextPreview }
+fun interface TextPreviewSource {
+    fun preview(encoding: String,lines: Int,checkpoint: ()->Unit): TextPreview
+    /** What [rule] would find in the original under [encoding]; sources that cannot scan say so. */
+    fun scanChapters(encoding: String,rule: ChapterRule,checkpoint: ()->Unit): ChapterScan = throw UnsupportedOperationException()
+}
 /** Reads original bytes only. The bounded buffer ends on a decoder boundary, never half a character. */
 fun readTextPreview(open: ()->InputStream,encoding: String,lineLimit: Int=6,detectedEncoding: String?=null,chapterCount: Int=0,checkpoint: ()->Unit={}): TextPreview {
     require(encoding in previewEncodings && lineLimit in 1..20)

@@ -19,6 +19,8 @@ interface ReaderPublication {
     val sectionOffset: Int get() = 0
     val finalRenderingGroup: Boolean get() = true
     val compatibilityNotices: List<String> get() = emptyList()
+    /** BCP 47 language of the content when the source declares one (used for script-specific typography defaults). */
+    val language: String? get() = null
     fun linkTarget(identity: String): Locator? = null
     fun configure(rules: ReaderRules) { }
     val resourceManifest: Map<String,PackagedContentResource> get() = emptyMap()

@@ -1,51 +1,60 @@
 # AI 协作 · 当前状态与交接
 
-共同规则见 [AGENTS.md](../AGENTS.md)，Claude UI 补充见 [CLAUDE.md](../CLAUDE.md)。本文件只保留当前状态、可复用交接格式、最近审核及下一任务；需求和架构继续在原文档维护。
+共同规则见[AGENTS](../AGENTS.md)，Claude另读[CLAUDE](../CLAUDE.md)。当前范围、候选与验收资料保留在本文件及[Sol接手报告](V0_6_SOL_TAKEOVER_20261014.md)。已结束轮次的交接/报告/产物已按用户2026-10-14授权清理；不声称已删的未提交资料在Git历史中，也不自动恢复它们。
 
-## 当前状态 · 2026-10-12（Asia/Shanghai）
+## 当前状态 · 2026-10-15 · 输入法胶囊修复与GitHub首次推送
 
-- 本轮目标：将多模型协作流程接入现有阅读工程；不修改业务代码、不自动提交/推送/发布。
-- 已核对目录与 Git 根目录均为 `/Users/leon1ca/Documents/reader`，分支 `main`，HEAD `2918c1e58c645aa97d9d6aae2bebab194314477c`（Add EPUB document interactions and bounded auxiliary reading）。父级、根目录及现有子目录未发现其他 AGENTS.md / CLAUDE.md；原有有效约定分布在 README 与 PRD 中，已通过共同入口引用。
-- **HEAD 不是完整候选**：接入前 84 个已跟踪修改、53 个已跟踪删除、81 个未跟踪文件（展开目录后），无暂存改动。范围含 Kotlin/JS 内核、Compose UI、资源、构建配置、测试、设计及文档；删除中包括旧阶段报告和 samples。全部保留，不恢复旧文件，不把这些成果归为本轮实现。
-- 本轮仅新增 `AGENTS.md`、`CLAUDE.md`、`docs/ai-handoff.md`。规则引用原资料，未重写产品/架构文档；未安装模型路由器，未实际调用 Claude/Astra/Opus 或声称他们已审核。
-- 接入前快照包含 362 个路径（含删除项），SHA-256：`85aef58817c287f20395281516b1913c2ff0108460b7c984caf5bde34ee5f68b`。快照排除本轮三个协作文档，覆盖其余全部 Git 已跟踪及未忽略的未跟踪文件和 index。日志/差异/清单保存在本机 `work/ai-handoff/20261012-baseline/`，该目录被 Git 忽略；跨机器交接需另行携带，不能假定存在。
+用户新增授权：修复“悬浮胶囊遮住输入法”，确认应用名为“阅读”、包名保持`com.localreader.app`、版本`0.6.0`/versionCode8；新建私有GitHub仓库`Leon1ca/reader`，提交并推送已完成0.6.0和本次修复。此明确授权覆盖此前本轮“不commit/push”的默认约定；不包含正式发行签名或创建GitHub Release。
 
-### 代码中存在（已核对入口，不等于完整验收）
+有限契约：输入键盘显示时隐藏书架导航及选择操作胶囊，键盘收起后恢复，搜索文字、选择状态和当前页保持；正常无键盘的导航/选择操作不变。实际耦合为LibraryRoot的胶囊呈现条件、FloatingTabBar/SelectionActionBar独立Popup、输入法insets及搜索/选择状态；API29实测adjustNothing下IME inset与visibleFrame均不反映键盘，因此仅该API的LibraryRoot生命周期临时启用adjustResize、离开后恢复完整原softInputMode，补同Activity进入正文/返回书架的必要回归；不改渲染器、数据库、备份、正文或恢复故障链。原问题采用真实键盘显示/收起、连续输入与两种胶囊的可见性/状态检查；默认构建/JVM/lint、正式测试包、Release/R8/lintRelease及API29有限UI回归，设备可用则补小米原入口截图。无设备的真机项明确列未验，不能沿用旧真机证据冒称本修复通过。
 
-| 模块 | 实际入口与职责 |
-| --- | --- |
-| Android 应用 | `app/src/main/java/com/localreader/app/MainActivity.kt`、`ReaderApplication.kt`；单模块 `:app`，applicationId `com.localreader.app`，versionName `0.4.0-core` |
-| UI 与集成 | 同包 `ui/ReaderApp.kt`、`ReaderViewModel.kt`，`ui/app/` 导航与页面，`ui/shelf/` 书架，`ui/design/` 设计系统；`ReaderOverlay.kt`、`ReaderSettingsPanels.kt`、`PageTurnOverlay.kt` 阅读交互 |
-| 会话与业务接口 | 同包 `core/ReaderController.kt`、`ShelfController.kt`、`ReadingPreferences.kt`、`ReaderRules.kt`、`Locator.kt`、`SessionResources.kt`；进度、排版、会话及资源边界 |
-| 数据与格式 | 同包 `data/LibraryDb.kt`（SQLite v5）、`LibraryRepository.kt`、`SqliteReadingStore.kt`、`data/importer/`；`formats/txt/`、`formats/epub/`（含固定/混排） |
-| WebView 与 JS | 同包 `ui/WebReaderAdapter.kt`、`ReaderSurface.kt`；`app/src/main/assets/reader/host*.js`、`input.js`、`viewport.js` 与固定 foliate vendor |
-| 验证 | `app/src/test/` JVM、`app/src/androidTest/` 设备、`scripts/tests/renderer-*.cjs` 浏览器、`verify-vendor.py` 补丁重放 |
+开始完整状态见`work/v060-ime-github-20261015/before/`（HEAD、index、工作区、未跟踪文件），保留全部既存0.6改动。独立GPT-6.1 Sol负责最小修复和必要测试，主会话核差异与结果、名称/包/版本及提交推送。结束条件是原遮挡关闭、查询/选择/导航必要关联通过、身份配置实包一致并验证GitHub分支实际提交一致；原0.6既定验收保持其原对象，不重开全项目或性能故障矩阵。测试数据和工具只留ignored目录，真实书库/备份不上传。
 
-技术栈/构建命令见 AGENTS；启动路径为构建 Debug APK 后按 [README](../README.md) 安装，再执行 `adb shell am start -W -n com.localreader.app/.MainActivity`（多设备须选序列号）。本轮未安装或启动应用。
+本次最小修复及有限代码审核、小米真实键盘验收均已通过。冻结候选SHA `74464a152d3f59e3681d621013e3784eb4f6ed81458a71fecd454e6a8b6d4f2e`；259新鲜JVM、Debug/正式test、Release/R8/双lint、API29三个相关用例及小米真实IME单项通过，生产代码冻结后无漂移。手机保留Debug `e2d469f…`、test `835aed4…`；43本原件/书签/设置完整，用户确认《美国反对美国》48%→2%是本人操作，最新位置保留；系统99/手动0/timeout60000/stay15已归还。完整证据与产物见[输入法修复与GitHub交付](V0_6_IME_FIX_GITHUB_20261015.md)。私有仓库已创建，下一步执行授权提交推送并核远端；用户可继续使用手机。
 
-### 本轮已经运行验证
+以下为本次新增问题前的已完成结版记录，历史“不commit/push”不覆盖上面的最新明确授权。
 
-所有结果对应上述工作区快照，不只对应 HEAD。证据目录为 `work/ai-handoff/20261012-baseline/`。
+历史资料清理：用户明确授权删除已完成交接、已关闭单子及历史版本遗留，当前工作与真实依赖保留。本清理会话Codex只处理历史资料与文档引用，不操作设备；本轮释放6.87GiB，占用由28.16GiB降至21.29GiB；清单及核验见 `work/maintenance-cleanup-20261014/`，不改变下述0.6.0业务任务。
 
-| 检查 | 实际结果 | 证据 / 边界 |
-| --- | --- | --- |
-| `./scripts/build.sh assembleDebug testDebugUnitTest lintDebug --console=plain --warning-mode all` | 通过，退出 0，49 秒；55 个任务，9 执行、46 up-to-date | `build.log`；Debug 构建/lint 已执行，首轮 JVM 命中缓存 |
-| `./scripts/build.sh testDebugUnitTest --rerun --console=plain --warning-mode all` | 通过，退出 0，142 测试 / 32 suites，0 失败、0 错误、0 跳过 | `unit-rerun.log`，JUnit XML 位于 `app/build/test-results/testDebugUnitTest/`；测试任务实际重跑，依赖任务可缓存 |
-| `python3 scripts/tests/verify-vendor.py` | 首次退出 1：下载模块时 SSL EOF | `vendor.log`；属于上游下载连接阻塞，不能记作补丁失败或通过 |
-| `python3 scripts/tests/verify-vendor.py --upstream-dir work/ai-handoff/20261012-baseline/upstream` | 通过，退出 0，两个模块哈希和补丁重放一致 | `vendor-offline.log`；用 curl 保持 TLS 校验下载 manifest 指定固定来源，先核 upstreamSha256，再走原有脚本离线入口 |
-| `node scripts/tests/renderer-input.cjs`（设置现有 Playwright 的 NODE_PATH） | 启动失败，退出 1，尚未执行浏览器断言 | `renderer-input.log`；缺少 Chromium headless shell，不视为业务回归失败；未继续运行全套 |
-| `adb devices -l` | 列表为空 | 无连接设备/模拟器，未运行 connectedDebugAndroidTest、UI 截图、手势/体验验收 |
-| `git diff --check` | 既有失败，退出 2：12 处 trailing whitespace | `diff-check.log`；均在 `app/src/main/assets/reader/vendor/foliate/paginator.patch`。补丁上下文空行可能触发此检查；本轮不改动，重放已另验 |
+用户授权Claude无额度后Codex接手，独立GPT-6.1 Sol完成剩余收口，主会话独立复审与小米。本轮有限契约与实施证据由Sol接手报告及当前目录承接；旧接手前会话日志已按用户授权删除。
 
-环境：项目内 Temurin JDK 17.0.20.1 可用，SDK `android-37.0` 和 Build Tools `36.0.0` 存在；Node v24.21.0、Python 3.9.6。系统默认 Java 不可用，但项目脚本回退 JDK 有效，未阻塞构建。Playwright 1.62.1 位于 `/Users/leon1ca/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules`；其默认 `chromium_headless_shell-1234` 可执行文件不存在。后续提供匹配 Chromium 或设置有效 `READER_CHROMIUM` 后，执行共同规则中的全套浏览器命令。
+清理前冻结候选main/HEAD `c3d1dbf1f14d8a91beb1bcda01bebe10a0f18ac3`、index空、业务改动与未跟踪源码保留；原完整SHA `919efe7dba8944612dd451e106eabba95fac82606a33f8fe6f296ac4755e666c`，405文件，`work/v060-gpt-takeover-20261014/after/`及`after-source/`。Sol已停止编辑。本主会话独立核实际差异与必要调用方、原问题证据、JVM XML/实际APK哈希及最终截图；review-before/review-after完整快照一致。**限定代码复审通过，进入小米验收**，该句是设备阶段开始时的代码结论；现真机有限验收也已通过，完整结果见[结版验收](V0_6_CLOSEOUT_ACCEPTANCE_20261014.md)。本轮删除旧文档并更新入口后，当前文档树与原完整快照不同；业务源码/安装包未改，不冒称当前全树仍等于旧快照。
 
-### 文档中的计划 / 待确认
+用户2026-10-15恢复后，独立GPT-6.1 Sol完成FG01/02/03小米，主会话完成FG04 API29宽屏大字号并独立核原始记录、复算P95、读取前后归档及SQLite。**四项必补及归还检查全部通过，0.6.0当前工程/限定验收阶段结束**，见[最终补验结果](V0_6_FINAL_VALIDATION_20261015.md)及[有限合同](V0_6_FINAL_GATES_20261014.md)。Release完整R8/resource shrink、nondebuggable，SHA `99ece0372c94111d4059cc89f0ae347216fdb5289604aaa66ace3b1c8a2ba41d`，仅本地测试证书；TXT/EPUB冷OPEN P95338.082/377.679ms、热OPEN209.968/240.034ms、PAGE75.994/105.588ms，fixed PAGE202.417ms，各30有效样本，端点是接受目标位置而非GPU首帧。隔离千本实际repo/projection7组各30均正确且P95≤6.504ms；宽屏2160×1600/density320/font1.3的3项formal＋1面板probe通过，原断言保留。
 
-- [NEXT_DEVELOPMENT_PRD](NEXT_DEVELOPMENT_PRD.md) 是后续执行入口；2026-10-11 的 F-1…F-12 记录为“已改代码，待验证”。本轮补充当前工作区的 Debug/JVM/lint 证据，**未补齐这些交互的真机验收**。2026-10-09 的设备/截图/性能数据仍是历史范围。
-- 稍后阅读、RSS、备份恢复、分类、PDF/漫画等仍按原 PRD 作为后续里程碑，不能因有画板或入口而算已实现。
-- [PERFORMANCE](PERFORMANCE.md) 中真机 Release OPEN/PAGE 有效样本不足、[UI_WALKTHROUGH](UI_WALKTHROUGH.md) 中 TalkBack/部分正文浮层截图等开放项保持待验。本轮未运行 Release 构建、Release lint 或性能验收。
-- 资料有时间差：旧 UI PRD 写 compile/target 35，实际 Gradle 为 37；README 及 NEXT 第 2 节字体描述未完全体现 NEXT 最新 F-10 系统中文回退；较早“单本覆盖”描述已被 F-11 全局排版决策更新。恢复时读最新记录并核源码，勿按旧段落回退实现。本轮不扩展为原文档全面整理。
-- 下一项 Claude UI 需求：**待指定**。未确认的产品取舍由用户决定，既有决策不重复询问。
+手机归还Debug a66…/正式test ea1…；3自建样书与QA输入工具清理，43书/位置/原件完整，原件逐份哈希及坐标/进度/全局与每书设置保持。前后备份SHA94f13…/137396…独立复核，brightness16/自动1/timeout60000/stay15已归还，保留用户已授予WRITE_SETTINGS。驱动曾误开《碧血剑》《这游戏也太真实了》，只更新两本最近阅读/保存时间戳，可能影响最近排序；没有翻页或回滚真实进度，不能说全部数据未变。5554系统/尺寸/字体归还，5556未动；执行者已停止设备操作。
+
+267个app/scripts相对原919…业务候选无漂移，HEAD/index不变；本轮开始全状态`work/v060-final-gates-20261015/review-before/` SHA `c50383fd3b3ae3057dcd4c453fdd44680ae8f8cce0e841fb21566df233e9d009`，结束文档另快照`final-state/`，SHA `69af53d7c7dcd9053f02bd5da76a48e7a9ca65534cc30c373e3eb1a5ec819f21`（本交接/AGENTS/CLAUDE按共同方法排除、单独审阅）；`final-independent-state.json`确认只有6份快照内文档变化，267业务/脚本一致。本轮只更新结版资料与入口，完整树变化不得冒称业务变化或旧全树SHA仍有效。已登记8项和本轮必补无待解决项；硬件掉电/真实云弱网/物理平板/完整TalkBack/全V-3依合同保留专项，未冒称通过。r5保持停用，不commit/push/发布、不自动开启0.7，下一步用户体验与发行决定。
+
+## 最近审核与关闭记录
+
+2026-10-15输入法胶囊：独立Sol实现和自测、主会话限定审核及小米验收通过，原问题关闭。最小关联为LibraryRoot生命周期/IME呈现与搜索选择状态，259JVM、双lint和Release/R8通过，原件/最新用户进度及系统归还已核。详见[本次报告](V0_6_IME_FIX_GITHUB_20261015.md)。
+
+2026-10-15最终补验：FG01～04及数据/构建/系统归还全部通过；主会话独立核验见`work/v060-final-gates-20261015/metrics-independent-check.json`、`projection-independent-check.json`、`data-independent-check.json`。原驱动输入/外部重复启动/浮层界面树失配的失败保留，修的是ignored驱动同步与定位，未改业务或降低断言；误开两本时间戳明确记录。完整结果与结束条件见[最终补验](V0_6_FINAL_VALIDATION_20261015.md)。以下为此前已关闭工程与Debug阶段，不能替代本次Release证据。
+
+清理专项：按用户授权删除旧候选工程、旧手机备份/安装包、已关闭报告和会话历史；保留当前 `work/v060-gpt-takeover-20261014/` 全部内容、Sol报告、根工程产物、SDK/JDK及两个仍需复用的API29模拟器。现进行中的验收实际读取旧font-home/ui-v2探针和对照日志、旧final辅助源码/样书，相关依赖保持原路径，正在运行的模拟器写入旧P2目录的vm-reboot.log也原位保留，其余历史资料删除。26份旧交接/报告删除，长期决定与未完成需求保留在NEXT/架构/产品文档；NEXT去掉已失效的多轮状态日志，README/FONTS引用改为当前入口，AGENTS明确用户授权清理的例外。Git HEAD/index未改，业务源码无差异，1786份当前探针/冻结源码按哈希一致，现存Markdown链接与本次文档空白检查通过；本项不是业务复审，不重跑构建或设备测试，无commit/push/发布。实际删除清单、保留边界、差异核验及空间统计在 `work/maintenance-cleanup-20261014/result.json`。
+
+完整实施/自测/首次失败与更正见[Sol交付](V0_6_SOL_TAKEOVER_20261014.md)。259新鲜JVM、Debug/正式test/Release/R8/双lint，API29正式必要14项通过；4个直接浏览器项通过，未改vendor/旧恢复链不重开全矩阵。未削弱断言，无commit/push/发布。
+
+CLOSE01旧固定seed 551248 Unicode对照差异0及NEL真实preview/scan/build/reopen/书签通过；CLOSE02 shortEOF3/原取消及导入ENOSPC/3点SIGKILL保护通过；CLOSE03修正确测试同步，ADB五轮query/EditableText/空结果都有断言；CLOSE04按用户确认采用渲染层滚动上下空间+渐隐带，首行与真正整书末行marker/日夜/位置/中心tap通过；CLOSE05模拟平板卡片仅20dp底空、手机inset保持；CLOSE06真正滑杆1–5与3→5逐级保存重开通过；CLOSE07三无用常量删除且无引用；CLOSE08 README/FONTS/NEXT按实现校正，最终设备状态已补齐，8项全部关闭。
+
+UIF01/02保持关闭；UIF03字面style正文真实WebView及canonical通过。用户确认碧血剑原入口为从封面向后：AUTHOR/CUSTOM封面→标题页→下一页、书签/重开实际像素通过；四样书真正第一章P的所选字体、缩进/居中已核。白页单帧误判已更正：旧/试验代码同有界绘制等待均正常，临时native/software/gpu/opacity修复全部撤销，adapter与接手字节相同；不带入无证据防御。
+
+5554 ENOSPC注入曾因挂载前置失败误填自身/data，导致并行样书失败；原失败/失误保留，filler/挂载/SELinux已归还，受影响原项已串行复验。不得写为隔离tmpfs成功。5554设置/尺寸/权限归还，已释放；5556未动。
+
+## 小米Debug有限验收 · 2026-10-14已通过
+
+手机e3e3ff70/Xiaomi24129PN74C已重新连接。安装前当时完整私有备份`phone/before-install-connected/data.tar.gz`，640484404字节，SHA `aa87e1297b50cbeca8d380d812873c80400a0f8971ea6a1d44ff53bae326108a`，SQLite完整性ok，43书/43位置/43原件；不是用旧43本覆盖新库，已重新实际备份。安装前APK也保存。系统原值见该目录settings.json，安装前WRITE_SETTINGS未授予；本轮用户已手动开启并验证系统实际调节，保留该用户选择。
+
+安装审核生产APK SHA `a66f9050f1cc8a3f83e44f3f8d23ca495a4144491a5b072e2258ade17f0c8d54`。仅本轮首页/搜索选择/分类读完删除确认、样书字体/布局/缓存重开与封面原路径、日夜滚动/缩放/亮度。样书EOCD加UUID避免命中真实书目，清理只删自己创建项；真实原件只读，不恢复用户positions、不还原整库。结束核原件/真实数据与系统亮度/模式/亮屏归还；锁屏/授权只请求一次所需操作。
+
+真机实际15个不同正式测试原项＋7个独立探针项通过：首页搜索/选择/读完/删除确认/系统选择器、ReadingUi六项、字面style两项、short三项和平台Unicode；原生搜索五轮、四样书、日夜真正EOF、逐级缩放、手机面板及亮度拒绝/允许两分支。MIUI整类后台启动卡住的原日志保留，后续受控单项启动通过；小写ADB被中文IME转换的驱动失败保留，以不触发转换的大写ASCII补原生五轮，query/EditableText/空结果断言全保持。业务源码未改，真机阶段267个app/scripts文件与919…快照哈希一致。
+
+结束重新完整备份`phone/after-acceptance/data.tar.gz`，SHA `8b86e8537bcf16927b20de318b4f4435b3376b712f98b0ccdcfab5030c6442fc`；SQLite ok、43书/位置，43原件哈希全相同，书签/分类/每书设置保持，无测试书目或原件遗留。18:07–18:11三本真实书进度和行距/边距/段间距变化由用户确认本人操作，保留最新值，不恢复旧positions/整库。原系统亮度50/模式1自动、timeout60000、充电保持15已恢复；用户主动授予的WRITE_SETTINGS保留。正式测试APK已恢复、主包0.6.0/versionCode8正常冷启动至书架。
+
+**本轮限定代码审核通过，小米有限真机验收通过；CLOSE01～08、UIF03与本轮明确追加需求已关闭，约定工程阶段结束。** 证据、失败更正、完整源码/APK状态和数据核对见[结版验收](V0_6_CLOSEOUT_ACCEPTANCE_20261014.md)。最终文档树完整快照SHA `76472c633c44731c0611ea372d501e73106ee09ca56373fa1e74b0ed3e8950e1`，380文件，另存`work/v060-gpt-takeover-20261014/final-state/`；不将清理及结版文档变化冒称旧全树SHA未变。
+
+2026-10-14阶段已知8项无待解决遗留；其后的Release必补已于2026-10-15完成，见本文当前状态。用户最终体验/发布确认另列；真实物理断电/真实云无线弱网/物理平板/TalkBack/Release整库性能未验保留为环境或后续专项，不虚称已过、不递归新增版本门槛。r5跟进保持停用，未commit/push/发布。下一步由用户体验当前已安装的0.6.0；新需求另定有限合同，本轮不自动开始0.7。
 
 ## 交接格式（每次替换当前任务内容）
 
@@ -53,12 +62,16 @@
 任务编号 / 目标 / 当前状态：
 实际执行者 / 接收者 / 审核者（未执行写待定）：
 范围与非目标；产品取舍及已确认来源：
+功能边界（支持的输入/操作与限制；成功、取消、失败状态；设计假设）：
+系统耦合范围（依赖/调用方/共享状态/不变量；影响机制和必要关联回归）：
 相关文件和接口（当前签名、数据来源、调用方、目标画板）：
-验收条件（可观察行为、边界、设备/尺寸/字号）：
+有限验收清单（触发条件、预期结果、验证方式、环境；必验/专项/未验）：
+结束条件（通过条件、阻塞标准、可接受遗留；代码/设备/用户确认）：
 基线：仓库根、分支、HEAD；index/工作区/未跟踪清单及状态快照 SHA-256：
 本次改动（与既存改动分开）；交付快照 SHA-256：
 实际检查（命令、环境、退出码、通过/失败/阻塞、证据；缓存/跳过说明）：
 审核记录（对应交付快照、审核范围、发现、严重性、文件位置、处置）：
+问题修复复验（问题边界、必要关联范围、复现/验收项；新增范围的证据）：
 未解决问题（已有/新增/环境/产品待定分开）：
 下一步及负责人；用户待体验/待决定事项：
 ```
@@ -105,14 +118,3 @@ PY
 
 3. 快照保存暂存/未暂存补丁以及文件内容哈希，覆盖新增、删除、内容和执行位；未跟踪文件清单/哈希不等于文件备份，跨机器必须携带对应内容。审核开始后不修改待审业务代码；结束时把上面目录换成 `review-after` 再执行，使用 `cmp work/ai-handoff/review-before/state.json work/ai-handoff/review-after/state.json`。不同则定位漂移并重新冻结审核，不能继续沿用旧结论。
 4. 完成任务后写回当前状态、最近审核和下一步。日志/截图放在本地证据目录，只在这里保留路径、摘要和哈希；跨机器先核证据可用性。旧过程由正常 Git 历史保留，不无限追加。当前未提交资料先保留至明确交接，不为维护历史擅自提交。
-
-## 最近审核 · 工作流接入
-
-- 执行者：本会话 Codex；类型：接入自检，未进行其他模型独立审核。
-- 对象：上述 `85aef588…f68b` 的既有未提交候选，加本轮三个协作文档。已检查全量变更清单、暂存状态、关键 Gradle/manifest/控制器/排版与 UI 边界、相关未跟踪组件/测试入口，并对实际工作区运行基线；**不是对全部既存业务差异的逐行安全审计**。
-- 本轮业务问题处置：不修改业务代码；空白检查既有失败单列，Chromium/设备缺失明确阻塞，旧文档时间差保留说明。剩余业务验收交后续独立任务。
-- 交付验收已通过：三个规则入口及相对链接有效、文档无尾部空白，已实际执行上述快照命令；`work/ai-handoff/20261012-after/state.json` 与接入前逐字节一致，HEAD/分支/index/原有 362 个路径均未变化，Git 状态只新增三个协作文档。已执行命令及参数由日志验证；设备启动/仪器测试与浏览器全套入口仅核对 README/脚本，未冒充运行通过。最终证据与协作文档哈希见本机 `work/ai-handoff/20261012-baseline/delivery-check.txt`。
-
-## 可直接交给 Claude Sonnet 的任务说明
-
-> 在 `/Users/leon1ca/Documents/reader` 的现有 Android 阅读工程继续工作。先读根目录 AGENTS.md、CLAUDE.md 和 docs/ai-handoff.md，核对实际仓库、分支、HEAD、暂存/未暂存及未跟踪文件，保留全部既存改动。下一项 UI 任务目前**待指定**，目标画板、改动文件和行为验收条件随用户指定后填写；现在只恢复上下文，不自行创造功能或启动后续里程碑。收到明确任务后，按需读取 NEXT_DEVELOPMENT_PRD 的最新决策和对应画板，使用现有 Compose 组件及真实控制器接口。涉及业务接口补充交 GPT-6.1 Sol，复杂架构决策交 GPT-6 Astra，重要方案才按需交 Claude Opus。完成后按本文件模板交回改动、交付快照、实际检查结果、遗留与下一步；当前基线 Debug 构建/lint 与 142 项 JVM 通过，vendor 离线重放通过，浏览器与设备验证仍受环境阻塞。不自动 commit、push 或发布，实际 UI 体验由用户确认。

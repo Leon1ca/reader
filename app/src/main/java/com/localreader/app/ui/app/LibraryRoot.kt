@@ -4,6 +4,8 @@ import com.localreader.app.R
 import com.localreader.app.ui.UiStrings.text as uiText
 
 import android.app.Activity
+import android.os.Build
+import android.view.WindowManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -11,6 +13,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,11 +40,21 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /** Navigation state is UI-only; all data mutations remain in the existing VM/controllers. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
 @Composable
 fun LibraryRoot(model: ReaderViewModel,state: UiState) {
     val context=LocalContext.current
     val activity=remember(context) { context.activity() }
+    // API 29 reports neither IME insets nor a reduced visible frame with adjustNothing. Opt the library into
+    // resize reporting only while it is mounted; the reader keeps the original window mode and viewport.
+    if(Build.VERSION.SDK_INT<30 && activity!=null) DisposableEffect(activity) {
+        val original=activity.window.attributes.softInputMode
+        @Suppress("DEPRECATION") // This legacy flag is required only on API 29; API 30+ uses native IME visibility.
+        val resize=WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        activity.window.setSoftInputMode((original and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv()) or resize)
+        onDispose { activity.window.setSoftInputMode(original) }
+    }
+    val imeVisible=WindowInsets.isImeVisible
     UiDesignTheme(UiFonts.system) {
         val colors=LocalUiPalette.current
         val loader=remember(context) {(context.applicationContext as com.localreader.app.ReaderApplication).covers}
@@ -51,20 +65,20 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
         var tab by rememberSaveable { mutableIntStateOf(model.preferences.getInt("tab",0).coerceIn(0,3)) }
         val navigation=rememberLibraryNavigation()
         val route=navigation.current(tab)
-        val detailId=route.bookId
         val retained=rememberSaveableStateHolder()
         var settingsDialog by remember { mutableStateOf(false) }
         var sheet by rememberSaveable { mutableStateOf<LibrarySheet?>(null) }
         val snackbar=remember {SnackbarHostState()}
         val scope=rememberCoroutineScope()
         var deleteIds by rememberSaveable(stateSaver=listSaver<List<String>,String>(save={it},restore={it.toList()})) { mutableStateOf<List<String>>(emptyList()) }
-        var editId by rememberSaveable { mutableStateOf<String?>(null) }
-        val edit=state.books.firstOrNull {it.id==editId}
-        LaunchedEffect(editId,state.books) {if(editId!=null && edit==null)editId=null}
+        // Shelf selection mode: while on, the bottom bar shows the selection actions instead of the tabs.
+        var selectingRequested by rememberSaveable { mutableStateOf(false) }
+        var pickerIds by rememberSaveable(stateSaver=listSaver<List<String>,String>(save={it},restore={it.toList()})) { mutableStateOf<List<String>>(emptyList()) }
+        val categories by model.categories.collectAsStateWithLifecycle()
         // Scroll ticks only refresh the tab bar's backdrop; reading them here would recompose the whole library per frame.
         val backdropTick=remember { mutableLongStateOf(0L) }
         com.localreader.app.ui.ShelfPresentationTiming(shelf.presentationOperation,
-            tab==0 && route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && editId==null && !shelf.loading,shelf.items.size,loader)
+            tab==0 && route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && !shelf.loading,shelf.items.size,loader)
         val enabled=state.libraryReady && !state.loading && !state.busy && !deletion.running
         val documentContract=remember {
             object: ActivityResultContracts.OpenMultipleDocuments() {
@@ -73,9 +87,12 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
             }
         }
         val import=rememberLauncherForActivityResult(documentContract) { uris -> if(uris.isNotEmpty()) { model.importFiles(uris);sheet=LibrarySheet.IMPORT } }
+        LaunchedEffect(Unit) { model.notices.flow.collect { message -> snackbar.currentSnackbarData?.dismiss();snackbar.showSnackbar(message) } }
+        LaunchedEffect(Unit) { model.restoreResult?.let { result ->
+            snackbar.showSnackbar(if(result.applied)uiText(R.string.restore_result_done) else (result.message?.takeIf { it.isNotBlank() }?.let { uiText(R.string.restore_result_failed_reason,it) } ?: uiText(R.string.restore_result_failed)))
+        } }
         fun showSoon() {scope.launch {snackbar.currentSnackbarData?.dismiss();snackbar.showSnackbar(uiText(R.string.coming_soon))}}
         fun launchImport() { import.launch(arrayOf("text/plain","application/epub+zip","application/octet-stream")) }
-        fun showDetail(id: String) { navigation.push(tab,LibraryRoute(RouteKind.DETAIL,id)) }
         val closeRoute={ navigation.pop(tab) }
         BackHandler(route.kind!=RouteKind.ROOT && sheet==null) { closeRoute() }
         // Results open once per batch; returning from a book must not pop them up again.
@@ -88,23 +105,29 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
                     ActionButton(uiText(R.string.retry_library),model::retryLibrary)
                 }
                 retained.SaveableStateProvider("$tab:${route.kind}:${route.bookId}") { when(route.kind) {
-                    RouteKind.DETAIL -> state.books.firstOrNull { it.id==detailId }?.let { book ->
-                        BookDetailScreen(book,model,loader,enabled,closeRoute,{ editId=book.id },{ deleteIds=listOf(book.id) })
-                    } ?: MissingBookScreen(closeRoute)
-                    RouteKind.CONTINUE -> ContinueListScreen(shelf.continueReading,loader,enabled,closeRoute,model::open,::showDetail,model.shelfController,{deleteIds=it.toList()})
-                    RouteKind.STORAGE -> StorageScreen(model,closeRoute,{showSoon()},backLabel=uiText(if(tab==3)R.string.back_to_settings else R.string.back_to_library))
+                    RouteKind.STORAGE -> StorageScreen(model,closeRoute,model::cleanCaches,backLabel=uiText(if(tab==3)R.string.back_to_settings else R.string.back_to_library))
                     RouteKind.LICENSES -> LicenseScreen(closeRoute)
+                    RouteKind.CATEGORIES -> CategoryManageScreen(model,state.books,closeRoute)
+                    RouteKind.FONTS -> FontsScreen(model,closeRoute)
+                    RouteKind.DIAGNOSTICS -> DiagnosticsScreen(model,closeRoute)
+                    RouteKind.BACKUP -> BackupScreen(model,closeRoute,{navigation.push(tab,LibraryRoute(RouteKind.RESTORE_PREVIEW))})
+                    RouteKind.RESTORE_PREVIEW -> RestorePreviewScreen(model,closeRoute)
                     else -> when(tab) {
-                        0 -> ShelfScreen(shelf,state.books.size,model.shelfController,ShelfActions(model::open,::showDetail,::launchImport,
-                            {navigation.push(tab,LibraryRoute(RouteKind.CONTINUE))},{sheet=LibrarySheet.MORE},{deleteIds=it.toList()},{showSoon()}),loader,enabled,onBackdropDirty={backdropTick.longValue++})
+                        0 -> ShelfScreen(shelf,state.books.size,model.shelfController,ShelfActions(model::open,::launchImport,
+                            {sheet=LibrarySheet.MORE},{deleteIds=it.toList()},{showSoon()},{ pickerIds=it.toList() },categories,{ model.shelfController.start() }),loader,enabled,onBackdropDirty={backdropTick.longValue++},
+                            selectingRequested=selectingRequested,onSelectingRequested={ selectingRequested=it })
                         1 -> DeferredTabScreen(false,{showSoon()})
                         2 -> DeferredTabScreen(true,{showSoon()})
-                        else -> SettingsScreen(model,state,{navigation.push(tab,LibraryRoute(RouteKind.STORAGE));model.refreshStorage()},{showSoon()},{navigation.push(tab,LibraryRoute(RouteKind.LICENSES))},{backdropTick.longValue++},onDialog={settingsDialog=it})
+                        else -> SettingsScreen(model,state,{navigation.push(tab,LibraryRoute(RouteKind.STORAGE));model.refreshStorage()},{showSoon()},{navigation.push(tab,LibraryRoute(RouteKind.LICENSES))},{navigation.push(tab,LibraryRoute(RouteKind.BACKUP))},{navigation.push(tab,LibraryRoute(RouteKind.DIAGNOSTICS))},{navigation.push(tab,LibraryRoute(RouteKind.FONTS))},{backdropTick.longValue++},onDialog={settingsDialog=it})
                     }
                 } }
             }
-            if(route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && editId==null && !settingsDialog && state.error==null && deletion.results.isEmpty() && activity!=null) {
-                FloatingTabBar(activity,tab,{ index -> tab=index;model.preferences.edit { putInt("tab",index) };backdropTick.longValue++ },
+            val selecting=tab==0 && (selectingRequested || shelf.selected.isNotEmpty())
+            if(!imeVisible && route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && pickerIds.isEmpty() && !settingsDialog && state.error==null && deletion.results.isEmpty() && activity!=null) {
+                if(selecting) SelectionActionBar(activity,shelf.selected.size,enabled,{ pickerIds=shelf.selected.toList() },
+                    { shelf.selected.toList().forEach { model.shelfController.finished(it,true) };model.shelfController.clearSelection();selectingRequested=false },
+                    { deleteIds=shelf.selected.toList() },contentKey=listOf(colors.page,"selection",androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books to backdropTick.longValue)
+                else FloatingTabBar(activity,tab,{ index -> tab=index;model.preferences.edit { putInt("tab",index) };backdropTick.longValue++ },
                     if(tab==0) uiText(R.string.import_books) else if(tab==1) uiText(R.string.add_link) else if(tab==2) uiText(R.string.add_subscription) else uiText(R.string.more_settings),
                     {when(tab) {0 -> launchImport();1 -> showSoon();2 -> showSoon();else -> sheet=LibrarySheet.MORE}},
                     moreAction=tab==3,enabled=if(tab==0)enabled else true,contentKey=listOf(colors.page,tab,androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books,dirtyTick={ backdropTick.longValue*31+coverRevision.hashCode() })
@@ -119,33 +142,37 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
                 }
             }
         }
-        if(sheet!=null) ModalBottomSheet(onDismissRequest={sheet=null},containerColor=colors.card,shape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp)) {
+        if(sheet!=null) ModalBottomSheet(onDismissRequest={sheet=null},containerColor=if(sheet==LibrarySheet.IMPORT)colors.page else colors.card,shape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp),
+            dragHandle={ Box(Modifier.padding(top=10.dp,bottom=4.dp).size(36.dp,4.dp).background(androidx.compose.ui.graphics.Color(0xFFD6D6D1),RoundedCornerShape(2.dp))) }) {
             Column(Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 if(sheet==LibrarySheet.IMPORT) ImportPanel(imports,model,{ sheet=null },{sheet=null;launchImport()}) else {
                     Text(uiText(R.string.more),style=LocalUiText.current.panel)
                     if(tab==3) {
-                        SettingRow(uiText(R.string.backup_restore),uiText(R.string.in_development),{sheet=null;showSoon()})
+                        SettingRow(uiText(R.string.backup_restore),uiText(R.string.view),{sheet=null;navigation.push(tab,LibraryRoute(RouteKind.BACKUP))})
                         SettingRow(uiText(R.string.licenses),uiText(R.string.view),{sheet=null;navigation.push(tab,LibraryRoute(RouteKind.LICENSES))})
                     } else {
                     SettingRow(uiText(R.string.import_books),"EPUB / TXT",{sheet=null;launchImport()},enabled=enabled)
                     SettingRow(uiText(R.string.import_progress_title),"${imports.results.size}/${imports.total}",{sheet=LibrarySheet.IMPORT})
-                    SettingRow(uiText(R.string.categories),uiText(R.string.in_development),{sheet=null;showSoon()})
+                    SettingRow(uiText(R.string.categories),categories.size.takeIf { it>0 }?.let { uiText(R.string.category_book_count,it).replace("本","个") } ?: uiText(R.string.view),{sheet=null;navigation.push(tab,LibraryRoute(RouteKind.CATEGORIES))})
                     }
                     SettingRow(uiText(R.string.storage),uiText(R.string.view),{sheet=null;navigation.push(tab,LibraryRoute(RouteKind.STORAGE));model.refreshStorage()})
                 }
             }
+        }
+        if(pickerIds.isNotEmpty()) {
+            val chosen=state.books.filter { it.id in pickerIds }
+            if(chosen.isEmpty())pickerIds=emptyList() else CategoryPickerSheet(chosen,model,{ pickerIds=emptyList() },{ navigation.push(tab,LibraryRoute(RouteKind.CATEGORIES)) })
         }
         if(deleteIds.isNotEmpty()) {
             val captured=deleteIds.toSet()
             val chosen=state.books.filter { it.id in captured }
             val bookmarkTotal by produceState<Int?>(null,captured) {value=model.bookmarkCount(captured)}
             val names=chosen.take(3).joinToString("、") { it.title }+if(chosen.size>3)uiText(R.string.names_more) else ""
-            AlertDialog(onDismissRequest={deleteIds=emptyList()},title={Text(if(chosen.size==1)uiText(R.string.delete_book_confirm,chosen.first().title) else uiText(R.string.delete_books_confirm,captured.size))},
-                text={Text((if(chosen.size>1)"$names\n" else "")+uiText(R.string.delete_copies_confirm,bytesLabel(chosen.sumOf { it.bytes }),bookmarkTotal?.toString() ?: uiText(R.string.counting)))},
-                confirmButton={ActionButton(if(captured.size==1)uiText(R.string.delete) else uiText(R.string.delete_books_count,captured.size),{model.shelfController.deleteBooks(captured);deleteIds=emptyList();if(detailId in captured)closeRoute()},enabled=enabled)},
-                dismissButton={ActionButton(uiText(R.string.cancel),{deleteIds=emptyList()},style=ActionStyle.SECONDARY)})
+            ConfirmSheet(if(chosen.size==1)uiText(R.string.delete_book_confirm,chosen.first().title) else uiText(R.string.delete_books_confirm,captured.size),
+                (if(chosen.size>1)"$names\n" else "")+uiText(R.string.delete_copies_confirm,bytesLabel(chosen.sumOf { it.bytes }),bookmarkTotal?.toString() ?: uiText(R.string.counting)),
+                if(captured.size==1)uiText(R.string.delete) else uiText(R.string.delete_books_count,captured.size),
+                {model.shelfController.deleteBooks(captured);deleteIds=emptyList();selectingRequested=false},{deleteIds=emptyList()},uiText(R.string.cancel),confirmEnabled=enabled)
         }
-        edit?.let { book -> EditBookDialog(book,{editId=null}) { title,author -> model.metadata(book,title,author);editId=null } }
         if(deletion.results.isNotEmpty() && !deletion.running) AlertDialog(onDismissRequest=model.shelfController::dismissDeletions,title={Text(uiText(R.string.deletion_results))},
             text={LazyColumn { items(deletion.results,key={it.id}) { result -> Text(if(result.success)if(result.fileCleanupPending)uiText(R.string.cleanup_pending) else uiText(R.string.deleted) else uiText(R.string.deletion_failed,com.localreader.app.ui.UiStrings.safeMessage(result.error.orEmpty())),Modifier.padding(vertical=8.dp)) } }},
             confirmButton={ActionButton(uiText(R.string.done),model.shelfController::dismissDeletions)})
@@ -156,8 +183,10 @@ private fun Context.activity(): Activity? { var current=this;while(current is Co
 
 @Composable internal fun ScreenHeader(title: String,onBack: (()->Unit)?=null,backLabel: String=uiText(R.string.back_to_library),gutter: androidx.compose.ui.unit.Dp=20.dp,actions: @Composable RowScope.()->Unit={}) {
     Row(Modifier.fillMaxWidth().height(UiSize.header).padding(horizontal=gutter),verticalAlignment=Alignment.CenterVertically) {
-        onBack?.let { IconAction(backLabel,UiGlyph.BACK,it) }
-        Text(title,Modifier.weight(1f),style=LocalUiText.current.page,color=LocalUiPalette.current.text)
+        // The design's back arrow is a bare 22dp glyph, not a tinted circle.
+        onBack?.let { IconAction(backLabel,UiGlyph.BACK,it,plain=true,color=LocalUiPalette.current.text) }
+        // Screens reached by a back arrow carry the design's 16sp title; top-level tabs keep the large heading.
+        Text(title,Modifier.weight(1f),style=if(onBack!=null)LocalUiText.current.panel else LocalUiText.current.page,color=LocalUiPalette.current.text)
         actions()
     }
 }
@@ -174,44 +203,47 @@ private fun Context.activity(): Activity? { var current=this;while(current is Co
     }
 }
 
-@Composable private fun MissingBookScreen(back: ()->Unit) { Column { ScreenHeader(uiText(R.string.book_information),back);Text(uiText(R.string.book_missing),Modifier.padding(24.dp)) } }
 
 @Composable private fun ImportPanel(batch: ImportBatch,model: ReaderViewModel,close: ()->Unit,reselect: ()->Unit) {
     val running=batch.phase in setOf(ImportPhase.QUEUED,ImportPhase.RUNNING)
-    Text(if(running)uiText(R.string.importing) else uiText(R.string.import_results),style=LocalUiText.current.panel)
-    Text(uiText(R.string.processed_count,batch.results.size,batch.total),style=LocalUiText.current.value)
-    if(running && batch.total>0)LinearProgressIndicator(progress={batch.results.size.toFloat()/batch.total},modifier=Modifier.fillMaxWidth())
-    Text(uiText(R.string.import_outcome_counts,batch.count(ImportOutcome.OK),batch.count(ImportOutcome.DUPLICATE),batch.count(ImportOutcome.FAILED),batch.count(ImportOutcome.CANCELED)),style=LocalUiText.current.explanation)
-    batch.storageFull?.let { space -> Surface(color=LocalUiPalette.current.dangerContainer,shape=RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(16.dp)) { Text(uiText(R.string.storage_full),style=LocalUiText.current.section)
+    val colors=LocalUiPalette.current;val type=LocalUiText.current
+    // Design `ImportProgress`: heading, a one-line tally, a 3dp bar, one card of 56dp file rows, then the actions.
+    Text(if(running)uiText(R.string.importing_count,batch.total) else uiText(R.string.import_results),style=type.section.copy(fontSize=17.sp,letterSpacing=0.sp),color=colors.text)
+    Text(uiText(R.string.processed_count,batch.results.size,batch.total),style=type.explanation,color=colors.secondaryText)
+    Text(uiText(R.string.import_outcome_counts,batch.count(ImportOutcome.OK),batch.count(ImportOutcome.DUPLICATE),batch.count(ImportOutcome.FAILED),batch.count(ImportOutcome.CANCELED)),style=type.explanation,color=colors.secondaryText)
+    if(batch.total>0)LinearProgressIndicator(progress={(batch.results.size.toFloat()/batch.total).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),color=colors.primary,trackColor=androidx.compose.ui.graphics.Color(0xFFE4E4E0))
+    batch.storageFull?.let { space -> Surface(color=colors.dangerContainer,shape=RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(16.dp)) { Text(uiText(R.string.storage_full),style=type.section)
             Text(uiText(R.string.storage_full_numbers,bytesLabel(space.requiredBytes),bytesLabel(space.availableBytes),bytesLabel(space.shortfall)))
-            Text(uiText(R.string.storage_full_hint)) }
+            Text(uiText(R.string.storage_full_hint))
+            ActionButton(uiText(R.string.cleanup_rebuildable),model::cleanCaches,Modifier.padding(top=8.dp).fillMaxWidth(),style=ActionStyle.SECONDARY) }
     } }
-    LazyColumn(Modifier.fillMaxWidth().heightIn(max=360.dp)) { items(batch.results) { result ->
-        Column(Modifier.fillMaxWidth().padding(vertical=10.dp)) {
-            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                UiIcon(when(result.outcome) {ImportOutcome.OK,ImportOutcome.DUPLICATE->UiGlyph.CHECK;ImportOutcome.FAILED->UiGlyph.CLOSE;ImportOutcome.CANCELED->UiGlyph.CLOCK},Modifier.size(20.dp),if(result.outcome==ImportOutcome.FAILED)LocalUiPalette.current.danger else LocalUiPalette.current.primary)
-                Text(result.name,Modifier.weight(1f),style=LocalUiText.current.card)
-                Text(result.name.substringAfterLast('.',"").uppercase(java.util.Locale.ROOT).takeIf {it in setOf("TXT","EPUB")} ?: uiText(R.string.file),style=LocalUiText.current.explanation)
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max=360.dp).background(colors.card,RoundedCornerShape(UiSize.groupRadius)).padding(horizontal=16.dp)) { items(batch.results) { result ->
+        val failed=result.outcome==ImportOutcome.FAILED
+        val format=result.name.substringAfterLast('.',"").uppercase(java.util.Locale.ROOT).takeIf { it in setOf("TXT","EPUB") }
+        Row(Modifier.fillMaxWidth().heightIn(min=56.dp).rowDivider(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(36.dp).background(if(failed)colors.dangerContainer else if(format=="EPUB")colors.primaryContainer else colors.neutral,RoundedCornerShape(8.dp)),contentAlignment=Alignment.Center) {
+                Text(format ?: uiText(R.string.file),style=type.cover.copy(fontSize=10.sp,fontWeight=androidx.compose.ui.text.font.FontWeight.Medium),color=if(failed)colors.danger else if(format=="EPUB")colors.primary else colors.controlText)
             }
-            Text(com.localreader.app.ui.UiStrings.safeMessage(result.status),color=if(result.outcome==ImportOutcome.FAILED)LocalUiPalette.current.danger else LocalUiPalette.current.secondaryText,style=LocalUiText.current.auxiliary)
-            result.bookId?.let { id -> if(!running)ActionButton(uiText(R.string.view_book),{ close();model.open(id) },style=ActionStyle.FILTER) }
+            Column(Modifier.weight(1f).padding(vertical=8.dp)) {
+                Text(result.name,style=type.value,color=colors.text,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(com.localreader.app.ui.UiStrings.safeMessage(result.status),style=type.explanation.copy(fontWeight=androidx.compose.ui.text.font.FontWeight.Normal),color=if(failed)colors.danger else colors.secondaryText)
+            }
+            when {
+                result.outcome==ImportOutcome.OK || result.outcome==ImportOutcome.DUPLICATE -> if(!running && result.bookId!=null)ActionButton(uiText(R.string.view_book),{ close();model.open(requireNotNull(result.bookId)) },style=ActionStyle.FILTER) else UiIcon(UiGlyph.CHECK,Modifier.size(20.dp),colors.success)
+                failed -> UiIcon(UiGlyph.CLOSE,Modifier.size(20.dp),colors.danger)
+                else -> UiIcon(UiGlyph.CLOCK,Modifier.size(20.dp),colors.secondaryText)
+            }
         }
     } }
-    if(!running && batch.count(ImportOutcome.FAILED)>0)ActionButton(uiText(R.string.reselect_failed),reselect,Modifier.fillMaxWidth(),style=ActionStyle.SECONDARY)
-    if(running) { Text(uiText(R.string.import_background_hint),style=LocalUiText.current.explanation);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-        ActionButton(uiText(R.string.continue_background),close,Modifier.weight(1f),style=ActionStyle.SECONDARY)
-        ActionButton(uiText(R.string.cancel_import),model::cancelImport,Modifier.weight(1f))
-    } } else ActionButton(uiText(R.string.done),{model.dismissResults();close()},Modifier.fillMaxWidth())
-}
-
-@Composable private fun EditBookDialog(book: ContentSummary,close: ()->Unit,save: (String,String)->Unit) {
-    var title by rememberSaveable(book.id) { mutableStateOf(book.title) };var author by rememberSaveable(book.id) { mutableStateOf(book.author) }
-    AlertDialog(onDismissRequest=close,title={Text(uiText(R.string.edit_book))},text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(title,{title=it.take(250)},label={Text(uiText(R.string.title))},singleLine=true)
-        OutlinedTextField(author,{author=it.take(250)},label={Text(uiText(R.string.author))},singleLine=true)
-        Text(uiText(R.string.edit_metadata_hint),style=LocalUiText.current.explanation)
-    }},confirmButton={ActionButton(uiText(R.string.save),{save(title,author)},enabled=title.isNotBlank())},dismissButton={ActionButton(uiText(R.string.cancel),close,style=ActionStyle.SECONDARY)})
+    if(running) {
+        Text(uiText(R.string.import_background_hint),style=type.explanation,color=colors.secondaryText)
+        ActionButton(uiText(R.string.continue_background),close,Modifier.fillMaxWidth())
+        ActionButton(uiText(R.string.cancel_import),model::cancelImport,Modifier.fillMaxWidth(),style=ActionStyle.SECONDARY)
+    } else {
+        ActionButton(uiText(R.string.done),{model.dismissResults();close()},Modifier.fillMaxWidth())
+        if(batch.count(ImportOutcome.FAILED)>0)ActionButton(uiText(R.string.reselect_failed),reselect,Modifier.fillMaxWidth(),style=ActionStyle.SECONDARY)
+    }
 }
 
 internal fun bytesLabel(bytes: Long): String = when { bytes<1024 -> "$bytes B";bytes<1024*1024 -> "${bytes/1024} KB";bytes<1024L*1024*1024 -> "${bytes/(1024*1024)} MB";else -> String.format(java.util.Locale.ROOT,"%.2f GB",bytes/(1024.0*1024*1024)) }

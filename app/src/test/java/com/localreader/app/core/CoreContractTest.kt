@@ -89,7 +89,7 @@ class CoreContractTest {
         val faces = "@font-face{src:url('Roboto-Regular-VF.ttf')}"
         val txt = RuleCompiler.compile(WebContentKind.TXT,ReaderRules(),url,faces)
         val article = RuleCompiler.compile(WebContentKind.ARTICLE,ReaderRules(fontSize = 24f,theme = "dark"),url,faces)
-        assertTrue(txt.afterAuthor.contains("font-family:Roboto,"));assertFalse(txt.afterAuthor.contains("font-family:Arial,"));assertFalse(article.afterAuthor.contains("font-family:Arial,"))
+        assertTrue(txt.afterAuthor.contains("font-family:'Roboto', 'LXGW WenKai GB Screen',"));assertFalse(txt.afterAuthor.contains("font-family:Arial,"));assertFalse(article.afterAuthor.contains("font-family:Arial,"))
         assertTrue(article.afterAuthor.contains("font-size:30.0px"));assertTrue(article.afterAuthor.contains("#1a1917"))
         assertFalse(txt.beforeAuthor.contains("@import"));assertTrue(txt.beforeAuthor.contains(url.substringBeforeLast('/')+"/Roboto-Regular-VF.ttf"))
         val publication = ArticleSamplePublication()
@@ -105,8 +105,13 @@ class CoreContractTest {
             assertEquals(2,defaults.geometry.maxColumns)
             assertTrue(defaults.afterAuthor.contains("margin:0.6em 0"))
             assertTrue(defaults.afterAuthor.contains("line-height:1.4"))
-            assertTrue(defaults.afterAuthor.contains("text-align:left"))
-            assertTrue(defaults.afterAuthor.contains("text-indent:0"))
+            if(kind==WebContentKind.TXT) {
+                assertTrue(defaults.afterAuthor.contains("text-align:left"))
+                assertTrue(defaults.afterAuthor.contains("text-indent:0"))
+            } else {
+                // EPUB custom mode keeps the book's own alignment and indent (Readest parity); see EpubTypographyRulesTest.
+                assertFalse(defaults.afterAuthor.contains("text-align:left"))
+            }
             val explicit=RuleCompiler.compile(kind,ReaderRules(columns="one",lineHeight=1.9,epubStyleMode="CUSTOM"),url)
             assertEquals(1,explicit.geometry.maxColumns)
             assertTrue(explicit.afterAuthor.contains("line-height:1.9"))

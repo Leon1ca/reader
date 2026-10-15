@@ -139,6 +139,7 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
     }
     @Volatile private var lastShelfNotice=0L
     override fun bookmarks(contentId: String) = db.bookmarks(contentId).map { ReaderBookmark(it.id,it.bookId,it.locator,it.excerpt,it.created) }
+    override fun restoreBookmark(bookmark: ReaderBookmark): Boolean = db.transaction { requireNotNull(db.content(bookmark.contentId)) { "书籍不存在" };db.restoreBookmark(bookmark) }
     override fun addBookmark(contentId: String,revision: String,locator: Locator,excerpt: String): Boolean = db.transaction {
         checkCurrent(contentId,revision,locator);db.addBookmark(contentId,locator,excerpt)
     }
@@ -174,14 +175,14 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
             BOOK_FIELDS.forEachIndexed { index,field -> if(!c.isNull(index))values[field]=c.getString(index) }
         }
         val rules=ReaderRules(fontSize=values["font_size"]?.toFloat() ?: 16f,theme=values["theme"] ?: "white",flow=ReaderFlow.entries.first { it.wire==(values["flow"] ?: "paginated") },
-            epubStyleMode=values["epub_style_mode"] ?: "AUTHOR",lineHeight=values["line_height"]?.toDouble() ?: 1.4,margin=values["margin"] ?: "M",fontFamily=values["font_family"] ?: "default",
+            epubStyleMode=values["epub_style_mode"] ?: "AUTHOR",lineHeight=values["line_height"]?.toDouble() ?: 1.4,paragraphSpacing=values["paragraph_spacing"]?.toDouble() ?: ReaderRules.DEFAULT_PARAGRAPH_SPACING,margin=values["margin"] ?: "M",fontFamily=(values["font_family"] ?: "default").let { family -> if(ReaderFontStacks.userFontId(family)?.let(db::userFont)!=null || ReaderFontStacks.userFontId(family)==null)family else "default" },
             columns=values["columns"] ?: "auto",fxlZoom=values["fxl_zoom"] ?: "fit-page",spreadPreference=values["spread_pref"] ?: "AUTO")
         return EffectiveRules(rules,revision)
     }
     private fun write(contentId: String?,patch: RulesPatch): EffectiveRules {
         val result = db.transaction { database ->
             val app = ContentValues();val book = ContentValues()
-            listOf("font_size" to patch.fontSize,"theme" to patch.theme,"flow" to patch.flow,"line_height" to patch.lineHeight,"margin" to patch.margin,"font_family" to patch.fontFamily,"columns" to patch.columns,"epub_style_mode" to patch.epubStyleMode,"fxl_zoom" to patch.fxlZoom,"spread_pref" to patch.spreadPreference).forEach { (field,update) ->
+            listOf("font_size" to patch.fontSize,"theme" to patch.theme,"flow" to patch.flow,"line_height" to patch.lineHeight,"margin" to patch.margin,"font_family" to patch.fontFamily,"columns" to patch.columns,"epub_style_mode" to patch.epubStyleMode,"paragraph_spacing" to patch.paragraphSpacing,"fxl_zoom" to patch.fxlZoom,"spread_pref" to patch.spreadPreference).forEach { (field,update) ->
                 if(update is FieldUpdate.Set<*>) (if(field in BOOK_FIELDS)book else app).put(field,validate(field,update.value))
             }
             if(book.size()>0) { require(contentId != null) { "固定版式缩放属于单本书" };check(database.update("reading_settings",book,"content_id=?",arrayOf(contentId)) == 1) }
@@ -198,15 +199,16 @@ class SqliteReadingStore(private val db: LibraryDb) : ReadingStore, ReadingPrefe
     private fun validate(field: String,value: Any?): String = when(field) {
         "font_size" -> (value as Number).toFloat().also { require(it.isFinite() && it in 12f..36f) }.toString()
         "line_height" -> (value as Number).toDouble().also { require(it.isFinite() && it in 1.2..2.4) }.toString()
+        "paragraph_spacing" -> (value as Number).toDouble().also { require(it.isFinite() && it in 0.0..2.4) }.toString()
         "theme" -> (value as String).also { require(it in ReaderThemes.labels) }
         "flow" -> (value as ReaderFlow).wire
         "margin" -> (value as String).also { require(it in setOf("S","M","L")) }
-        "font_family" -> (value as String).also { require(it in setOf("default","serif","sans","kai")) }
+        "font_family" -> (value as String).also { require(it in setOf("default","serif","sans","kai") || ReaderFontStacks.userFontId(it)?.let(db::userFont)!=null) }
         "columns" -> (value as String).also { require(it in setOf("auto","one")) }
         "epub_style_mode" -> (value as String).also { require(it in setOf("AUTHOR","CUSTOM")) }
         "fxl_zoom" -> (value as String).also { require(it in setOf("fit-page","fit-width") || (it.toDoubleOrNull()?.let { n -> n.isFinite() && n in 1.0..5.0 } == true)) }
         "spread_pref" -> (value as String).also { require(it in setOf("AUTO","SINGLE")) }
         else -> error("未知偏好字段")
     }
-    private companion object { const val SHELF_NOTICE_MS=10_000L;val APP_FIELDS = listOf("font_size","theme","flow","line_height","margin","font_family","columns","epub_style_mode");val BOOK_FIELDS = listOf("fxl_zoom","spread_pref") }
+    private companion object { const val SHELF_NOTICE_MS=10_000L;val APP_FIELDS = listOf("font_size","theme","flow","line_height","margin","font_family","columns","epub_style_mode","paragraph_spacing");val BOOK_FIELDS = listOf("fxl_zoom","spread_pref") }
 }

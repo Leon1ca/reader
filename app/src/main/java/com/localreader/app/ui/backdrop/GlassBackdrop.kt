@@ -31,7 +31,12 @@ import kotlin.math.min
 
 /** Native-window source and popup foreground are deliberately separate surfaces. */
 @Composable
-fun GlassBackdrop(activity: Activity,tint: Color,key: Any,modifier: Modifier=Modifier,splitFraction: Float?=null,dirtyKey: Any=key,saturation: Float=1.6f) {
+/**
+ * [tintAlpha] (0–255) overrides how much tint covers the blur; [edge] adds a 1dp outline that separates the glass from a similar
+ * page; [sheen] (0–1) is the opacity of a white highlight fading from the top edge, the light catching the glass.
+ */
+fun GlassBackdrop(activity: Activity,tint: Color,key: Any,modifier: Modifier=Modifier,splitFraction: Float?=null,dirtyKey: Any=key,saturation: Float=1.6f,
+                  tintAlpha: Int?=null,edge: Color?=null,sheen: Float=0f) {
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     val view=remember(activity) { GlassBackdropView(activity,activity) }
     DisposableEffect(view,lifecycle) {
@@ -40,7 +45,7 @@ fun GlassBackdrop(activity: Activity,tint: Color,key: Any,modifier: Modifier=Mod
         onDispose { lifecycle.removeObserver(observer);view.close() }
     }
     LaunchedEffect(view,dirtyKey) { view.markDirty() }
-    AndroidView(factory={ view },modifier=modifier,update={ it.configure(tint.toArgb(),splitFraction,key,saturation) })
+    AndroidView(factory={ view },modifier=modifier,update={ it.configure(tint.toArgb(),splitFraction,key,saturation,tintAlpha,edge?.toArgb(),sheen) })
 }
 
 private object CaptureCopies { val lease=CopyLease() }
@@ -92,6 +97,14 @@ internal class GlassBackdropView(context: Context,private val activity: Activity
     private var failures=0
     private var saturation=1.6f
     private var tint=android.graphics.Color.WHITE
+    private var tintAlpha: Int?=null
+    private var edge: Int?=null
+    private var sheen=0f
+    /** Built when the size or [sheen] changes, never while drawing. */
+    private var sheenShader: Shader?=null
+    private fun updateSheen() {
+        sheenShader=if(sheen>0f && height>0)android.graphics.LinearGradient(0f,0f,0f,height*.6f,android.graphics.Color.argb((sheen*255).toInt(),255,255,255),android.graphics.Color.TRANSPARENT,Shader.TileMode.CLAMP) else null
+    }
     private var split: Float?=null
     private var key: Any?=null
     private var fallback: String?="waiting"
@@ -101,8 +114,10 @@ internal class GlassBackdropView(context: Context,private val activity: Activity
     private fun clearFront() { front?.let { lease.front(-it.allocationByteCount.toLong()) };front=null
         try {effect?.clear()} catch(_: RuntimeException) {effect=null} catch(_: OutOfMemoryError) {effect=null}
     }
-    fun configure(color: Int,splitFraction: Float?,contentKey: Any,saturation: Float=1.6f) {
-        require(saturation.isFinite() && saturation in 1f..2f)
+    fun configure(color: Int,splitFraction: Float?,contentKey: Any,saturation: Float=1.6f,tintAlpha: Int?=null,edge: Int?=null,sheen: Float=0f) {
+        require(saturation.isFinite() && saturation in 1f..2f && (tintAlpha==null || tintAlpha in 0..255) && sheen in 0f..1f)
+        this.tintAlpha=tintAlpha;this.edge=edge
+        if(this.sheen!=sheen) { this.sheen=sheen;updateSheen() }
         val changed=this.saturation!=saturation
         this.saturation=saturation
         tint=color;split=splitFraction
@@ -120,7 +135,7 @@ internal class GlassBackdropView(context: Context,private val activity: Activity
         handler.removeCallbacks(capture)
         handler.postDelayed(capture,max(0L,250L-(SystemClock.uptimeMillis()-lease.lastStart)))
     }
-    override fun onSizeChanged(w: Int,h: Int,oldw: Int,oldh: Int) { super.onSizeChanged(w,h,oldw,oldh);generation++;clearFront();markDirty() }
+    override fun onSizeChanged(w: Int,h: Int,oldw: Int,oldh: Int) { super.onSizeChanged(w,h,oldw,oldh);updateSheen();generation++;clearFront();markDirty() }
     override fun onAttachedToWindow() { super.onAttachedToWindow();afterSourceDraw() }
     private fun afterSourceDraw() {
         if(drawListener!=null || closed)return
@@ -203,8 +218,11 @@ internal class GlassBackdropView(context: Context,private val activity: Activity
                     catch(_: OutOfMemoryError) {clearFront();effect=null;failures=2;fallback="memory"}
                 }
             }
-            paint.color=tint;paint.alpha=if(bitmap!=null && fallback==null)if(saturation==1.4f)230 else 214 else 240;paint.style=Paint.Style.FILL;canvas.drawPath(shapes,paint)
+            val blurred=bitmap!=null && fallback==null
+            paint.color=tint;paint.alpha=if(blurred)tintAlpha ?: if(saturation==1.4f)230 else 214 else 240;paint.style=Paint.Style.FILL;canvas.drawPath(shapes,paint)
+            sheenShader?.let { paint.shader=it;paint.alpha=255;paint.style=Paint.Style.FILL;canvas.drawPath(shapes,paint);paint.shader=null }
             paint.color=android.graphics.Color.WHITE;paint.alpha=204;paint.style=Paint.Style.STROKE;paint.strokeWidth=.5f*density;canvas.drawPath(shapes,paint)
+            edge?.let { paint.color=it;paint.style=Paint.Style.STROKE;paint.strokeWidth=2f*density;canvas.drawPath(shapes,paint) }
         }
     }
     fun close() {

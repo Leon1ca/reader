@@ -10,9 +10,11 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class ShelfSort { RECENT, IMPORTED, TITLE, AUTHOR }
-enum class ShelfFilter { ALL, TXT, EPUB }
-data class ShelfPreferences(val sort: ShelfSort=ShelfSort.RECENT,val filter: ShelfFilter=ShelfFilter.ALL)
+/** The shelf offers three orders. Older versions also stored IMPORTED and a TXT/EPUB filter; both read back as the default (see AndroidUiPrefsStore). */
+enum class ShelfSort { RECENT, TITLE, AUTHOR }
+/** Shelf category view: everything, books in no category (system view), or one category by id. */
+object ShelfCategories { const val ALL = -1L;const val NONE = 0L }
+data class ShelfPreferences(val sort: ShelfSort=ShelfSort.RECENT,val category: Long=ShelfCategories.ALL)
 enum class NightMode { SYSTEM, LIGHT, DARK }
 /** How a page turn is drawn. [NONE] keeps the engine's own instant behaviour. */
 enum class PageTurn { COVER, CURL, SLIDE, NONE }
@@ -23,13 +25,13 @@ interface UiPrefsStore {
     fun shelf(): ShelfPreferences
     fun saveShelf(value: ShelfPreferences)
 }
-data class ShelfState(val items: List<ContentSummary> = emptyList(),val continueReading: List<ContentSummary> = emptyList(),
-    val query: String="",val sort: ShelfSort=ShelfSort.RECENT,val filter: ShelfFilter=ShelfFilter.ALL,
+data class ShelfState(val items: List<ContentSummary> = emptyList(),
+    val query: String="",val sort: ShelfSort=ShelfSort.RECENT,val category: Long=ShelfCategories.ALL,
     val selected: Set<String> = emptySet(),val loading: Boolean=true,val error: String?=null,val presentationOperation: ReaderOperationToken?=null)
 data class DeleteResult(val id: String,val success: Boolean,val error: String?=null,val fileCleanupPending: Boolean=false)
 data class DeleteBatch(val running: Boolean=false,val total: Int=0,val results: List<DeleteResult> = emptyList())
 
-/** Projection is pure and runs off the UI thread. Continue reading is independent of the search. */
+/** Projection is pure and runs off the UI thread. */
 object ShelfProjection {
     fun normalized(value: String): String = Normalizer.normalize(Normalizer.normalize(value,Normalizer.Form.NFKC).lowercase(Locale.ROOT),Normalizer.Form.NFKC)
     private data class Prepared(val title: String,val author: String,val titleKey: java.text.CollationKey,val authorKey: java.text.CollationKey,val normalizedTitle: String=normalized(title),val normalizedAuthor: String=normalized(author))
@@ -47,24 +49,22 @@ object ShelfProjection {
     fun project(all: List<ContentSummary>,previous: ShelfState): ShelfState {
         val query=normalized(previous.query)
         val keys=keys(all)
-        val filtered=all.filter { (previous.filter==ShelfFilter.ALL || it.format.name==previous.filter.name) &&
+        val category=previous.category
+        val filtered=all.filter { (category==ShelfCategories.ALL || (if(category==ShelfCategories.NONE)it.categories.isEmpty() else category in it.categories)) &&
             (query.isEmpty() || keys.getValue(it.id).normalizedTitle.contains(query) || keys.getValue(it.id).normalizedAuthor.contains(query)) }
         val comparison=when(previous.sort) {
             ShelfSort.RECENT -> compareByDescending<ContentSummary> { it.lastRead }.thenByDescending { it.imported }
-            ShelfSort.IMPORTED -> compareByDescending { it.imported }
             ShelfSort.TITLE -> Comparator { a,b -> keys.getValue(a.id).titleKey.compareTo(keys.getValue(b.id).titleKey) }
             ShelfSort.AUTHOR -> Comparator { a,b -> keys.getValue(a.id).authorKey.compareTo(keys.getValue(b.id).authorKey) }
         }.thenBy { it.id }
         val ids=filtered.map { it.id }.toSet()
-        return previous.copy(items=filtered.sortedWith(comparison),continueReading=all.filter {
-            it.lastRead>0 && it.finishedAt==null && !it.hiddenFromContinue
-        }.sortedWith(compareByDescending<ContentSummary> { it.lastRead }.thenBy { it.id }).take(20),selected=previous.selected.intersect(ids),loading=false,error=null)
+        return previous.copy(items=filtered.sortedWith(comparison),selected=previous.selected.intersect(ids),loading=false,error=null)
     }
 }
 class ShelfController(private val repository: ContentRepository,private val scope: CoroutineScope,private val preferences: UiPrefsStore,private val beforeDelete: suspend (String)->Unit={},private val afterDelete: (String)->Unit={},private val canDelete: ()->Boolean={true},private val timings: ReaderOperationLedger?=null,private val project: (List<ContentSummary>,ShelfState)->ShelfState=ShelfProjection::project) {
     private val optionBarrier=Any()
     private data class OptionSnapshot(val generation: Long,val state: ShelfState)
-    private val options=MutableStateFlow(OptionSnapshot(0,preferences.shelf().let { ShelfState(sort=it.sort,filter=it.filter) }))
+    private val options=MutableStateFlow(OptionSnapshot(0,preferences.shelf().let { ShelfState(sort=it.sort,category=it.category) }))
     private val mutable=MutableStateFlow(options.value.state)
     val state=mutable.asStateFlow()
     private val deleteMutable=MutableStateFlow(DeleteBatch())
@@ -126,21 +126,23 @@ class ShelfController(private val repository: ContentRepository,private val scop
         // Every accepted edit has a distinct identity even if its final fields
         // match an earlier option. That edit must complete its loading state.
         val current=OptionSnapshot(before.generation+1,change(before.state))
-        options.value=current
         // Text editing must be reflected in the very next UI frame. Only the
         // expensive item projection stays on IO; commands never await that work.
-        mutable.update { it.copy(query=current.state.query,sort=current.state.sort,filter=current.state.filter,
+        // The loading flag must be raised BEFORE the option is published: the
+        // collector can resume inline on this thread (the lock is reentrant) and
+        // publish this very option, and a later "loading=true" would never clear.
+        mutable.update { it.copy(query=current.state.query,sort=current.state.sort,category=current.state.category,
             selected=current.state.selected,loading=it.loading || before.state!=current.state) }
+        options.value=current
     }
     fun query(value: String) { changeOptions { it.copy(query=value.take(500)) } }
-    fun sort(value: ShelfSort) { changeOptions { it.copy(sort=value) };preferences.saveShelf(ShelfPreferences(value,options.value.state.filter)) }
-    fun filter(value: ShelfFilter) { changeOptions { it.copy(filter=value) };preferences.saveShelf(ShelfPreferences(options.value.state.sort,value)) }
+    private fun savePreferences() = options.value.state.let { preferences.saveShelf(ShelfPreferences(it.sort,it.category)) }
+    fun sort(value: ShelfSort) { changeOptions { it.copy(sort=value) };savePreferences() }
+    fun category(value: Long) { changeOptions { it.copy(category=value) };savePreferences() }
     fun select(id: String) { if(state.value.items.none { it.id==id })return;changeOptions { it.copy(selected=if(id in it.selected)it.selected-id else it.selected+id) } }
     fun selectAll() { changeOptions { it.copy(selected=state.value.items.map { row -> row.id }.toSet()) } }
     fun clearSelection() { changeOptions { it.copy(selected=emptySet()) } }
-    fun detail(id: String)=repository.detail(id)
     fun finished(id: String,finished: Boolean) = action { repository.setFinished(id,finished) }
-    fun hide(id: String,hidden: Boolean=true) = action { repository.hideFromContinue(id,hidden) }
     private fun action(work: () -> Unit) { scope.launch { try { withContext(Dispatchers.IO) { work() } }
         catch(cancel: CancellationException) { throw cancel }
         catch(error: Exception) { mutable.update { it.copy(error=error.message) } }

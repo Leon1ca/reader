@@ -16,7 +16,8 @@ class MixedPublication(private val source: EpubSource): ReaderPublication {
     override val direction=record.direction
     override val sectionCount=record.parts.size
     override val paginationParts=text.paginationParts
-    override val compatibilityNotices=record.warnings
+    override val compatibilityNotices=EpubNotices.visible(record.warnings)
+    override val language=record.language
     override val resourceManifest=text.resourceManifest
     override fun configure(rules: ReaderRules)=text.configure(rules)
     override fun section(index: Int): ContentSection {
@@ -92,6 +93,7 @@ class MixedOpenedBook(override val contentId: String,override val metadata: Cont
     override val publication=MixedPublication(source)
     override val interactions=if(original!=null && originalHash!=null)EpubInteractions(source,original,originalHash,publication,true) else null
     override val search=text.search
+    private val closed=java.util.concurrent.atomic.AtomicBoolean(false)
     override fun toc()=text.toc()
     override fun locatorForToc(id: String)=text.locatorForToc(id)?.let { publication.locator(publication.target(it).anchor) }
     override fun chapterOf(locator: Locator)=text.chapterOf(asText(locator))
@@ -101,16 +103,22 @@ class MixedOpenedBook(override val contentId: String,override val metadata: Cont
         is Locator.Page -> Locator.Epub(revision,locator.page,(locator.y*source.record.sections[locator.page].characters).toInt())
         else -> locator
     }
+    // Auxiliary body documents belong to the outer interactions; the inner text book has none.
     override fun accepts(locator: Locator): Boolean=when(locator) {
+        is Locator.EpubResource -> !closed.get() && interactions?.accepts(locator)==true
         is Locator.Page -> locator.version==revision && locator.page in source.record.sections.indices && publication.locator(publication.target(locator).anchor) is Locator.Page && locator.x.isFinite() && locator.y.isFinite() && locator.x in 0.0..1.0 && locator.y in 0.0..1.0
         else -> text.accepts(locator) && (locator !is Locator.Epub || publication.target(locator).anchor !is RendererAnchor.Page)
     }
-    override fun fractionOf(locator: Locator)=text.fractionOf(asText(locator))
+    override fun fractionOf(locator: Locator): Double=if(locator is Locator.EpubResource)fractionOf(locator.returnTo) else text.fractionOf(asText(locator))
     override fun fractionOf(extent: ReadingExtent)=if(extent is FixedReadingExtent)text.fractionOf(EpubReadingExtent(revision,extent.page,(extent.y*source.record.sections[extent.page].characters).toInt())) else text.fractionOf(extent)
-    override fun excerpt(locator: Locator,maxChars: Int)=text.excerpt(asText(locator),maxChars)
+    override fun excerpt(locator: Locator,maxChars: Int): String {
+        if(locator is Locator.EpubResource) { require(maxChars in 0..120);return interactions?.excerpt(locator,maxChars).orEmpty() }
+        return text.excerpt(asText(locator),maxChars)
+    }
     override fun furthestOf(first: ReadingExtent,second: Locator): ReadingExtent {
+        if(second is Locator.EpubResource) { require(accepts(second));return first }
         val previous=if(first is FixedReadingExtent)EpubReadingExtent(revision,first.page,(first.y*source.record.sections[first.page].characters).toInt()) else first
         return text.furthestOf(previous,asText(second))
     }
-    override fun close() { interactions?.close();text.close() }
+    override fun close() { if(closed.compareAndSet(false,true)) { interactions?.close();text.close() } }
 }

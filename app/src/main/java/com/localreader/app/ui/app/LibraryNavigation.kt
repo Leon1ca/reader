@@ -4,7 +4,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 
-internal enum class RouteKind { ROOT, CONTINUE, DETAIL, STORAGE, LICENSES }
+internal enum class RouteKind { ROOT, STORAGE, LICENSES, BACKUP, RESTORE_PREVIEW, CATEGORIES, DIAGNOSTICS, FONTS }
 internal enum class LibrarySheet { IMPORT, MORE }
 internal data class LibraryRoute(val kind: RouteKind,val bookId: String?=null)
 
@@ -16,7 +16,9 @@ internal class LibraryNavigation(initial: List<List<LibraryRoute>>) {
     fun pop(tab: Int) {stacks=stacks.mapIndexed {index,stack -> if(index==tab && stack.size>1)stack.dropLast(1) else stack} }
     companion object {
         val Saver=listSaver<LibraryNavigation,String>(save={ nav -> nav.stacks.flatMapIndexed {tab,stack -> stack.map {"$tab:${it.kind.name}:${it.bookId.orEmpty()}"}} },restore={ saved ->
-            LibraryNavigation((0..3).map {tab -> saved.filter {it.startsWith("$tab:")}.map {value -> val parts=value.split(':',limit=3);LibraryRoute(RouteKind.valueOf(parts[1]),parts[2].ifEmpty {null})}.ifEmpty {listOf(LibraryRoute(RouteKind.ROOT))} })
+            LibraryNavigation((0..3).map {tab -> saved.filter {it.startsWith("$tab:")}.mapNotNull {value -> val parts=value.split(':',limit=3)
+                // A route removed in a later version (the continue-reading list) is dropped from a restored stack.
+                RouteKind.entries.firstOrNull { it.name==parts.getOrNull(1) }?.let { LibraryRoute(it,parts.getOrNull(2)?.ifEmpty {null}) }}.ifEmpty {listOf(LibraryRoute(RouteKind.ROOT))} })
         })
     }
 }

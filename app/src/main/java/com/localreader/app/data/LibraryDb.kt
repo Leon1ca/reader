@@ -11,7 +11,7 @@ import com.localreader.app.formats.epub.*
 import kotlinx.coroutines.flow.update
 
 /** One schema and one write path for every format. Bootstrap precedes Helper's automatic upgrade. */
-class LibraryDb(private val context: Context, private val migrationCheckpoint: (String) -> Unit = {}) : SQLiteOpenHelper(context,"library.db",null,5,LibraryBootstrap.preserveCorruption) {
+class LibraryDb(private val context: Context, private val migrationCheckpoint: (String) -> Unit = {}) : SQLiteOpenHelper(context,"library.db",null,6,LibraryBootstrap.preserveCorruption) {
     private val writes=writeClocks.computeIfAbsent(context.getDatabasePath("library.db").canonicalPath) { WriteClock() }
     internal fun storageWriteRevision(): Long=writes.epoch.get()
     internal fun storageWritesIdle(): Boolean=writes.active.get()==0
@@ -27,20 +27,26 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     override fun getWritableDatabase(): SQLiteDatabase = open { super.getWritableDatabase() }
     override fun getReadableDatabase(): SQLiteDatabase = open { super.getReadableDatabase() }
     private fun open(work: () -> SQLiteDatabase): SQLiteDatabase = synchronized(this) {
+        com.localreader.app.core.backup.RestoreGate.require()
         if (initialized) work() else LibraryBootstrap.open(context) { work().also { initialized = true } }
     }
     @Synchronized override fun close() { super.close(); initialized = false }
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true);db.enableWriteAheadLogging() }
     override fun onCreate(db: SQLiteDatabase) = createSchema(db)
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        require(oldVersion in 1..4 && newVersion == 5) { "此版本没有迁移路径，原库已保留" }
+        require(oldVersion in 1..5 && newVersion == 6) { "此版本没有迁移路径，原库已保留" }
         if(oldVersion < 4) migrate(db,oldVersion)
-        else {
+        else if(oldVersion == 4) {
             migrationCheckpoint("before-alter")
             db.execSQL("ALTER TABLE contents ADD COLUMN hidden_from_continue INTEGER NOT NULL DEFAULT 0 CHECK(hidden_from_continue IN (0,1))")
             db.execSQL("ALTER TABLE epub_meta ADD COLUMN canonical_characters INTEGER")
             migrationCheckpoint("after-alter")
         }
+        // v6 adds categories; fresh installs and the legacy migration already created them through SCHEMA.
+        if(oldVersion == 5)migrationCheckpoint("before-categories")
+        V6_SCHEMA.forEach(db::execSQL)
+        // Legacy migration builds the current schema through createSchema, which already has these columns.
+        if(oldVersion >= 4)V6_ALTERS.forEach(db::execSQL)
         migrationCheckpoint("before-commit")
     }
     override fun onOpen(db: SQLiteDatabase) {
@@ -48,7 +54,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         db.rawQuery("PRAGMA foreign_key_check",null).use { check(!it.moveToFirst()) { "书库关联校验失败" } }
     }
     private fun createSchema(db: SQLiteDatabase, defaultLineHeight: Double = 1.4) {
-        SCHEMA.forEach(db::execSQL)
+        SCHEMA.forEach(db::execSQL);V6_SCHEMA.forEach(db::execSQL);V6_ALTERS.forEach(db::execSQL)
         db.execSQL("INSERT INTO reader_defaults(scope,theme,flow,prefs_revision) VALUES('app','white','paginated',0)")
         db.execSQL("INSERT INTO reader_defaults(scope,font_size,line_height,margin,font_family,columns,epub_style_mode,prefs_revision) VALUES('txt',16,$defaultLineHeight,'M','default','auto','AUTHOR',0)")
         db.execSQL("INSERT INTO reader_defaults(scope,font_size,line_height,margin,font_family,columns,epub_style_mode,prefs_revision) VALUES('epub',16,$defaultLineHeight,'M','default','auto','AUTHOR',0)")
@@ -108,7 +114,7 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     fun txtMetadata(id: String): TxtMetadata? = readableDatabase.rawQuery("SELECT * FROM txt_meta WHERE content_id=?",arrayOf(id)).use { if(it.moveToFirst()) TxtMetadata(it.string("encoding"),it.int("paragraphs"),it.long("characters")) else null }
     fun contents(): List<ContentSummary> = summaries(null)
     fun summary(id: String): ContentSummary? = summaries(id).singleOrNull()
-    private fun summaries(id: String?): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding,e.layout AS epub_layout FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id LEFT JOIN epub_meta e ON e.content_id=c.id" + if(id==null) "" else " WHERE c.id=?",id?.let { arrayOf(it) }).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"),c.nullString("epub_layout"),if(c.isNull(c.getColumnIndexOrThrow("finished_at"))) null else c.long("finished_at"),c.int("hidden_from_continue")!=0,c.nullString("cover_path"))) } }
+    private fun summaries(id: String?): List<ContentSummary> = readableDatabase.rawQuery("SELECT c.*,p.fraction,p.furthest_fraction,t.encoding,e.layout AS epub_layout,(SELECT group_concat(category_id) FROM content_categories WHERE content_id=c.id) AS category_ids FROM contents c JOIN positions p ON p.content_id=c.id LEFT JOIN txt_meta t ON t.content_id=c.id LEFT JOIN epub_meta e ON e.content_id=c.id" + if(id==null) "" else " WHERE c.id=?",id?.let { arrayOf(it) }).use { c -> buildList { while(c.moveToNext()) add(ContentSummary(c.string("id"),ContentFormat.valueOf(c.string("format").uppercase()),c.string("title"),c.string("author"),c.long("bytes"),c.long("imported_at"),c.long("last_read_at"),c.double("fraction"),c.double("furthest_fraction"),c.nullString("encoding"),c.nullString("epub_layout"),if(c.isNull(c.getColumnIndexOrThrow("finished_at"))) null else c.long("finished_at"),c.nullString("cover_path"),categories=c.nullString("category_ids")?.split(',')?.mapNotNull { it.toLongOrNull() }?.toSet().orEmpty())) } }
     fun byHash(hash: String): ContentRecord? = readableDatabase.rawQuery("SELECT * FROM contents WHERE hash=?",arrayOf(hash)).use { if(it.moveToFirst()) it.content() else null }
     internal fun epubLogicalDirectory(id: String): java.io.File {
         val content=requireNotNull(content(id));require(content.format==ContentFormat.EPUB)
@@ -158,6 +164,81 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         put("locator_json",if(legacy) StoredLocatorCodec.encodeLegacyTxt(current) else LocatorCodec.encode(current));put("furthest_json",ReadingExtentCodec.encode(extent))
         put("fraction",(current.sourceOffset.toDouble()/(chars-1).coerceAtLeast(1)).coerceIn(0.0,1.0));put("furthest_fraction",(extent.sourceOffset.toDouble()/(chars-1).coerceAtLeast(1)).coerceIn(0.0,1.0))
     }
+    // --- user fonts (v6): the files live in the app's private font directory; the table says what they are ---
+    fun userFonts(): List<UserFont> = readableDatabase.rawQuery("SELECT id,name,family,extension,bytes,imported_at FROM user_fonts ORDER BY imported_at,id",null).use { c ->
+        buildList { while(c.moveToNext()) add(UserFont(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5))) }
+    }
+    fun userFont(id: String): UserFont? = userFonts().firstOrNull { it.id==id }
+    fun userFontByHash(sha256: String): UserFont? = readableDatabase.rawQuery("SELECT id FROM user_fonts WHERE sha256=?",arrayOf(sha256)).use { if(it.moveToFirst()) it.getString(0) else null }?.let(::userFont)
+    fun insertUserFont(font: UserFont,sha256: String) {
+        transaction { db ->
+            db.insertOrThrow("user_fonts",null,ContentValues().apply { put("id",font.id);put("name",font.name);put("family",font.family);put("extension",font.extension);put("bytes",font.bytes);put("sha256",sha256);put("imported_at",font.importedAt) })
+            // The persistent revision moves with the in-memory one, so the next rule write cannot land on an already-seen number.
+            db.execSQL("UPDATE reader_defaults SET prefs_revision=prefs_revision+1")
+        }
+        notifyContentsChanged()
+        val revision=readableDatabase.rawQuery("SELECT MAX(prefs_revision) FROM reader_defaults",null).use { it.moveToFirst();it.getLong(0) }
+        preferencesRevision.update { maxOf(it,revision) }
+    }
+    /** Removes the row and, if it was the chosen reading font, returns the app-wide choice to the default in the same transaction. */
+    fun deleteUserFont(id: String) {
+        transaction { db ->
+            db.delete("user_fonts","id=?",arrayOf(id))
+            db.update("reader_defaults",ContentValues().apply { put("font_family","default") },"font_family=?",arrayOf("user:$id"))
+            db.execSQL("UPDATE reader_defaults SET prefs_revision=prefs_revision+1")
+        }
+        notifyContentsChanged()
+        val revision=readableDatabase.rawQuery("SELECT MAX(prefs_revision) FROM reader_defaults",null).use { it.moveToFirst();it.getLong(0) }
+        preferencesRevision.update { maxOf(it,revision) }
+    }
+    // --- categories (v6): a book may be in several; deleting a category only removes the links ---
+    fun categories(): List<Category> = readableDatabase.rawQuery("SELECT c.id,c.name,c.sort,(SELECT COUNT(*) FROM content_categories m WHERE m.category_id=c.id) FROM categories c ORDER BY c.sort,c.id",null).use { c ->
+        buildList { while(c.moveToNext()) add(Category(c.getLong(0),c.getString(1),c.getInt(2),c.getInt(3))) }
+    }
+    fun uncategorizedCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM contents c WHERE NOT EXISTS(SELECT 1 FROM content_categories m WHERE m.content_id=c.id)",null).use { c -> check(c.moveToFirst());c.getInt(0) }
+    fun createCategory(name: String): Long {
+        val clean=CategoryNames.clean(name)
+        return transaction { db ->
+            require(db.rawQuery("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE",arrayOf(clean)).use { !it.moveToFirst() }) { "已有同名分类" }
+            val next=db.rawQuery("SELECT COALESCE(MAX(sort),-1)+1 FROM categories",null).use { check(it.moveToFirst());it.getInt(0) }
+            db.insertOrThrow("categories",null,ContentValues().apply { put("name",clean);put("sort",next);put("created_at",System.currentTimeMillis()) })
+        }.also { notifyContentsChanged() }
+    }
+    fun renameCategory(id: Long,name: String) {
+        val clean=CategoryNames.clean(name)
+        transaction { db ->
+            require(db.rawQuery("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE AND id<>?",arrayOf(clean,id.toString())).use { !it.moveToFirst() }) { "已有同名分类" }
+            check(db.update("categories",ContentValues().apply { put("name",clean) },"id=?",arrayOf(id.toString()))==1) { "分类不存在" }
+        }
+        notifyContentsChanged()
+    }
+    fun deleteCategory(id: Long) {
+        transaction { db ->
+            check(db.delete("categories","id=?",arrayOf(id.toString()))==1) { "分类不存在" }
+            // Keep the remaining order contiguous.
+            val rest=db.rawQuery("SELECT id FROM categories ORDER BY sort,id",null).use { c -> buildList { while(c.moveToNext()) add(c.getLong(0)) } }
+            rest.forEachIndexed { index,categoryId -> db.update("categories",ContentValues().apply { put("sort",index) },"id=?",arrayOf(categoryId.toString())) }
+        }
+        notifyContentsChanged()
+    }
+    fun reorderCategories(orderedIds: List<Long>) {
+        transaction { db ->
+            val existing=db.rawQuery("SELECT id FROM categories",null).use { c -> buildSet { while(c.moveToNext()) add(c.getLong(0)) } }
+            require(orderedIds.size==existing.size && orderedIds.toSet()==existing) { "分类顺序已过期，请刷新后重试" }
+            orderedIds.forEachIndexed { index,categoryId -> db.update("categories",ContentValues().apply { put("sort",index) },"id=?",arrayOf(categoryId.toString())) }
+        }
+        notifyContentsChanged()
+    }
+    fun setMembership(contentIds: Collection<String>,categoryId: Long,member: Boolean) {
+        transaction { db ->
+            check(db.rawQuery("SELECT 1 FROM categories WHERE id=?",arrayOf(categoryId.toString())).use { it.moveToFirst() }) { "分类不存在" }
+            contentIds.forEach { id ->
+                if(member)db.insertWithOnConflict("content_categories",null,ContentValues().apply { put("content_id",id);put("category_id",categoryId) },SQLiteDatabase.CONFLICT_IGNORE)
+                else db.delete("content_categories","content_id=? AND category_id=?",arrayOf(id,categoryId.toString()))
+            }
+        }
+        notifyContentsChanged()
+    }
     fun delete(id: String) = transaction { it.delete("contents","id=?",arrayOf(id)) }
     fun setMetadata(id: String,title: String,author: String) = transaction { it.update("contents",ContentValues().apply { put("title",title);put("author",author) },"id=?",arrayOf(id));Unit }
     fun savePosition(id: String,locator: Locator.Text,furthest: Long = locator.sourceOffset,time: Long = System.currentTimeMillis()) = transaction { db ->
@@ -173,9 +254,21 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         readableDatabase.rawQuery("SELECT COUNT(*) FROM bookmarks WHERE content_id IN (${batch.joinToString(",") { "?" }})",batch.toTypedArray()).use { c -> check(c.moveToFirst());c.getInt(0) }
     }
     fun bookmarks(id: String): List<Bookmark> = readableDatabase.rawQuery("SELECT * FROM bookmarks WHERE content_id=? ORDER BY created DESC,id DESC",arrayOf(id)).use { c -> buildList { while(c.moveToNext()) add(Bookmark(c.long("id"),id,StoredLocatorCodec.decode(c.string("locator_json")),c.string("excerpt"),c.long("created"))) } }
+    /**
+     * Puts back a bookmark that was just deleted, with its original identity, position and time. The position may belong to an
+     * earlier index revision of the book (such bookmarks are shown as "nearby"), so this deliberately does not apply the current-
+     * revision check that creating a new bookmark does.
+     */
+    fun restoreBookmark(bookmark: ReaderBookmark): Boolean = transaction { it.insertWithOnConflict("bookmarks",null,ContentValues().apply {
+        put("id",bookmark.id);put("content_id",bookmark.contentId);put("locator_json",LocatorCodec.encode(bookmark.locator));put("locator_key",LocatorCodec.key(bookmark.locator))
+        put("fallback_fraction",when(val locator=bookmark.locator) { is Locator.Text -> locator.fallbackFraction;is Locator.Epub -> locator.fallbackFraction;else -> 0.0 })
+        put("excerpt",LocatorCodec.safePrefix(bookmark.excerpt,120));put("created",bookmark.created)
+    },SQLiteDatabase.CONFLICT_IGNORE) != -1L }
     fun addBookmark(id: String,locator: Locator,excerpt: String): Boolean = transaction { it.insertWithOnConflict("bookmarks",null,ContentValues().apply { put("content_id",id);put("locator_json",LocatorCodec.encode(locator));put("locator_key",LocatorCodec.key(locator));put("fallback_fraction",when(locator) { is Locator.Text -> locator.fallbackFraction;is Locator.Epub -> locator.fallbackFraction;else -> 0.0 });put("excerpt",LocatorCodec.safePrefix(excerpt,120));put("created",System.currentTimeMillis()) },SQLiteDatabase.CONFLICT_IGNORE) != -1L }
     fun deleteBookmark(id: Long,contentId: String) { transaction { it.delete("bookmarks","id=? AND content_id=?",arrayOf(id.toString(),contentId));Unit } }
-    fun reindex(id: String,encoding: String,version: String,paragraphs: Int,characters: Long) = transaction { db ->
+    /** The chapter rule chosen for a TXT book; books never re-chaptered use the built-in detection. */
+    fun chapterRule(id: String): ChapterRule = ChapterRules.decode(readableDatabase.rawQuery("SELECT chapter_rule FROM txt_meta WHERE content_id=?",arrayOf(id)).use { if(it.moveToFirst() && !it.isNull(0)) it.getString(0) else null })
+    fun reindex(id: String,encoding: String,version: String,paragraphs: Int,characters: Long,chapterRule: String? = null) = transaction { db ->
         val old = requireNotNull(txt(id)); val anchors = bookmarks(id)
         val backup = buildString { append("current=${old.current.sourceOffset},${old.current.paragraph},${old.current.character},${old.current.fallbackFraction};furthest=${old.furthest}\n")
             anchors.forEach { val anchor = it.locator; if(anchor is Locator.Text) append("bookmark=${it.id},${anchor.version},${anchor.sourceOffset},${anchor.paragraph},${anchor.character},${anchor.fallbackFraction}\n") } }
@@ -185,8 +278,26 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         fun remap(offset: Long) = (offset*scale).toLong().coerceIn(0,last)
         val offset = remap(old.current.sourceOffset)
         db.update("contents",ContentValues().apply { put("revision",version) },"id=?",arrayOf(id))
-        db.update("txt_meta",ContentValues().apply { put("encoding",encoding);put("paragraphs",paragraphs);put("characters",characters) },"content_id=?",arrayOf(id))
+        db.update("txt_meta",ContentValues().apply { put("encoding",encoding);put("paragraphs",paragraphs);put("characters",characters);if(chapterRule!=null)put("chapter_rule",chapterRule) },"content_id=?",arrayOf(id))
         db.update("positions",positionValues(Locator.Text(version,offset,0,0,if(characters>0) offset.toDouble()/characters else 0.0),TxtReadingExtent(version,remap(old.furthest)),characters),"content_id=?",arrayOf(id));Unit
+    }
+    /**
+     * Copies the database file while holding SQLite's writer lock, after merging the WAL into it, so the copy is one
+     * consistent state even if reading progress is being saved at the same moment. Callers hold the repository's mutation lock.
+     */
+    internal fun snapshotTo(target: java.io.File) {
+        val source=context.getDatabasePath("library.db")
+        var merged=false
+        repeat(5) { attempt ->
+            if(!merged) {
+                writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)",null).use { c -> merged=c.moveToFirst() && c.getInt(0)==0 }
+                if(!merged)Thread.sleep(100L*(attempt+1))
+            }
+        }
+        check(merged) { "书库正在使用，请稍后重试" }
+        transaction { _ ->
+            java.io.FileOutputStream(target).use { out -> source.inputStream().use { it.copyTo(out) };out.fd.sync() }
+        }
     }
     internal fun <T> transaction(action: (SQLiteDatabase) -> T): T = trackedWrite {
         val db = writableDatabase;db.beginTransactionNonExclusive()
@@ -208,10 +319,19 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
     internal fun recoveryVersions(): Map<String,Set<String>> = readableDatabase.rawQuery("SELECT id,revision FROM contents UNION SELECT content_id,version FROM locator_backups",null).use { c ->
         val result=mutableMapOf<String,MutableSet<String>>();while(c.moveToNext())result.getOrPut(c.getString(0)) { mutableSetOf() }.add(c.getString(1));result
     }
-    private fun Cursor.content() = ContentRecord(string("id"),ContentFormat.valueOf(string("format").uppercase()),string("revision"),string("title"),string("author"),string("hash"),long("bytes"),long("imported_at"),long("last_read_at"),nullString("language"),nullString("original_name"),nullString("cover_path"),if(isNull(getColumnIndexOrThrow("finished_at"))) null else long("finished_at"),int("hidden_from_continue")!=0)
+    private fun Cursor.content() = ContentRecord(string("id"),ContentFormat.valueOf(string("format").uppercase()),string("revision"),string("title"),string("author"),string("hash"),long("bytes"),long("imported_at"),long("last_read_at"),nullString("language"),nullString("original_name"),nullString("cover_path"),if(isNull(getColumnIndexOrThrow("finished_at"))) null else long("finished_at"))
     private class WriteClock { val epoch=java.util.concurrent.atomic.AtomicLong();val active=java.util.concurrent.atomic.AtomicInteger() }
     internal companion object {
         private val writeClocks=java.util.concurrent.ConcurrentHashMap<String,WriteClock>()
+        /** v6 column additions kept apart from SCHEMA so earlier-version fixtures stay accurate. */
+        val V6_ALTERS = listOf("ALTER TABLE reader_defaults ADD COLUMN paragraph_spacing REAL","ALTER TABLE txt_meta ADD COLUMN chapter_rule TEXT")
+        val V6_SCHEMA = listOf(
+            "CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,sort INTEGER NOT NULL,created_at INTEGER NOT NULL)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS categories_name ON categories(name COLLATE NOCASE)",
+            "CREATE TABLE IF NOT EXISTS content_categories(content_id TEXT NOT NULL REFERENCES contents(id) ON DELETE CASCADE,category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,PRIMARY KEY(content_id,category_id))",
+            "CREATE INDEX IF NOT EXISTS content_categories_category ON content_categories(category_id)",
+            "CREATE TABLE IF NOT EXISTS user_fonts(id TEXT PRIMARY KEY,name TEXT NOT NULL,family TEXT NOT NULL,extension TEXT NOT NULL CHECK(extension IN ('ttf','otf')),bytes INTEGER NOT NULL,sha256 TEXT NOT NULL UNIQUE,imported_at INTEGER NOT NULL)"
+        )
         val SCHEMA = listOf(
             "CREATE TABLE contents(id TEXT PRIMARY KEY,format TEXT NOT NULL CHECK(format IN ('txt','epub')),revision TEXT NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,bytes INTEGER NOT NULL,imported_at INTEGER NOT NULL,last_read_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER,cover_path TEXT,language TEXT,original_name TEXT,hidden_from_continue INTEGER NOT NULL DEFAULT 0 CHECK(hidden_from_continue IN (0,1)))",
             "CREATE TABLE txt_meta(content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,encoding TEXT NOT NULL,paragraphs INTEGER NOT NULL,characters INTEGER NOT NULL)",

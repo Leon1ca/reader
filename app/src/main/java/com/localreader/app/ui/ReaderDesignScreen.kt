@@ -99,6 +99,8 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
         if(uiState.readerPanel==ReaderPanel.ENCODING && rendererState.phase==ReaderPhase.READY && !encodingEntryConsumed)session.textControls?.encoding?.let {encodingEntryConsumed=true;encoding=it;controller.preview(it);model.consumeReaderPanel()}
     }
     LaunchedEffect(uiState.readerPanel) { if(uiState.readerPanel!=null && uiState.readerPanel!=ReaderPanel.ENCODING)model.consumeReaderPanel() }
+    // Messages raised while reading (a shared link, an unreadable file) are shown here instead of waiting for the shelf.
+    LaunchedEffect(Unit) { model.notices.flow.collect { localNotice=it } }
     var searchQuery by remember(session.generation) { mutableStateOf("") }
     fun dismissPanel() { panel=null }
     DisposableEffect(controller) {
@@ -109,9 +111,10 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
             is RendererEvent.Notice -> localNotice=event.message
             RendererEvent.Loading -> restored=false
             is RendererEvent.Ready -> { failed=false;if(event.nearby)localNotice=uiText(R.string.nearby_restored) }
-            is RendererEvent.Position -> restored=true
+            // Turning or scrolling the page is reading again: the bars go away, as after a centre tap (UX-06).
+            is RendererEvent.Position -> { restored=true;if(event.intent==IntentCause.UserNavigation)chrome=false }
             is RendererEvent.Error -> { restored=false;failed=true;localNotice=event.message }
-            is RendererEvent.Crashed -> { restored=false;failed=controller.state.value.phase==ReaderPhase.FAILED;localNotice=controller.state.value.message }
+            is RendererEvent.Crashed -> { (model.diagnosticsHook)("renderer_crashed");restored=false;failed=controller.state.value.phase==ReaderPhase.FAILED;localNotice=controller.state.value.message }
         } }
         onDispose { stop() }
     }
@@ -136,7 +139,7 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
             // The bars start hidden, so assistive technology gets its own way to show them besides the centre tap.
             val toolbar=CustomAccessibilityAction(uiText(R.string.toggle_toolbar)) {controller.toggleChrome();true}
             customActions=if(controller.fixedState?.zoom?.let {it>1}==true)listOf(toolbar) else listOf(CustomAccessibilityAction(uiText(R.string.previous_page)) {controller.prev();true},CustomAccessibilityAction(uiText(R.string.next_page)) {controller.next();true},toolbar)
-        }, update = { it.pageTurn=display.pageTurn;it.pageColor=background.toArgb();it.present(session,rendererState.recoveryAttempt) }) }
+        }, update = { it.onUserScroll={chrome=false};it.pageTurn=display.pageTurn;it.pageColor=background.toArgb();it.present(session,rendererState.recoveryAttempt) }) }
         Column(Modifier.fillMaxWidth().statusBarsPadding().padding(top=64.dp)) {
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(operation, Modifier.padding(12.dp)) }
             val notice = localNotice
@@ -146,6 +149,8 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
                 Text(if(chapterIndex>=0)uiText(R.string.chapter_parse_error,chapterIndex+1) else uiText(R.string.page_parse_error),style=LocalUiText.current.section)
                 Text(uiText(R.string.progress_preserved),style=LocalUiText.current.explanation)
                 if(rendererState.retryable)ActionButton(uiText(R.string.retry),{failed=false;localNotice=null;controller.retry()},style=ActionStyle.SECONDARY)
+                // Whatever the cause, there is always a way out; progress is already preserved.
+                ActionButton(uiText(R.string.back_to_library),{ model.closeReader() },style=ActionStyle.SECONDARY)
                 val current=currentChapter(session,rendererState.position)
                 session.toc.indexOfFirst {it.id==current}.takeIf {it>=0}?.let {index -> session.toc.getOrNull(index+1)?.let {next -> ActionButton(uiText(R.string.skip_next_chapter),{controller.goToToc(next.id)},style=ActionStyle.FILTER)} }
                 ActionButton(uiText(R.string.copy_diagnostics),{
@@ -160,7 +165,7 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
             !busy && restored && rendererState.phase==ReaderPhase.READY,controller.capabilities.search,
             {if(!controller.returnToMain())controller.close()},
             {val bookmarks=rendererState.currentPageBookmarks;if(bookmarks.isEmpty())controller.addBookmark() else bookmarks.forEach {controller.deleteBookmark(it.id)}},
-            {panel=it},{controller.patchRules(RulesPatch(fxlZoom=FieldUpdate.Set("fit-page")))})
+            {panel=it},{controller.patchRules(RulesPatch(fxlZoom=FieldUpdate.Set("fit-page")))},background)
     }
     if(finishUndo!=null) {
         LaunchedEffect(finishUndo) {delay(6000);finishUndo=null}
@@ -196,25 +201,47 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
         ActionButton(uiText(R.string.mark_finished),{finishUndo=false;controller.markFinished(true)},Modifier.fillMaxWidth())
         ActionButton(uiText(R.string.continue_reading),controller::dismissEnd,Modifier.fillMaxWidth(),style=ActionStyle.SECONDARY)
     }
-    panel?.takeIf {encoding==null}?.let { selected -> ReaderOverlay(selected.title,side=selected==ReaderPanel.CONTENTS || selected==ReaderPanel.BOOKMARKS,onClose=::dismissPanel) {
+    panel?.takeIf {encoding==null}?.let { selected ->
+    // The toolbar keeps its short labels; the two V2 panels are titled by what they hold.
+    val title=when(selected) {
+        ReaderPanel.READING -> uiText(R.string.display_settings)
+        ReaderPanel.TYPOGRAPHY -> if(controller.capabilities.fixedZoom)uiText(R.string.zoom_and_spread) else uiText(R.string.typography_settings)
+        else -> selected.title
+    }
+    // Search is the same full-height card as the table of contents, on phones and tablets alike.
+    ReaderOverlay(title,side=selected==ReaderPanel.CONTENTS || selected==ReaderPanel.BOOKMARKS || selected==ReaderPanel.SEARCH,onClose=::dismissPanel) {
             when (selected) {
                 ReaderPanel.SEARCH -> {
-                    OutlinedTextField(searchQuery,{ searchQuery=it },label={Text(uiText(R.string.search_body))},singleLine=true,modifier=Modifier.fillMaxWidth())
-                    Row {
-                        TextButton(onClick={controller.search(searchQuery)},enabled=searchQuery.isNotEmpty()) { Text(uiText(R.string.find)) }
-                        if(searchState.phase==SearchPhase.RUNNING)TextButton(onClick=controller::cancelSearch) { Text(uiText(R.string.cancel_search)) }
+                    // As in Apple Books: a search field on top (the keyboard's search key submits), one status line, then results.
+                    val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                    val submit={ if(searchQuery.isNotBlank()) { keyboard?.hide();controller.search(searchQuery) } }
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        UiTextField(searchQuery,{ searchQuery=it },uiText(R.string.search_body),Modifier.weight(1f).testTag("reader-search-field"),leading=UiGlyph.SEARCH,
+                            keyboardOptions=androidx.compose.foundation.text.KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions=androidx.compose.foundation.text.KeyboardActions(onSearch={ submit() }))
+                        if(searchState.phase==SearchPhase.RUNNING) ActionButton(uiText(R.string.cancel_search),controller::cancelSearch,style=ActionStyle.FILTER)
+                        else ActionButton(uiText(R.string.find),submit,enabled=searchQuery.isNotBlank(),style=ActionStyle.FILTER)
                     }
-                    when(searchState.phase) {
-                        SearchPhase.RUNNING -> { LinearProgressIndicator(Modifier.fillMaxWidth());Text(uiText(R.string.search_progress,searchState.completedDocuments,searchState.totalDocuments)) }
-                        SearchPhase.FAILED -> Text(searchState.message ?: uiText(R.string.search_failed))
-                        SearchPhase.CANCELED -> Text(uiText(R.string.search_canceled))
-                        SearchPhase.DONE -> Text(if(searchState.hits.isEmpty())uiText(R.string.search_empty) else uiText(R.string.search_hit_count,searchState.hits.size,if(searchState.truncated)uiText(R.string.search_truncated) else ""))
-                        SearchPhase.IDLE -> Text(uiText(R.string.search_hint))
+                    val status=LocalUiText.current.explanation;val secondary=LocalUiPalette.current.secondaryText
+                    Column(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                        when(searchState.phase) {
+                            SearchPhase.RUNNING -> {
+                                UiProgressBar(if(searchState.totalDocuments>0)searchState.completedDocuments.toFloat()/searchState.totalDocuments else null)
+                                Text(uiText(R.string.search_progress,searchState.completedDocuments,searchState.totalDocuments),style=status,color=secondary)
+                            }
+                            SearchPhase.FAILED -> Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Text(searchState.message ?: uiText(R.string.search_failed),Modifier.weight(1f),style=status,color=LocalUiPalette.current.danger)
+                                ActionButton(uiText(R.string.retry),{ controller.search(searchQuery) },enabled=searchQuery.isNotEmpty(),style=ActionStyle.FILTER)
+                            }
+                            SearchPhase.CANCELED -> Text(uiText(R.string.search_canceled),style=status,color=secondary)
+                            SearchPhase.DONE -> Text(if(searchState.hits.isEmpty())uiText(R.string.search_empty) else uiText(R.string.search_hit_count,searchState.hits.size,if(searchState.truncated)uiText(R.string.search_truncated) else ""),style=status,color=secondary)
+                            SearchPhase.IDLE -> Text(uiText(R.string.search_hint),style=status,color=secondary)
+                        }
                     }
                     if(session.document.kind==WebContentKind.FIXED)Text(uiText(R.string.fixed_search_hint),style=MaterialTheme.typography.labelSmall)
                     val chapter=currentChapter(session,rendererState.position)?.let {id -> session.toc.firstOrNull {it.id==id}?.title}
                     val groups=searchState.hits.groupBy {it.chapter}.entries.sortedBy {if(it.key==chapter)0 else 1}
-                    LazyColumn(Modifier.heightIn(max=400.dp).testTag("reader-search-results")) {groups.forEach {group ->
+                    LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-search-results")) {groups.forEach {group ->
                         item(key="chapter-${group.key}") {Text(uiText(R.string.search_chapter_count,group.key.ifBlank {uiText(R.string.body)},group.value.size),style=LocalUiText.current.section)}
                         items(group.value,key={it.id}) { hit ->
                         Column(Modifier.fillMaxWidth().clickable(role=androidx.compose.ui.semantics.Role.Button) {if(controller.goToSearch(hit.id))dismissPanel()}.padding(vertical=12.dp)) {
@@ -223,7 +250,7 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
                                 Text(page?.let { uiText(R.string.page_number,if(it.estimated)uiText(R.string.estimated_prefix) else "",it.page) } ?: uiText(R.string.page_not_estimated),style=MaterialTheme.typography.labelSmall)
                                 Text(buildAnnotatedString {
                                     append(hit.excerpt.text.substring(0,hit.excerpt.matchStart))
-                                    withStyle(SpanStyle(fontFamily=LocalUiText.current.fonts.sans(FontWeight.Bold),fontWeight=FontWeight.Bold,color=LocalUiPalette.current.primary)) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
+                                    withStyle(SpanStyle(fontFamily=LocalUiText.current.fonts.sans(FontWeight.Medium),fontWeight=FontWeight.Medium,color=LocalUiPalette.current.primary)) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
                                     append(hit.excerpt.text.substring(hit.excerpt.matchEnd))
                                 })
                             }
@@ -232,7 +259,7 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
                 }
                 ReaderPanel.CONTENTS, ReaderPanel.BOOKMARKS -> ContentsPanel(session,rendererState,controller,selected==ReaderPanel.BOOKMARKS,uiState.books.firstOrNull {it.id==session.contentId},{panel=if(it)ReaderPanel.BOOKMARKS else ReaderPanel.CONTENTS},::dismissPanel,{localNotice=it})
                 ReaderPanel.READING -> ReadingControls(model,session) {panel=ReaderPanel.TYPOGRAPHY}
-                ReaderPanel.TYPOGRAPHY -> TypographyControls(session,controller,{localNotice=it}) {candidate -> encoding=candidate;controller.preview(candidate)}
+                ReaderPanel.TYPOGRAPHY -> TypographyControls(session,controller,{localNotice=it},{candidate -> encoding=candidate;controller.preview(candidate)}) {panel=ReaderPanel.READING}
                 ReaderPanel.ENCODING -> Unit
 
             }
@@ -241,7 +268,7 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
         Column(Modifier.heightIn(max=520.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
             Text(uiText(R.string.encoding_detected,session.textControls?.encoding ?: uiText(R.string.unknown)))
             Text(uiText(R.string.encoding_preview_hint))
-            FlowRow {session.textControls?.availableEncodings.orEmpty().forEach {value -> ActionButton(value,{encoding=value;controller.preview(value)},style=ActionStyle.FILTER,selected=value==candidate)}}
+            FlowRow {session.textControls?.availableEncodings.orEmpty().forEach {value -> ActionButton(value,{encoding=value;controller.cancelChapterScan();controller.preview(value)},style=ActionStyle.FILTER,selected=value==candidate)}}
             Text(uiText(R.string.encoding_preview_metadata,preview.value?.detectedEncoding ?: uiText(R.string.unknown),preview.value?.chapterCount ?: session.toc.size))
             when(preview.phase) {
                 PreviewPhase.IDLE -> Unit
@@ -250,9 +277,14 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
                 PreviewPhase.DONE -> preview.value?.let {value -> SelectionContainer {Text(value.lines.joinToString("\n"),Modifier.fillMaxWidth().background(LocalUiPalette.current.input).padding(12.dp))};if(value.truncated)Text(uiText(R.string.preview_truncated))}
             }
             ActionButton(uiText(R.string.preview_twenty_lines),{controller.preview(candidate,20)},style=ActionStyle.FILTER)
-            Row {ActionButton(uiText(R.string.custom_rules),{},enabled=false,style=ActionStyle.FILTER);ActionButton(uiText(R.string.split_by_count),{},enabled=false,style=ActionStyle.FILTER)}
+            val scan by controller.chapterScanState.collectAsStateWithLifecycle()
+            var ruleMode by remember { mutableStateOf(ChapterRuleMode.UNCHANGED) }
+            var pattern by remember { mutableStateOf("") }
+            var chars by remember { mutableIntStateOf(chapterLengthChoices[1]) }
+            ChapterRuleEditor(ruleMode,pattern,chars,scan,{ ruleMode=it;controller.cancelChapterScan() },{ pattern=it;controller.cancelChapterScan() },{ chars=it;controller.cancelChapterScan() },
+                { controller.scanChapters(candidate,composedRule(if(ruleMode==ChapterRuleMode.UNCHANGED)ChapterRuleMode.AUTO else ruleMode,pattern,chars) ?: ChapterRule.Auto) })
             Text(uiText(R.string.reencode_hint),style=LocalUiText.current.explanation)
-            ActionButton(uiText(R.string.reencode_action,candidate),{controller.reencode(candidate);encoding=null;panel=null},Modifier.fillMaxWidth(),enabled=preview.phase==PreviewPhase.DONE)
+            ActionButton(uiText(R.string.reencode_action,candidate),{controller.reencode(candidate,composedRule(ruleMode,pattern,chars));encoding=null;panel=null},Modifier.fillMaxWidth(),enabled=preview.phase==PreviewPhase.DONE && (ruleMode!=ChapterRuleMode.CUSTOM || (pattern.isNotBlank() && scan.phase==PreviewPhase.DONE && scan.encoding==candidate && scan.rule==composedRule(ruleMode,pattern,chars) && (scan.value?.hits ?: 0)>0)))
             ActionButton(uiText(R.string.cancel),{encoding=null;controller.cancelPreview()},Modifier.fillMaxWidth(),style=ActionStyle.SECONDARY)
         }
     } }

@@ -39,7 +39,7 @@ class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val i
                                 append(css)
                                 if(media.isNotBlank())append('}')
                             } else warnings.add("外部、缺失或循环 CSS import 已阻止")
-                        } else if(name!="charset")warnings.add("不支持的 CSS at-rule 已移除：$name")
+                        }  // other statement at-rules (@charset, @namespace, ...) are dropped silently, as Readest does
                     }
                     continue
                 }
@@ -50,7 +50,7 @@ class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val i
                     when(name) {
                         "font-face" -> { val decl=declarations(body,mode,true);if(decl.isNotBlank())append("@font-face{$decl}") }
                         "media","supports","layer","container" -> append("$prelude{${sheet(body,mode,depth+1)}}")
-                        else -> warnings.add("不支持的 CSS at-rule 已移除：$name")
+                        else -> Unit // @page, @keyframes and other unsupported blocks are removed without bothering the reader
                     }
                 } else if(prelude.isNotBlank()) {
                     val decl=declarations(body,mode,false)
@@ -180,7 +180,8 @@ class EpubCss(private val resourceUrl: (String,Boolean) -> String?,private val i
         val SIZE=Regex("[+]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:px|pt|pc|em|rem|ex|rex|ch|rch|cap|rcap|ic|ric|lh|rlh|vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|vi|vb|cm|mm|q|in|%)")
         val ANGLE=Regex("[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:deg|grad|rad|turn)")
         val STRETCH=setOf("ultra-condensed","extra-condensed","condensed","semi-condensed","semi-expanded","expanded","extra-expanded","ultra-expanded")
-        val CUSTOM=setOf("color","font","font-family","font-size","line-height","text-align","text-indent","letter-spacing","word-spacing")
+        // Alignment and first-line indent stay the book's own in custom mode (Readest keeps them too); the reader controls fonts, size, colour and spacing.
+        val CUSTOM=setOf("color","font","font-family","font-size","line-height","letter-spacing","word-spacing")
     }
 }
 

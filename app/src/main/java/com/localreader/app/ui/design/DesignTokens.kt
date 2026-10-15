@@ -19,6 +19,19 @@ data class UiPalette(
     val readingInput: Color = Color(0xFFF0EADF), val readingText: Color = Color(0xFF2B2620),
     val readingHeader: Color = Color(0xFF5A5040), val readingSecondary: Color = Color(0xFF6B604F),
     val nightPage: Color = Color(0xFF1A1917), val nightText: Color = Color(0xFFB9B2A6),
+    /** Reader running header, page number and their night variant (UiSpec 阅读·页眉页码). */
+    val chromeText: Color = Color(0xFF5A5040),
+    /** Background of bottom sheets and confirmations; grouped cards sit on it in [card]. */
+    val sheet: Color = Color(0xFFF7F7F5),
+    /** 36×4 grab handle on sheets. */
+    val sheetHandle: Color = Color(0xFFD6D6D1),
+    /** Hairline outline of unselected pills, checkboxes and radio rings (boards: #D9D9D4 / #C6C7CB). */
+    val outline: Color = Color(0xFFD9D9D4),
+    /** Text and icons drawn on [primary] or [danger] fills. */
+    val onPrimary: Color = Color.White,
+    val successContainer: Color = Color(0xFFE3EFE8),
+    /** Track of progress bars and sliders. */
+    val track: Color = Color(0xFFEDEDEA),
 )
 
 val LocalUiPalette = staticCompositionLocalOf { UiPalette() }

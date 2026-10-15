@@ -14,7 +14,10 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
     private val projection=source.displayDirectory?.let { TxtDisplayProjection.prepare(source,it,checkpoint) }
     override val publication: ReaderPublication = try { TxtPublication(source,checkpoint,projection) }
         catch(error: Throwable) { try {projection?.close()} catch(close: Throwable) {error.addSuppressed(close)};throw error }
-    override val textPreview = original?.let { file -> TextPreviewSource { encoding,lines,checkpoint -> checkOpen();readTextPreview({ file.inputStream() },encoding,lines,null,source.index.chapters.size) { checkOpen();checkpoint() } } }
+    override val textPreview = original?.let { file -> object: TextPreviewSource {
+        override fun preview(encoding: String,lines: Int,checkpoint: ()->Unit) = run { checkOpen();readTextPreview({ file.inputStream() },encoding,lines,null,source.index.chapters.size) { checkOpen();checkpoint() } }
+        override fun scanChapters(encoding: String,rule: ChapterRule,checkpoint: ()->Unit) = run { checkOpen();TxtParser.scanChapters(file,encoding,rule) { checkOpen();checkpoint() } }
+    } }
     private val chapters = source.index.chapters
     private val entries = chapters.map { TocEntry("text:${it.sourceOffset}", it.title) }
     override val textControls = TextControls(source.index.encoding, TxtParser.encodings.toList(),

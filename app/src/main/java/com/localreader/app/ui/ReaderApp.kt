@@ -52,15 +52,21 @@ fun ReaderApp(model: ReaderViewModel) {
     SystemBarAppearance(dark)
     // The library keeps its scroll position, route and sheets while a book is open.
     val saveable=androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val fonts by model.userFonts.collectAsStateWithLifecycle()
     UiDesignTheme(UiFonts.system,dark,reader=reading) {
+      CompositionLocalProvider(LocalUserFonts provides fonts) {
         Surface(Modifier.fillMaxSize(),color=LocalUiPalette.current.page) {
             if (reading) saveable.SaveableStateProvider("reader") { ReaderDesignScreen(model, requireNotNull(state.reader), state.busy, state.operation,nightOverride) }
             else saveable.SaveableStateProvider("library") { com.localreader.app.ui.app.LibraryRoot(model,state) }
             state.error?.let { message -> AlertDialog(onDismissRequest = model::dismissError,
                 title = { Text(uiText(R.string.operation_incomplete)) }, text = { Text(UiStrings.safeMessage(message)) }, confirmButton = { TextButton(onClick = model::dismissError) { Text(uiText(R.string.acknowledge)) } }) }
         }
+      }
     }
 }
+
+/** Imported fonts, for the typography controls wherever they appear. */
+internal val LocalUserFonts = staticCompositionLocalOf<List<com.localreader.app.data.UserFont>> { emptyList() }
 
 private fun Context.activity(): Activity? {
     var current: Context = this

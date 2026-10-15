@@ -54,7 +54,7 @@ internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=fal
         val view=LocalView.current
         val lightBars=LocalUiPalette.current.page.luminance()>.5f
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.let { window ->
-            window.attributes=window.attributes.apply {dimAmount=.08f}
+            window.attributes=window.attributes.apply {dimAmount=.16f}
             WindowCompat.getInsetsController(window,view).apply {isAppearanceLightStatusBars=lightBars;isAppearanceLightNavigationBars=lightBars}
         } }
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout)).imePadding()) {
@@ -81,15 +81,17 @@ internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=fal
                     Column(Modifier.fillMaxWidth().pointerInput(Unit) {
                         detectVerticalDragGestures(onDragEnd={if(drag>threshold)close();drag=0f},onDragCancel={drag=0f}) {_,amount -> drag=(drag+amount).coerceAtLeast(0f)}
                     }) {
-                        Box(Modifier.align(Alignment.CenterHorizontally).padding(top=10.dp).size(36.dp,4.dp).background(LocalUiPalette.current.controlText.copy(alpha=.28f),RoundedCornerShape(2.dp)))
+                        Box(Modifier.align(Alignment.CenterHorizontally).padding(top=10.dp).size(36.dp,4.dp).background(LocalUiPalette.current.sheetHandle,RoundedCornerShape(2.dp)))
                         Row(Modifier.fillMaxWidth().heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Text(title,Modifier.weight(1f),style=LocalUiText.current.panel)
-                            IconAction(uiText(R.string.close_panel,title),UiGlyph.CLOSE,close)
+                            Text(title,Modifier.weight(1f),style=LocalUiText.current.sheetTitle,color=LocalUiPalette.current.text)
+                            IconAction(uiText(R.string.close_panel,title),UiGlyph.CLOSE,close,visual=UiSize.readerIcon)
                         }
                     }
                     content()
-                    // The card runs to the screen edge; this space keeps the last row clear of the navigation bar.
-                    Spacer(Modifier.height(20.dp));Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars.union(WindowInsets.displayCutout)))
+                    // A sheet or side panel runs to the screen edge, so it keeps its last row clear of the navigation bar. The
+                    // floating card on wide screens ends above that bar; padding it by the bar's height left a blank strip (CLOSE-05).
+                    Spacer(Modifier.height(20.dp))
+                    if(attached || (side && wide))Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars.union(WindowInsets.displayCutout)))
                 }
             }
         }

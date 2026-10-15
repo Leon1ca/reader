@@ -26,7 +26,7 @@ for f in sorted((root/'app/src/androidTest/java').rglob('*.kt')):
   name=package[1]+'.'+cls[1]
   if a.class_name and name!=a.class_name:continue
   if cls[1] in ('AcceptanceFixturesTest','DevicePerformanceTest','LayoutSnapshotTest'):continue
-  tests.extend((name,m) for m in re.findall(r'@Test\s+(?:fun)\s+(\w+)\s*\(',text))
+  tests.extend((name,m) for m in re.findall(r'@Test\s+(?:@\w+(?:\([^)]*\))?\s+)*fun\s+(\w+)\s*\(',text))
 assert tests,'No selected tests found'
 records=[]
 for cls,method in tests:
@@ -38,11 +38,13 @@ for cls,method in tests:
   launch=command(['shell','am','start','-W','-n','com.localreader.app/.MainActivity'])
   result=command(['shell','am','instrument','-w','-e','class',name,'com.localreader.app.test/androidx.test.runner.AndroidJUnitRunner'],a.timeout)
   log.write_text(setup.stdout+'\n'+launch.stdout+'\n'+result.stdout)
-  status='PASS' if re.search(r'OK \(\d+ tests?\)',result.stdout) else 'FAIL'
+  # An SdkSuppress'd test on an older platform reports "OK (0 tests)": that is a skip, not a pass.
+  status='PASS' if re.search(r'OK \([1-9]\d* tests?\)',result.stdout) else 'SKIP' if re.search(r'OK \(0 tests?\)',result.stdout) else 'FAIL'
  except subprocess.TimeoutExpired as error:
   raw=error.stdout or b'';log.write_bytes(raw if isinstance(raw,bytes) else raw.encode())
   command(['shell','am','force-stop','com.localreader.app']);status='TIMEOUT'
  record=dict(test=name,status=status,seconds=round(time.monotonic()-start,2));records.append(record)
  (a.output/'results.json').write_text(json.dumps(records,ensure_ascii=False,indent=2)+'\n')
  print(json.dumps(record,ensure_ascii=False),flush=True)
-raise SystemExit(0 if all(r['status']=='PASS' for r in records) else 1)
+print({k:sum(r['status']==k for r in records) for k in ('PASS','SKIP','FAIL','TIMEOUT')})
+raise SystemExit(0 if all(r['status'] in ('PASS','SKIP') for r in records) else 1)

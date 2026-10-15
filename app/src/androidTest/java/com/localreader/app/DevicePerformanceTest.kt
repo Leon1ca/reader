@@ -100,7 +100,7 @@ class DevicePerformanceTest {
             ShelfProjection.project(rows,ShelfState())
             measure("shelf1000Title",50.0) { ShelfProjection.project(rows,ShelfState(sort=ShelfSort.TITLE)) }
             measure("shelf1000Author",50.0) { ShelfProjection.project(rows,ShelfState(sort=ShelfSort.AUTHOR)) }
-            measure("shelf1000Filter",50.0) { ShelfProjection.project(rows,ShelfState(filter=ShelfFilter.EPUB)) }
+            measure("shelf1000Search",50.0) { ShelfProjection.project(rows,ShelfState(query="1")) }
             measure("shelf1000Search",50.0) { ShelfProjection.project(rows,ShelfState(query="000")) }
             // Unique titles prevent the deduplication shortcut. Fixture creation and deletion are excluded.
             val importSamples=mutableListOf<Double>();val sourceBytes=mutableListOf<Int>()

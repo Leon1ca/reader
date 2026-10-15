@@ -41,5 +41,11 @@ export function applyInsets(payload,fixedRenderer) {
             geometry[`margin-${side}`]=`${value}px`
         }
         payload.geometry=geometry
+        // Continuous scrolling lets the text run behind the title and the page number (the scroll container spans the whole
+        // grid, and horizontal scrolled flow ignores the top/bottom margins). Reserve that space inside each section instead,
+        // so a chapter's first line starts below the title and its last line ends above the page number. The paginator already
+        // publishes the margin it was given as --page-margin-top/bottom (including the insets added above); paged flow keeps
+        // its own margins and is not touched.
+        if(payload.flow==='scrolled')payload.afterAuthor=(payload.afterAuthor??'')+':root{padding-top:var(--page-margin-top)!important;padding-bottom:var(--page-margin-bottom)!important;}'
     }
 }

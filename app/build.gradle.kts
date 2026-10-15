@@ -10,7 +10,7 @@ require(splitKiB == "384" || providers.gradleProperty("localValidationReleaseSig
 android {
     namespace = "com.localreader.app"
     compileSdk { version = release(37) { minorApiLevel = 0 } }
-    defaultConfig { buildConfigField("int", "EPUB_SPLIT_KIB", splitKiB); applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 7; versionName = "0.4.0-core"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { buildConfigField("int", "EPUB_SPLIT_KIB", splitKiB); applicationId = "com.localreader.app"; minSdk = 29; targetSdk = 37; versionCode = 8; versionName = "0.6.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildTypes {
         getByName("release") {
             isDebuggable = false

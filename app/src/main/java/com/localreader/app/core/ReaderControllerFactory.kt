@@ -26,4 +26,4 @@ class ReaderControllerFactory(private val books: OpenedBookFactory,private val s
 /** UI commands call this typed port rather than database/format/view instances. */
 data class ReaderActions(val goTo: (Locator)->Unit = {},val goToToc: (String)->Unit = {},val addBookmark: ()->Unit = {},
     val deleteBookmark: (Long)->Unit = {},val patchRules: (RulesPatch)->Unit = {},
-    val finished: (Boolean)->Unit = {},val close: ()->Unit = {},val flush: ()->Boolean = { true },val reencode: (String)->Unit = {})
+    val finished: (Boolean)->Unit = {},val close: ()->Unit = {},val flush: ()->Boolean = { true },val reencode: (String,ChapterRule?)->Unit = { _,_ -> },val restoreBookmark: (ReaderBookmark)->Unit = { })

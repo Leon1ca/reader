@@ -39,15 +39,23 @@ import com.localreader.app.ui.design.LocalUiText
 import com.localreader.app.ui.design.UiSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.file.Files
 
 /** Covers only, never full-resolution page images. Caller passes the existing library root. */
 class CoverLoader(private val libraryRoot: File) {
-    private val decode=Mutex()
+    /** Two decodes at a time: one slow file no longer holds up every other cover on screen. */
+    private val decode=Semaphore(2)
+    /** Book (id + cover path) to the decoded file's cache key, so a cover seen before is found without touching the disk. */
+    private val bookKeys=java.util.concurrent.ConcurrentHashMap<String,String>()
+    private fun bookKey(book: ContentSummary)="${book.id}\u0000${book.coverPath}"
+    /** The cached cover for [book], or null; no I/O, safe on the main thread. */
+    fun peek(book: ContentSummary): Bitmap?=bookKeys[bookKey(book)]?.let { cache.get(it) }
+    /** Decodes covers that are about to scroll into view; already cached ones cost nothing. */
+    suspend fun prefetch(books: List<ContentSummary>) { books.forEach { if(peek(it)==null)load(it) } }
     private data class Presented(val id: String,val ready: Boolean,val bounds: Rect)
     private val presented=mutableMapOf<Any,Presented>()
     private val presentationChanged=MutableStateFlow(0L)
@@ -78,17 +86,18 @@ class CoverLoader(private val libraryRoot: File) {
         val file=File(root,relative)
         if(Files.isSymbolicLink(file.toPath()) || !file.canonicalPath.startsWith(root.path+File.separator) || !file.isFile)return@withContext null
         val key="${file.canonicalPath}:${file.length()}:${file.lastModified()}"
-        decode.withLock {
+        cache.get(key)?.let { bookKeys[bookKey(book)]=key;return@withContext it }
+        decode.withPermit {
             ensureActive()
-            cache.get(key)?.let { return@withLock it }
+            cache.get(key)?.let { bookKeys[bookKey(book)]=key;return@withPermit it }
             val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
             BitmapFactory.decodeFile(file.path,bounds)
-            if(bounds.outWidth<=0 || bounds.outHeight<=0)return@withLock null
+            if(bounds.outWidth<=0 || bounds.outHeight<=0)return@withPermit null
             val sample=CoverSampling.sampleSize(bounds.outWidth,bounds.outHeight)
-            val image=BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 }) ?: return@withLock null
+            val image=BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 }) ?: return@withPermit null
             try { ensureActive() } catch(error: Throwable) { image.recycle();throw error }
-            if(maxOf(image.width,image.height)>360 || image.width.toLong()*image.height>131072L || image.allocationByteCount>512*1024) { image.recycle();return@withLock null }
-            cache.put(key,image);changed.value=changed.value+1;image
+            if(maxOf(image.width,image.height)>360 || image.width.toLong()*image.height>131072L || image.allocationByteCount>512*1024) { image.recycle();return@withPermit null }
+            cache.put(key,image);bookKeys[bookKey(book)]=key;changed.value=changed.value+1;image
         }
         } catch(cancel: CancellationException) { throw cancel }
         catch(_: java.io.IOException) { null }
@@ -99,9 +108,13 @@ class CoverLoader(private val libraryRoot: File) {
 @Composable
 fun BookCover(book: ContentSummary,loader: CoverLoader,modifier: Modifier=Modifier) {
     val presentation=remember {Any()}
-    var ready by remember(book.id,book.coverPath,loader) {mutableStateOf(false)}
+    // A cover already in memory is shown in the first frame; only a fresh decode fades in over the generated cover.
+    val cached=remember(book.id,book.coverPath,loader) { loader.peek(book) }
+    var ready by remember(book.id,book.coverPath,loader) {mutableStateOf(cached!=null)}
     var bounds by remember {mutableStateOf(Rect.Zero)}
-    val image by produceState<Bitmap?>(null,book.id,book.coverPath,loader) {value=loader.load(book);ready=true}
+    val image by produceState(cached,book.id,book.coverPath,loader) { if(cached==null) { value=loader.load(book);ready=true } }
+    val reveal by androidx.compose.animation.core.animateFloatAsState(if(image!=null)1f else 0f,
+        if(cached!=null) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(com.localreader.app.ui.design.motionDuration(180)),label="cover")
     SideEffect {loader.present(presentation,book.id,ready,bounds)}
     DisposableEffect(loader,presentation) {onDispose {loader.removePresentation(presentation)}}
     val spec=remember(book.title) {CoverSpec.of(book.title)}
@@ -116,8 +129,8 @@ fun BookCover(book: ContentSummary,loader: CoverLoader,modifier: Modifier=Modifi
             drawRect(Brush.linearGradient(listOf(Color.White.copy(alpha=0.12f),Color.Transparent,Color.Black.copy(alpha=0.08f)),Offset.Zero,Offset(size.width,size.height)))
         },contentAlignment=Alignment.TopCenter) {
         val bitmap=image
-        if(bitmap!=null) Image(bitmap.asImageBitmap(),contentDescription=null,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
-        else GeneratedCoverTitle(book,spec)
+        if(bitmap==null || reveal<1f) GeneratedCoverTitle(book,spec)
+        if(bitmap!=null) Image(bitmap.asImageBitmap(),contentDescription=null,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Crop,alpha=reveal)
         Text(if(book.epubLayout=="pre-paginated")uiText(R.string.fixed_layout) else book.format.name,
             Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color.White.copy(alpha=.84f),RoundedCornerShape(3.dp)).padding(horizontal=5.dp,vertical=2.dp),
             style=LocalUiText.current.cover.copy(fontFamily=LocalUiText.current.fonts.sans(FontWeight.Medium),fontSize=10.sp,fontWeight=FontWeight.Medium,letterSpacing=.6.sp),color=Color(0xFF44474D))

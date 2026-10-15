@@ -27,9 +27,9 @@ internal object LibraryBootstrap {
         val rows = linkedMapOf<String,String>()
         val version = SQLiteDatabase.openDatabase(source.path,null,SQLiteDatabase.OPEN_READWRITE,preserveCorruption).use { db ->
             val version = db.version
-            require(version in 1..5) { "书库版本不受支持，原库已保留" }
+            require(version in 1..6) { "书库版本不受支持，原库已保留" }
             // A current library is checked by SQLite on open; the full integrity scan only guards migrations.
-            if (version == 5) return
+            if (version == 6) return
             checkIntegrity(db)
             db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)",null).use { c ->
                 check(c.moveToFirst() && c.getInt(0) == 0 && (c.getLong(1) == c.getLong(2))) { "书库仍被使用，无法完成一致备份，请重试" }
@@ -95,6 +95,9 @@ internal object LibraryBootstrap {
                 }
         } finally { temporary.delete() }
     }
+    /** Opens a copy read-only for verification; corruption is reported, never repaired or deleted. */
+    internal fun <T> openForCheck(file: File,work: (SQLiteDatabase) -> T): T =
+        SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READONLY,preserveCorruption).use(work)
     internal fun checkIntegrity(db: SQLiteDatabase) {
         db.rawQuery("PRAGMA integrity_check",null).use { c -> check(c.moveToFirst() && c.getString(0) == "ok" && !c.moveToNext()) { "书库完整性校验失败，原库已保留" } }
     }

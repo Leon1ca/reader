@@ -53,4 +53,4 @@ class ReadingSessionOwner(val opened: OpenedBook, val generation: Long, private 
 
 /** Format-specific mutation is separate from the general content and renderer ports. */
 data class ReencodedBook(val opened: OpenedBook, val snapshot: ReadingSnapshot, val presentation: ReadingPresentation)
-fun interface TextReencoder { suspend fun reencode(contentId: String, encoding: String): ReencodedBook }
+fun interface TextReencoder { suspend fun reencode(contentId: String, encoding: String, rule: ChapterRule?): ReencodedBook }

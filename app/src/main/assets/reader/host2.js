@@ -490,12 +490,17 @@ async function execute(command) {
             await stable(lastTarget)
         } else if (command.type === 'next' || command.type === 'prev') {
             const noOp=command.type==='next'?paginator.atEnd:paginator.atStart
-            await bounded(paginator[command.type](), 'pageTurn')
-            if(!await settleLoadedPage(noOp?lastTarget:undefined))await stable(noOp?lastTarget:undefined)
-            if(!noOp) {
+            // A box with min-height and a forced break (a title page, a volume page) can leave an empty column behind it.
+            // Such a blank page has no glyph or image to anchor a position to: step over it (a few at most) instead of
+            // failing; if nothing visible is found the previous position is kept and the blank page is simply shown.
+            for(let blank=0;;blank++) {
+                await bounded(paginator[command.type](), 'pageTurn')
+                if(!await settleLoadedPage(noOp?lastTarget:undefined))await stable(noOp?lastTarget:undefined)
+                if(noOp)break
                 const visible=relocationRange && targetFor(relocationRange.range,relocationRange.index)
-                if(!visible)throw new Error('Page has no visible reading position')
-                relocationDraft=visible;lastTarget=visible
+                if(visible) { relocationDraft=visible;lastTarget=visible;break }
+                const edge=command.type==='next'?paginator.atEnd:paginator.atStart
+                if(blank>=3 || edge)break
             }
         } else throw new Error('Unknown renderer command')
         if (commandId !== latestRequestedId || closed) throw superseded

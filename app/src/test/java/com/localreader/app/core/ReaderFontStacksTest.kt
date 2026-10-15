@@ -12,7 +12,8 @@ class ReaderFontStacksTest {
         assertTrue(sans.indexOf("Noto Sans CJK SC") in 0 until sans.indexOf("LXGW"))
         assertFalse(sans.contains("Serif"))
         assertTrue(ReaderFontStacks.KAI_STACK.startsWith("'LXGW WenKai GB Screen'"))
-        assertEquals("profile", ReaderFontStacks.choose("default", "profile"))
+        assertEquals(ReaderFontStacks.DEFAULT, ReaderFontStacks.choose("default", "profile"))
+        assertEquals("an unknown stored value reads as the default", ReaderFontStacks.DEFAULT, ReaderFontStacks.choose("nonsense"))
     }
     @Test fun compiledRulesCarryTheSelectedStackForTextAndEpub() {
         listOf(WebContentKind.TXT, WebContentKind.EPUB).forEach { kind ->
@@ -24,9 +25,25 @@ class ReaderFontStacksTest {
             assertFalse(css(serif).contains(ReaderFontStacks.SANS))
         }
     }
-    @Test fun defaultCjkFallbackIsSystemSansNotTheBundledKaiFace() {
-        val defaultSans = WebTypographyProfiles.readestTxtCjk.fontFamily
-        assertTrue(defaultSans.indexOf("Noto Sans CJK SC") in 0 until defaultSans.indexOf("LXGW"))
+    @Test fun defaultBodyFontIsRobotoForLatinThenLxgwForChineseAndNoSystemFontInBetween() {
+        val stack = ReaderFontStacks.DEFAULT
+        assertTrue(stack.startsWith("'Roboto', 'LXGW WenKai GB Screen'"))
+        assertFalse("Chinese must not be handed to a system sans", stack.contains("Noto Sans CJK"))
+        listOf(WebContentKind.TXT, WebContentKind.EPUB).forEach { kind ->
+            val css = RuleCompiler.compile(kind, ReaderRules(), url, "").let { it.beforeAuthor + it.afterAuthor }
+            assertTrue("default rules use the default stack ($kind)", css.contains(stack))
+            // Choosing 宋体 or 黑体 explicitly is still honoured, and so is a stored legacy 楷体 choice.
+            assertTrue(RuleCompiler.compile(kind, ReaderRules(fontFamily = "kai"), url, "").let { it.beforeAuthor + it.afterAuthor }.contains(ReaderFontStacks.KAI_STACK))
+        }
+    }
+    @Test fun importedFontFallsBackToTheDefaultStackForMissingGlyphs() {
+        val id = "0b8f3d3e-0000-4000-8000-000000000001"
+        assertEquals("'ReaderUserFont', ${ReaderFontStacks.DEFAULT}", ReaderFontStacks.choose("user:$id"))
+    }
+    @Test fun listOffersDefaultSerifAndSansAndShowsLegacyKaiAsTheDefaultEntry() {
+        assertEquals(listOf("default", "serif", "sans"), ReaderFontStacks.BUILT_IN)
+        assertEquals("default", ReaderFontStacks.displayChoice("kai"))
+        assertEquals("serif", ReaderFontStacks.displayChoice("serif"))
     }
 }
 

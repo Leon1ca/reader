@@ -17,11 +17,8 @@ class ImportCoordinatorTest {
         override fun summaries()=emptyList<ContentSummary>()
         override fun content(id: String): ContentRecord?=null
         override fun delete(book: ContentRecord) {}
-        override fun updateMetadata(id: String,title: String,author: String) {}
         override fun markRead(id: String,revision: String,time: Long) {}
         override fun setFinished(id: String,finished: Boolean) {}
-        override fun hideFromContinue(id: String,hidden: Boolean) {}
-        override fun detail(id: String): Flow<BookDetail?> = flowOf(null)
     }
     private fun source(id: String,bytes: Long?=1)=ImportSource(id,"text/plain",bytes) { ByteArrayInputStream(byteArrayOf(1)) }
     @Test fun batchPreflightUsesWholeKnownSumAndOverflowOpensNothing() = runBlocking {

@@ -67,7 +67,7 @@ class SchemaFiveTest {
             writer.execSQL("UPDATE contents SET author='已提交 WAL 😀' WHERE id='epub'")
             tables.forEach { table -> val columns=writer.rawQuery("SELECT * FROM $table LIMIT 0",null).use { it.columnNames.toList() };before[table]=columns to rows(writer,table) }
             val db=helper().writableDatabase
-            assertEquals(5,db.version)
+            assertEquals(6,db.version)
             before.forEach { (table,data) -> assertEquals(table,data.second,rows(db,table,data.first)) }
             db.rawQuery("SELECT hidden_from_continue FROM contents",null).use { c -> while(c.moveToNext())assertEquals(0,c.getInt(0)) }
             db.rawQuery("SELECT canonical_characters FROM epub_meta",null).use { assertTrue(it.moveToFirst());assertTrue(it.isNull(0)) }
@@ -89,27 +89,26 @@ class SchemaFiveTest {
             assertEquals(4,db.version)
             db.rawQuery("PRAGMA table_info(contents)",null).use { c -> while(c.moveToNext())assertNotEquals("hidden_from_continue",c.getString(1)) }
         }
-        assertEquals(5,helper().writableDatabase.version)
+        assertEquals(6,helper().writableDatabase.version)
     }
-    @Test fun finishedAndHiddenAreIndependentOfPositionAndVerifiedReadUnhidesOnly() = runBlocking {
+    @Test fun finishedIsIndependentOfPositionAndVerifiedReadOnlyMovesLastRead() = runBlocking {
         fixture();val repository=LibraryRepository(context);helpers+=repository.db
         val original=repository.db.txt("txt")!!.current
-        repository.hideFromContinue("txt",true);repository.setFinished("txt",true)
-        assertTrue(repository.content("txt")!!.hiddenFromContinue);assertNotNull(repository.content("txt")!!.finishedAt)
+        repository.setFinished("txt",true)
+        assertNotNull(repository.content("txt")!!.finishedAt)
         repository.markRead("txt","rev",42)
         val after=repository.content("txt")!!
-        assertEquals(42L,after.lastRead);assertFalse(after.hiddenFromContinue);assertNotNull(after.finishedAt)
+        assertEquals(42L,after.lastRead);assertNotNull(after.finishedAt)
         assertEquals(original,repository.db.txt("txt")!!.current)
         repository.setFinished("txt",false);assertNull(repository.content("txt")!!.finishedAt)
         assertThrows(IllegalStateException::class.java) { repository.markRead("txt","old",100) }
         assertEquals(42L,repository.content("txt")!!.lastRead)
-        // Unknown EPUB positions and missing caches still have usable metadata details.
-        val detail=repository.detail("epub").first()!!
-        assertNull(detail.characters);assertEquals(1,detail.bookmarkCount);assertEquals("原名epub",detail.content.originalName)
+        // The book's other records are untouched by finishing and reading.
+        assertEquals("原名epub",repository.content("epub")!!.originalName)
     }
     @Test fun previousUiSortMigratesOnlyWhenNewPreferenceIsAbsent() {
         val target=InstrumentationRegistry.getInstrumentation().targetContext
-        for((legacy,expected) in listOf("标题" to ShelfSort.TITLE,"导入时间" to ShelfSort.IMPORTED,"最近阅读" to ShelfSort.RECENT)) {
+        for((legacy,expected) in listOf("标题" to ShelfSort.TITLE,"导入时间" to ShelfSort.RECENT,"最近阅读" to ShelfSort.RECENT)) {
             val prefix="ui-migration-${UUID.randomUUID()}"
             val isolated=object: ContextWrapper(target) {
                 override fun getSharedPreferences(name: String,mode: Int)=target.getSharedPreferences("$prefix-$name",mode)
@@ -118,12 +117,28 @@ class SchemaFiveTest {
                 assertTrue(isolated.getSharedPreferences("ui",0).edit().putString("sort",legacy).commit())
                 val store=AndroidUiPrefsStore(isolated)
                 assertEquals(expected,store.shelf().sort)
-                store.saveShelf(ShelfPreferences(ShelfSort.AUTHOR,ShelfFilter.EPUB))
+                store.saveShelf(ShelfPreferences(ShelfSort.AUTHOR))
                 assertTrue(isolated.getSharedPreferences("ui",0).edit().putString("sort","导入时间").commit())
-                assertEquals(ShelfPreferences(ShelfSort.AUTHOR,ShelfFilter.EPUB),AndroidUiPrefsStore(isolated).shelf())
+                assertEquals(ShelfPreferences(ShelfSort.AUTHOR),AndroidUiPrefsStore(isolated).shelf())
                 assertEquals("导入时间",isolated.getSharedPreferences("ui",0).getString("sort",null))
             } finally { target.deleteSharedPreferences("$prefix-ui");target.deleteSharedPreferences("$prefix-ui_prefs") }
         }
     }
 
+    /** The shelf no longer has a format filter or an "imported" order; values stored by older versions must not hide or reorder anything. */
+    @Test fun oldShelfFilterAndImportedOrderReadBackAsTheDefaultViewAndTheFilterKeyIsDropped() {
+        val target=InstrumentationRegistry.getInstrumentation().targetContext
+        val prefix="ui-old-filter-${UUID.randomUUID()}"
+        val isolated=object: ContextWrapper(target) {
+            override fun getSharedPreferences(name: String,mode: Int)=target.getSharedPreferences("$prefix-$name",mode)
+        }
+        try {
+            assertTrue(isolated.getSharedPreferences("ui_prefs",0).edit().putString("shelf_sort","IMPORTED").putString("shelf_filter","EPUB").putLong("shelf_category",7L).commit())
+            val store=AndroidUiPrefsStore(isolated)
+            assertEquals("IMPORTED normalises to the recent order, the category is kept",ShelfPreferences(ShelfSort.RECENT,7L),store.shelf())
+            store.saveShelf(store.shelf())
+            val saved=isolated.getSharedPreferences("ui_prefs",0)
+            assertFalse("the dead filter is not written back",saved.contains("shelf_filter"));assertEquals("RECENT",saved.getString("shelf_sort",null))
+        } finally { target.deleteSharedPreferences("$prefix-ui");target.deleteSharedPreferences("$prefix-ui_prefs") }
+    }
 }

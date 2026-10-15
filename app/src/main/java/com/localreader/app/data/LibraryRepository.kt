@@ -16,11 +16,14 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
+/** One book's private directory and the single index revision that is still current. */
+internal class BookFiles(val id: String,val directory: File,val revision: String)
+
 class MissingBookFilesException : IllegalStateException("图书的应用内副本或索引缺失，请重新导入；阅读记录已保留")
 
 class ImportCancelled : Exception("导入已取消")
 
-class LibraryRepository(private val context: Context,private val deletionCheckpoint: (String)->Unit={}) : ContentRepository {
+class LibraryRepository(private val context: Context,private val deletionCheckpoint: (String)->Unit={}) : ContentRepository, CategoryStore {
     val db = LibraryDb(context)
     private val library = File(context.filesDir, "library").apply { mkdirs() }
     private val staging = File(context.filesDir, "import-staging").apply { mkdirs() }
@@ -58,19 +61,68 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
         // Old index versions are retained as locator backups; active books are never auto-deleted.
         recovered = true
     }
+    /**
+     * Frees only data the app can recreate: search caches, unfinished import staging, and index revisions no locator refers to.
+     * Book copies, progress, bookmarks and the database are never touched. Returns the bytes freed.
+     */
+    fun cleanRebuildable(checkpoint: () -> Unit = {}): Long = mutate {
+        var freed=0L
+        fun size(file: File): Long = if(file.isFile)file.length() else file.listFiles().orEmpty().sumOf(::size)
+        fun remove(file: File) { checkpoint();val bytes=size(file);if(file.deleteRecursively())freed+=bytes }
+        File(context.cacheDir,"reader-search").listFiles()?.forEach(::remove)
+        staging.listFiles()?.forEach(::remove)
+        db.recoveryVersions().forEach { (id,keep) ->
+            File(File(library,id),"versions").listFiles()?.filter { it.name !in keep }?.forEach(::remove)
+        }
+        freed
+    }
+    private fun rebuildTxtIndex(book: TxtRecord,original: File,directory: File) = mutate {
+        if(directory.isDirectory)return@mutate
+        val task=File(staging,UUID.randomUUID().toString()).apply { mkdirs() }
+        try {
+            val meta=requireNotNull(db.txtMetadata(book.id)) { "书籍记录不完整" }
+            TxtParser.build(original,File(task,"index"),meta.encoding,{ },db.chapterRule(book.id))
+            File(task,"index").renameTo(directory.also { it.parentFile?.mkdirs() })
+            syncDirectory(requireNotNull(directory.parentFile))
+        } finally { task.deleteRecursively() }
+    }
     /** Rebuildable historical indexes are cleaned after the shelf becomes interactive. */
     fun cleanupRetiredVersions() = mutate {
         db.recoveryVersions().forEach { (id,keep) ->
             File(File(library,id),"versions").listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
         }
     }
+    override fun categories() = db.categories()
+    override fun observeCategories() = db.contentsRevision.map { db.categories() }.distinctUntilChanged().flowOn(Dispatchers.IO)
+    fun observeUserFonts() = db.contentsRevision.map { db.userFonts() }.distinctUntilChanged().flowOn(Dispatchers.IO)
+    override fun createCategory(name: String) = db.createCategory(name)
+    override fun renameCategory(id: Long,name: String) = db.renameCategory(id,name)
+    override fun deleteCategory(id: Long) = db.deleteCategory(id)
+    override fun reorderCategories(orderedIds: List<Long>) = db.reorderCategories(orderedIds)
+    override fun setMembership(contentIds: Collection<String>,categoryId: Long,member: Boolean) = db.setMembership(contentIds,categoryId,member)
+    override fun uncategorizedCount() = db.uncategorizedCount()
+    /** Bookmarks across the given books, for the delete-confirmation summary. */
+    fun bookmarkCount(ids: Set<String>): Int = db.bookmarkCount(ids)
+    /** Tells shelf observers that reading progress was stored, so the shelf shows the final position. */
+    fun notifyProgressStored() = db.notifyContentsChanged()
+    /**
+     * Holds the library still for a backup: imports, deletions and re-indexing wait, while the database is copied once and
+     * the book files are listed under the same lock, so the package never mixes two states.
+     */
+    internal fun <T> stableForBackup(snapshot: File,work: (files: List<BookFiles>) -> T): T = mutate {
+        recoverLocked()
+        db.snapshotTo(snapshot)
+        val books=db.contents().map { summary -> requireNotNull(db.content(summary.id)) }
+        work(books.map { book -> BookFiles(book.id,File(library,book.id),book.revision) })
+    }
     override fun observeAll() = db.contentsRevision.map { summaries() }.distinctUntilChanged().flowOn(Dispatchers.IO)
-    override fun summaries() = db.contents()
+    override fun summaries() = db.contents().map { book ->
+        if(File(File(library,book.id),if(book.format==ContentFormat.TXT)"original.txt" else "original.epub").isFile)book else book.copy(filesMissing=true)
+    }
     override fun content(id: String) = db.content(id)
-    override fun updateMetadata(id: String,title: String,author: String) { db.setMetadata(id,title,author);db.notifyContentsChanged() }
     override fun markRead(id: String,revision: String,time: Long) {
         db.transaction { database -> check(database.update("contents",android.content.ContentValues().apply {
-            put("last_read_at",time);put("hidden_from_continue",0)
+            put("last_read_at",time)
         },"id=? AND revision=?",arrayOf(id,revision))==1) { "书籍版本已改变" } }
         db.notifyContentsChanged()
     }
@@ -79,20 +131,6 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
             if(finished)put("finished_at",System.currentTimeMillis()) else putNull("finished_at")
         },"id=?",arrayOf(id))==1) { "书籍不存在" } };db.notifyContentsChanged()
     }
-    override fun hideFromContinue(id: String,hidden: Boolean) {
-        db.transaction { database -> check(database.update("contents",android.content.ContentValues().apply {
-            put("hidden_from_continue",if(hidden)1 else 0)
-        },"id=?",arrayOf(id))==1) { "书籍不存在" } };db.notifyContentsChanged()
-    }
-    override fun detail(id: String) = db.contentsRevision.map {
-        db.read { database -> db.content(id)?.let { content ->
-            val summary=requireNotNull(db.summary(id))
-            val chars=if(content.format==ContentFormat.TXT)db.txtMetadata(id)?.characters else database.rawQuery("SELECT canonical_characters FROM epub_meta WHERE content_id=?",arrayOf(id)).use { c -> if(c.moveToFirst() && !c.isNull(0))c.getLong(0) else null }
-            // Only fixed-layout zoom/spread are stored per book; typography is app-wide.
-            val settings=database.rawQuery("SELECT fxl_zoom,spread_pref FROM reading_settings WHERE content_id=?",arrayOf(id)).use { c -> c.moveToFirst() && (!c.isNull(0) || !c.isNull(1)) }
-            BookDetail(content,summary,chars,database.rawQuery("SELECT COUNT(*) FROM bookmarks WHERE content_id=?",arrayOf(id)).use { it.moveToFirst();it.getInt(0) },settings)
-        } }
-    }.distinctUntilChanged().flowOn(Dispatchers.IO)
     fun directory(book: ContentRecord) = File(File(library,book.id),"versions/${book.revision}").also {
         if(!original(book).isFile || !it.isDirectory)throw MissingBookFilesException()
     }
@@ -105,7 +143,11 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
     }
     fun engine(book: TxtRecord): TxtEngine {
         val directory=directory(book)
-        if(!File(File(library,book.id),"original.txt").isFile || !directory.isDirectory)throw MissingBookFilesException()
+        val original=File(File(library,book.id),"original.txt")
+        if(!original.isFile)throw MissingBookFilesException()
+        // The copy survived but its index did not (a cleanup after an interrupted operation): rebuild it under the same revision.
+        if(!directory.isDirectory)rebuildTxtIndex(book,original,directory)
+        if(!directory.isDirectory)throw MissingBookFilesException()
         return TxtEngine(directory,book.version)
     }
 
@@ -126,6 +168,7 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
             ImportSource(name,mime,size) {
                 context.contentResolver.openInputStream(uri) ?: error("文件不可读取，请通过系统文件选择器重新选择")
             }
+        } catch(_: SecurityException) { throw IllegalStateException(context.getString(com.localreader.app.R.string.import_permission_expired))
         } finally { release?.invoke() }
     }
     fun import(uri: Uri,cancelled: ()->Boolean={false}): ImportResult = try { import(importSource(uri),cancelled) }
@@ -160,8 +203,16 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
                 output.fd.sync()
             } }
             require(copied>0) { "文件为空" }
+            // A provider that states a positive length and then ends the stream early without an error would otherwise be
+            // imported as if it were the whole file. Nothing is published; the user can pick the file again. An unknown or
+            // non-positive length keeps working.
+            source.declaredBytes?.takeIf { it>0 }?.let { declared -> require(copied>=declared) { "文件读取不完整：只读到 $copied 字节，文件应为 $declared 字节，请重新选择" } }
             val hash=digest.digest().joinToString("") { "%02x".format(it) }
-            db.byHash(hash)?.let { return ImportResult(name,"重复内容，已保留原进度与书签",it.id,ImportOutcome.DUPLICATE) }
+            db.byHash(hash)?.let { existing ->
+                // A record that survived a records-only restore has no copy: importing the same file links it again.
+                if(original(existing).isFile || File(library,existing.id).exists()) return ImportResult(name,"重复内容，已保留原进度与书签",existing.id,ImportOutcome.DUPLICATE)
+                return relink(existing,original,hash,task,cancelled).let { ImportResult(name,"已重新关联文件，阅读记录已保留",existing.id,ImportOutcome.OK) }
+            }
             val guard: () -> Unit={
                 if(cancelled())throw ImportCancelled()
                 require(StatFs(staging.absolutePath).availableBytes>8*1024*1024) { "空间不足，导入已停止" }
@@ -205,10 +256,44 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
             val reason=when(e) {
                 is ImportCancelled -> "已取消"
                 is java.nio.charset.CharacterCodingException -> "文本编码无法识别；请先用文本编辑器另存为 UTF-8 后重试"
+                is SecurityException -> context.getString(com.localreader.app.R.string.import_permission_expired)
                 else -> e.message?.take(180) ?: "导入失败，请重新选择文件"
             }
             return ImportResult(name,reason,outcome=if(cancelled() || e is ImportCancelled)ImportOutcome.CANCELED else ImportOutcome.FAILED)
         } finally { task.deleteRecursively();committed?.deleteRecursively() }
+    }
+
+    /**
+     * Restores the private copy and derived index of a book whose records are already here (DATA-04). The file must hash to the
+     * recorded content, so it cannot attach to the wrong book. Position and bookmarks are kept: an EPUB index is a pure function
+     * of the file, and a TXT is rebuilt with the encoding and chapter rule the book already had.
+     */
+    private fun relink(book: ContentRecord,pending: File,hash: String,task: File,cancelled: () -> Boolean) {
+        val guard: () -> Unit={
+            if(cancelled())throw ImportCancelled()
+            require(StatFs(staging.absolutePath).availableBytes>8*1024*1024) { "空间不足，导入已停止" }
+        }
+        val destination=File(library,book.id)
+        val versions=File(task,"versions").apply { mkdirs() }
+        if(book.format==ContentFormat.EPUB) {
+            val renamed=File(task,"original.epub");check(pending.renameTo(renamed))
+            val prepared=EpubImporter().prepare(ImportTask(renamed,versions,hash,guard))
+            check(prepared.cache.revision==book.revision) { "这个版本的应用已更新索引格式，无法直接关联；请更新到记录所用的版本后重试" }
+            syncTreeDirectories(task);guard()
+            check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" }
+            syncDirectory(library);syncDirectory(staging)
+            db.notifyContentsChanged()
+        } else {
+            val renamed=File(task,"original.txt");check(pending.renameTo(renamed))
+            val meta=requireNotNull(db.txtMetadata(book.id)) { "书籍记录不完整" }
+            val rule=db.chapterRule(book.id)
+            // The index is a pure function of the file, encoding and rule, so it is rebuilt under the revision the records already
+            // carry. Nothing in the database changes: one directory rename completes the link, and a crash leaves nothing half-done.
+            TxtParser.build(renamed,File(versions,book.revision),meta.encoding,guard,rule)
+            syncTreeDirectories(task);guard()
+            check(task.renameTo(destination)) { "无法提交文件，请检查可用空间" }
+            syncDirectory(library);syncDirectory(staging)
+        }
     }
 
     fun delete(book: ContentSummary) { delete(requireNotNull(db.content(book.id))) }
@@ -237,16 +322,18 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
     }
     fun reencode(book: TxtRecord, encoding: String) { reencodePrepared(book, encoding) { Unit } }
     /** Validate/open the new source before the database switches; failure keeps the previous version active. */
-    fun <T> reencodePrepared(book: TxtRecord, encoding: String, checkpoint: () -> Unit = {}, prepare: (TxtRecord) -> T): T = mutate { reencodeLocked(book,encoding,checkpoint,prepare) }
-    private fun <T> reencodeLocked(book: TxtRecord, encoding: String, checkpoint: () -> Unit, prepare: (TxtRecord) -> T): T {
+    fun <T> reencodePrepared(book: TxtRecord, encoding: String, checkpoint: () -> Unit = {}, rule: ChapterRule? = null, prepare: (TxtRecord) -> T): T = mutate { reencodeLocked(book,encoding,checkpoint,rule,prepare) }
+    private fun <T> reencodeLocked(book: TxtRecord, encoding: String, checkpoint: () -> Unit, requestedRule: ChapterRule?, prepare: (TxtRecord) -> T): T {
+        // A rebuild keeps the book's chosen chapter rule unless the caller picks another.
+        val rule = requestedRule ?: db.chapterRule(book.id)
         val task = File(staging, UUID.randomUUID().toString()).apply { mkdirs() }
         val version = UUID.randomUUID().toString()
         var destination: File? = null
         try {
-            val parsed = TxtParser.build(File(File(library, book.id), "original.txt"), task, encoding) {
+            val parsed = TxtParser.build(File(File(library, book.id), "original.txt"), task, encoding,{
                 checkpoint()
                 require(StatFs(staging.absolutePath).availableBytes > 8 * 1024 * 1024) { "空间不足，旧索引已保留" }
-            }
+            },rule)
             syncTreeDirectories(task)
             val target = File(File(library, book.id), "versions/$version")
             check(task.renameTo(target)) { "无法提交新索引" }; destination = target
@@ -260,7 +347,7 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
             val candidate = fresh.copy(encoding = encoding,version = version,paragraphs = parsed.paragraphs,characters = parsed.totalCharacters,
                 current = Locator.Text(version,offset,0,0,offset.toDouble() / parsed.totalCharacters.coerceAtLeast(1)),furthest = remap(fresh.furthest))
             val prepared = prepare(candidate)
-            db.reindex(book.id, encoding, version, parsed.paragraphs, parsed.totalCharacters)
+            db.reindex(book.id, encoding, version, parsed.paragraphs, parsed.totalCharacters, rule.encode())
             destination = null
             return prepared
         } finally { task.deleteRecursively(); destination?.deleteRecursively() }
@@ -274,6 +361,8 @@ class LibraryRepository(private val context: Context,private val deletionCheckpo
         try { android.system.Os.fsync(descriptor) } finally { android.system.Os.close(descriptor) }
     }
     private val mutationRevision=java.util.concurrent.atomic.AtomicLong()
+    /** For collaborators whose files must not change while a backup holds the library still (fonts). */
+    internal fun <T> exclusive(work: () -> T): T = mutate(work)
     private fun <T> mutate(work: () -> T): T = synchronized(lock) { mutationRevision.incrementAndGet();try { work() } finally { mutationRevision.incrementAndGet() } }
     private val lock = synchronized(locks) { locks.getOrPut(context.getDatabasePath("library.db").absolutePath) { Any() } }
     private companion object {

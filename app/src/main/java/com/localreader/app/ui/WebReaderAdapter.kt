@@ -123,7 +123,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
             if (event.optString("type") == "booted" && !session.booted) {
                 session.booted = true; session.pending?.let { dispatch(session,it) }; return
             }
-            fun integer(name: String): Int? = (event.opt(name) as? Number)?.toDouble()?.let { if (it.isFinite() && it == it.toInt().toDouble()) it.toInt() else null }
+            fun integer(name: String): Int? = WireNumbers.integerOrNull(event.opt(name))
             val identity = RendererIdentity(event.getString("sessionId"),event.getString("revision"),integer("layoutEpoch") ?: return,integer("commandId") ?: return)
             if (!session.gate.accepts(identity)) return
             if(session.publication.protocolVersion==2 && event.optString("intentToken")!=session.intentToken)return
@@ -138,7 +138,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
                 "relocated" -> {
                     if (!session.gate.ready) return
                     val target = event.optJSONObject("target") ?: return
-                    fun targetInteger(name: String): Int? = (target.opt(name) as? Number)?.toDouble()?.let { if(it.isFinite() && it==it.toInt().toDouble())it.toInt() else null }
+                    fun targetInteger(name: String): Int? = WireNumbers.integerOrNull(target.opt(name))
                     val section=targetInteger("section") ?: return
                     if(section !in 0 until session.publication.sectionCount)return
                     val anchor=if(session.publication.protocolVersion==1) {
@@ -147,7 +147,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
                     } else when(target.optString("kind")) {
                         "TEXT" -> RendererAnchor.Text(section,targetInteger("offset") ?: return)
                         "PAGE" -> {
-                            val x=(target.opt("x") as? Number)?.toDouble() ?: return;val y=(target.opt("y") as? Number)?.toDouble() ?: return
+                            val x=WireNumbers.doubleOrNull(target.opt("x")) ?: return;val y=WireNumbers.doubleOrNull(target.opt("y")) ?: return
                             if(!x.isFinite() || !y.isFinite() || x !in 0.0..1.0 || y !in 0.0..1.0 || session.publication.kind!=WebContentKind.FIXED)return
                             RendererAnchor.Page(section,x,y)
                         }
@@ -215,9 +215,9 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
                     if(!session.gate.ready || session.publication.kind!=WebContentKind.FIXED || session.userIntentToken.isEmpty() || event.optString("userIntentToken")!=session.userIntentToken)return
                     val zoom=event.opt("zoom")?.toString()?.takeIf { it=="fit-page" || it.toDoubleOrNull()?.let { n -> n.isFinite() && n in 1.0..5.0 }==true } ?: return
                     val target=event.optJSONObject("target") ?: return
-                    val section=(target.opt("section") as? Number)?.toDouble()?.takeIf { it.isFinite() && it==it.toInt().toDouble() && it.toInt() in 0 until session.publication.sectionCount }?.toInt() ?: return
-                    val x=(target.opt("x") as? Number)?.toDouble()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return
-                    val y=(target.opt("y") as? Number)?.toDouble()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return
+                    val section=WireNumbers.integerInOrNull(target.opt("section"),0 until session.publication.sectionCount) ?: return
+                    val x=WireNumbers.finiteInOrNull(target.opt("x"),0.0..1.0) ?: return
+                    val y=WireNumbers.finiteInOrNull(target.opt("y"),0.0..1.0) ?: return
                     val serial=session.gate.beginPosition(identity) ?: return
                     scope.launch {
                         val locator=withContext(Dispatchers.IO) { session.publication.locator(RendererAnchor.Page(section,x,y)) as? Locator.Page }
@@ -235,7 +235,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
                 }
                 "linkRequested","externalRequested","imageRequested","selectionRequested" -> {
                     if(!session.gate.ready || !session.positionValidated)return
-                    val section=(event.opt("section") as? Number)?.toDouble()?.takeIf { it.isFinite() && it==it.toInt().toDouble() && it.toInt() in 0 until session.publication.sectionCount }?.toInt() ?: return
+                    val section=WireNumbers.integerInOrNull(event.opt("section"),0 until session.publication.sectionCount) ?: return
                     val sourceSection=section+session.publication.sectionOffset
                     val request=when(event.getString("type")) {
                         "linkRequested","externalRequested" -> {
@@ -391,7 +391,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
         clearPages(active);cancelOperation(active,ReaderOperationOutcome.CANCELED);cancelDeferredDispatch();work?.cancel(); watchdog?.cancel(); active?.resources?.close(); active = null; view.stopLoading()
         val id = UUID.randomUUID().toString()
         document.configure(rules)
-        val resources = SessionResources(id,document) { view.context.assets.open(it) }
+        val resources = SessionResources(id,document,(view.context.applicationContext as? com.localreader.app.ReaderApplication)?.userFonts) { view.context.assets.open(it) }
         val session = HostSession(document,resources,RendererEventGate(id,document.revision),locator,rules,root,cause)
         active = session; currentRules = rules
         command(session,"open",locator,rules,operation)
@@ -472,7 +472,7 @@ class WebReaderAdapter(context: Context, private val generation: Long=0, private
                 }
                 if (targetRules != null) {
                     val faces = withContext(Dispatchers.IO) { fontFaces(view.context) }
-                    val compiled = RuleCompiler.compile(session.publication.kind,targetRules,SessionResources.FONT_CSS_URL,faces)
+                    val compiled = RuleCompiler.compile(session.publication.kind,targetRules,SessionResources.FONT_CSS_URL,faces,session.publication.language)
                     val metadata=session.publication.resourceManifest.entries.sortedBy { it.key }.joinToString { "${it.key}:${it.value.length}:${it.value.mime}" }
                     session.paginationBase=digest("${session.publication.sourceRevision}|${session.publication.revision}|$targetRules|${compiled.beforeAuthor}|${compiled.afterAuthor}|$fontSignature|$metadata|${view.settings.textZoom}|${session.publication.direction}|$insets")
                     payload.put("paginationBase",session.paginationBase)

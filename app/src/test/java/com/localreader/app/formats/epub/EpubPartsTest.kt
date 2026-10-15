@@ -63,7 +63,7 @@ class EpubPartsTest {
             }
             counts+=parts.size;ids+=parts.flatMap {it.elements.keys}.toSet()
             val record=EpubCacheRecord("source","t","a",null,"id",emptyList(),emptyList(),emptyList(),emptyList(),"reflowable",false,"ltr",
-                renderRevision="source-parts2-style4-${budget.key}",splitTargetBytes=budget.targetBytes,splitMaxBytes=budget.maxBytes)
+                renderRevision="source-parts2-style5-${budget.key}",splitTargetBytes=budget.targetBytes,splitMaxBytes=budget.maxBytes)
             for(other in listOf(256,384,512))assertEquals(other==kiB,EpubCache.compatibleSplit(record,EpubSplitBudget.ofKiB(other)))
             assertFalse(EpubCache.compatibleSplit(record.copy(splitMaxBytes=budget.maxBytes+1),budget))
         }

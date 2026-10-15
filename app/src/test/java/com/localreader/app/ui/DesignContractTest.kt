@@ -11,7 +11,6 @@ class DesignContractTest {
         assertEquals(listOf(3,5,5,8),listOf(599,600,839,840).map { WindowLayout.of(it.dp).columns })
         assertEquals(listOf(20,32,32,48),listOf(599,600,839,840).map { WindowLayout.of(it.dp).horizontal.value.toInt() })
         assertFalse(WindowLayout.of(599.dp).readerSidePanel);assertTrue(WindowLayout.of(600.dp).readerSidePanel)
-        assertEquals(listOf(272.dp,300.dp,340.dp),listOf(390,720,1280).map {WindowLayout.of(it.dp).continueCardWidth})
         assertEquals(400.dp,WindowLayout.of(600.dp).tocWidth)
         assertEquals(288.dp,WindowLayout.of(320.dp).readerToolbar(320.dp))
         assertThrows(IllegalArgumentException::class.java) { WindowLayout.of(Float.NaN.dp) }

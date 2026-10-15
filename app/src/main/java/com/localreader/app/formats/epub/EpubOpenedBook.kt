@@ -1,6 +1,7 @@
 package com.localreader.app.formats.epub
 
 import com.localreader.app.core.*
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -73,7 +74,8 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     override val sourceRevision=record.revision
     override val kind=WebContentKind.EPUB
     override val paginationParts=record.parts.map { PaginationPart(it.index,it.characters.toLong(),it.spine,it.canonicalStart.toLong()) }
-    override val compatibilityNotices=record.warnings
+    override val compatibilityNotices=EpubNotices.visible(record.warnings)
+    override val language=record.language
     override val protocolVersion=2
     override val direction=record.direction
     override fun linkTarget(identity: String): Locator? = try {
@@ -83,12 +85,18 @@ class EpubPublication(private val source: EpubSource): ReaderPublication {
     override val sectionCount=record.parts.size
     @Volatile private var mode=EpubStyleMode.AUTHOR
     override fun configure(rules: ReaderRules) { mode=EpubStyleMode.valueOf(rules.epubStyleMode) }
-    override val resourceManifest=record.resources.associate { resource -> "resources/${resource.id}" to ResourceDescriptor(resource.mime,resource.bytes) { source.open(resource.file,resource.bytes) } }
+    /** Families the book embeds with @font-face in any of its author stylesheets; the only fonts of its own that stay in use. */
+    private val embeddedFamilies: Set<String> by lazy {
+        record.resources.filter { it.mime=="text/css" && !it.file.endsWith("-custom.css") && it.bytes<=EpubLimits.CSS_BYTES }.flatMap { resource ->
+            runCatching { EpubFontFamilies.embeddedFamilies(source.open(resource.file,resource.bytes).use { it.readBytes().toString(Charsets.UTF_8) }) }.getOrDefault(emptySet())
+        }.toSet()
+    }
+    override val resourceManifest=record.resources.associate { resource -> "resources/${resource.id}" to ResourceDescriptor(resource.mime,resource.bytes) { source.open(resource.file,resource.bytes).let { stream -> if(resource.mime=="text/css" && !resource.file.endsWith("-custom.css")) stream.use { ByteArrayInputStream(EpubFontFamilies.redirectCss(it.readBytes().toString(Charsets.UTF_8),embeddedFamilies).toByteArray(Charsets.UTF_8)) } else stream } } }
     override fun section(index: Int): ContentSection {
         val section=record.parts.getOrNull(index) ?: error("EPUB 技术分块不存在")
         val file=if(mode==EpubStyleMode.AUTHOR)section.authorFile else section.customFile
         val size=File(source.directory,file).length();require(size<=2*EpubLimits.SMALL_SPINE_BYTES)
-        return ContentSection(index,source.open(file,size).bufferedReader(Charsets.UTF_8).use { it.readText() },section.characters)
+        return ContentSection(index,source.open(file,size).bufferedReader(Charsets.UTF_8).use { it.readText() }.let { if(mode==EpubStyleMode.AUTHOR)EpubFontFamilies.redirectHtml(it,embeddedFamilies) else it },section.characters)
     }
     override fun target(locator: Locator): ContentTarget {
         val epub=locator as? Locator.Epub

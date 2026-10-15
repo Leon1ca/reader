@@ -257,10 +257,10 @@ class LibraryPersistenceTest {
         createLegacyDatabase(version = 1,withFlow = false,withBackups = false)
         repository = LibraryRepository(context)
         val migrated = repository.db.writableDatabase
-        assertEquals(5,migrated.version)
+        assertEquals(6,migrated.version)
         val record = requireNotNull(repository.db.txt("legacy"))
         assertEquals("旧书",record.title);assertEquals(40L,record.current.sourceOffset)
-        assertEquals(0.4,record.current.fallbackFraction,0.00001);assertEquals("scrolled",record.flow)
+        assertEquals(0.4,record.current.fallbackFraction,0.00001);assertEquals("paginated",record.flow)
         val mark = repository.db.bookmarks("legacy").single()
         assertEquals("旧书签",mark.excerpt);assertEquals(0.4,(mark.locator as Locator.Text).fallbackFraction,0.00001)
         val backup = context.getDatabasePath("library.db").parentFile!!.listFiles()!!.single { it.name.endsWith(".bak") }
@@ -296,17 +296,21 @@ class LibraryPersistenceTest {
             old.version = version
         }
     }
-    @Test fun realV2SchemaMigratesKeepingOldBooksScrolledAndNewBooksPaginated() {
+    @Test fun realV2SchemaMigratesKeepingOldBooksAndUsesTheGlobalPaginatedFlow() {
         createLegacyDatabase(version = 2, withFlow = false, withBackups = true)
         repository = LibraryRepository(context)
         val legacy = requireNotNull(repository.db.txt("legacy"))
-        assertEquals("scrolled", legacy.flow); assertEquals(22f, legacy.fontSize, 0.01f); assertEquals("dark", legacy.theme)
+        // Typography is app-wide now: the effective rules are the global ones, while the migrated per-book values stay stored untouched.
+        assertEquals("paginated", legacy.flow); assertEquals(16f, legacy.fontSize, 0.01f); assertEquals("white", legacy.theme)
+        repository.db.readableDatabase.rawQuery("SELECT font_size,theme,flow FROM reading_settings WHERE content_id='legacy'",null).use { c ->
+            assertTrue(c.moveToFirst());assertEquals(22.0,c.getDouble(0),0.01);assertEquals("dark",c.getString(1));assertEquals("scrolled",c.getString(2))
+        }
         assertEquals(40L, legacy.current.sourceOffset); assertEquals(60L, legacy.furthest); assertEquals(0.4, legacy.current.fallbackFraction, 0.0001)
         assertEquals("旧书签", repository.db.bookmarks("legacy").single().excerpt)
         val fresh = TxtRecord("fresh", "新书", "作者未知", "h2", 10, 2, 0, "UTF-8", "v-new", 1, 10, Locator.Text("v-new", 0, 0), 0, 16f, "white")
         repository.db.insert(fresh)
         assertEquals("paginated", requireNotNull(repository.db.txt("fresh")).flow)
-        assertEquals("scrolled", requireNotNull(repository.db.txt("legacy")).flow)
+        assertEquals("paginated", requireNotNull(repository.db.txt("legacy")).flow)
     }
     @Test fun versionThreeDatabaseMissingBackupTableIsRepairedOnOpen() {
         createLegacyDatabase(version = 3, withFlow = true, withBackups = false)
@@ -650,7 +654,7 @@ class LibraryPersistenceTest {
             assertEquals(book.version,opened.revision)
             assertTrue(opened.publication.section(0).html.contains("中文"))
         }
-        val result = com.localreader.app.data.LibraryOpenedBookFactory(repository).reencode(id,"UTF-8")
+        val result = com.localreader.app.data.LibraryOpenedBookFactory(repository).reencode(id,"UTF-8",null)
         result.opened.use { opened ->
             assertNotEquals(book.version,opened.revision)
             assertEquals(opened.revision,repository.db.txt(id)?.version)

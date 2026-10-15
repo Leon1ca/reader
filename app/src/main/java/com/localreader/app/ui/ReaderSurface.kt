@@ -33,6 +33,14 @@ class ReaderSurface(context: Context) : FrameLayout(context) {
     private var downY=0f
     private var downTime=0L
     private val swipeTurns get() = animatesNow && pageTurn!=PageTurn.NONE
+    /** Vertical scrolling of reflowable text, seen as a gesture; the renderer's position reports do not say it was the user. */
+    private var scrolledFlow=false
+    private var scrollWatch=false
+    private var scrollDownX=0f
+    private var scrollDownY=0f
+    private var scrollDownTime=0L
+    /** Called once per gesture when the reader drags the text vertically in continuous scrolling. */
+    var onUserScroll: (()->Unit)?=null
     /** Reflowable pages only; judged per current page because a mixed EPUB alternates with fixed-layout pages. */
     private val animatesNow get() = turnAllowed && adapter?.onFixedPage != true
     var pageColor: Int
@@ -58,6 +66,7 @@ class ReaderSurface(context: Context) : FrameLayout(context) {
         release=owner.attach(next)
     }
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        watchScroll(event)
         if(!swipeTurns) { tracking=false;swiping=false;return false }
         when(event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { tracking=true;swiping=false;downX=event.x;downY=event.y;downTime=event.eventTime }
@@ -91,12 +100,28 @@ class ReaderSurface(context: Context) : FrameLayout(context) {
         }
         return true
     }
+    /** Only observes: the gesture still goes to the page. A long press first is text selection, a second finger is pinch. */
+    private fun watchScroll(event: MotionEvent) {
+        if(!scrolledFlow) { scrollWatch=false;return }
+        when(event.actionMasked) {
+            // A mixed EPUB is reflowable at the root but its current group may be fixed layout, where a vertical drag pans.
+            MotionEvent.ACTION_DOWN -> { scrollWatch=adapter?.onFixedPage!=true;scrollDownX=event.x;scrollDownY=event.y;scrollDownTime=event.eventTime }
+            MotionEvent.ACTION_POINTER_DOWN -> scrollWatch=false
+            MotionEvent.ACTION_MOVE -> if(scrollWatch && event.pointerCount==1) {
+                val dx=event.x-scrollDownX;val dy=event.y-scrollDownY
+                if(event.eventTime-scrollDownTime>=ViewConfiguration.getLongPressTimeout() && abs(dy)<=touchSlop)scrollWatch=false
+                else if(abs(dy)>touchSlop && abs(dy)>abs(dx)) { scrollWatch=false;onUserScroll?.invoke() }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> scrollWatch=false
+        }
+    }
     // Required by accessibility lint for views that interpret touch gestures; the swipe is also available as next/prev actions.
     override fun performClick(): Boolean = super.performClick()
     fun present(session: ReadingSession,recoveryAttempt: Int=attempt) {
         if(closed)return
         if(recoveryAttempt!=attempt) { attempt=recoveryAttempt;rebuild() }
         turnAllowed=session.document.kind!=WebContentKind.FIXED && session.snapshot.rules.flow==ReaderFlow.PAGINATED
+        scrolledFlow=session.document.kind!=WebContentKind.FIXED && session.snapshot.rules.flow==ReaderFlow.SCROLLED
         if(!turnAllowed)overlay.finish()
         controller?.present(session)
     }

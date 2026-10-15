@@ -33,10 +33,6 @@ import java.util.concurrent.atomic.AtomicReference
 class ReadingUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private lateinit var readerModel: ReaderViewModel
-    private var priorShelfFilter: com.localreader.app.core.ShelfFilter?=null
-    @org.junit.After fun restoreOwnedShelfFilter() {
-        priorShelfFilter?.let { prior -> compose.runOnUiThread { model().shelfController.filter(prior) } }
-    }
     private fun model() = readerModel
     private fun waitFor(timeout: Long = 20000, condition: () -> Boolean) = compose.waitUntil(timeoutMillis = timeout,condition = condition)
     private fun webView(view: View): WebView? {
@@ -64,17 +60,24 @@ class ReadingUiTest {
                 }
             } })
         } }
+    /**
+     * Puts back exactly the defaults and per-book overrides the test found, revision included, and moves the in-memory
+     * revision with them so the persisted and observed numbers stay equal for the next write in this process.
+     */
+    private fun restorePreferences(repository: com.localreader.app.data.LibraryRepository,defaults: List<ContentValues>,overrides: List<ContentValues>) {
+        repository.db.transaction { database ->
+            defaults.forEach { row -> database.update("reader_defaults",row,"scope=?",arrayOf(row.getAsString("scope"))) }
+            overrides.forEach { row -> database.update("reading_settings",row,"content_id=?",arrayOf(row.getAsString("content_id"))) }
+        }
+        repository.db.preferencesRevision.value=defaults.maxOf { it.getAsLong("prefs_revision") }
+    }
     private fun openFromShelf(title: String) {
         // Existing read books precede a fresh unread fixture. Use the production
         // search field so the real card can be clicked even in a populated library.
         if(compose.onAllNodes(androidx.compose.ui.test.hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty())
             compose.onNodeWithContentDescription("书架").performClick()
-        if(priorShelfFilter==null)priorShelfFilter=model().shelfController.state.value.filter
-        compose.onNodeWithText("全部",useUnmergedTree=true).performScrollTo().performClick()
-        waitFor { model().shelfController.state.value.filter==com.localreader.app.core.ShelfFilter.ALL }
+        // The shelf lists every format (there is no format filter). Select the real grid card by its stable source ID.
         compose.onNodeWithTag("shelf-search").performTextReplacement(title)
-        // Continue cards stay independent of the search. Select the real grid
-        // card by its stable source ID rather than a duplicate visible title.
         var id: String?=null
         waitFor {
             id=model().shelfController.state.value.items.singleOrNull {it.title==title}?.id
@@ -115,11 +118,10 @@ class ReadingUiTest {
             val imported = requireNotNull(repository.db.txt(requireNotNull(id)))
             compose.onNodeWithText("完成").performClick()
             assertEquals(0L,repository.content(imported.id)!!.lastRead)
-            repository.hideFromContinue(imported.id,true)
             openFromShelf(imported.title)
             waitFor { model().state.value.reader?.contentId == id }
             ready()
-            waitFor { repository.content(imported.id)!!.lastRead>0L && !repository.content(imported.id)!!.hiddenFromContinue }
+            waitFor { repository.content(imported.id)!!.lastRead>0L }
             assertNull(repository.content(imported.id)!!.finishedAt)
             val firstGeneration = requireNotNull(model().state.value.reader).generation
             compose.onNodeWithText("目录").performClick()
@@ -129,14 +131,14 @@ class ReadingUiTest {
             val jumped = requireNotNull(model().state.value.reader).snapshot.current
             assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible"))
             compose.onNodeWithText("设置").performClick()
-            compose.onNodeWithText("增大").performClick()
+            compose.onNodeWithContentDescription("增大字号").performClick()
             assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
             ready()
             assertEquals(jumped,requireNotNull(model().state.value.reader).snapshot.current)
             compose.onNodeWithText("阅读").performClick()
-            compose.onNodeWithText("连续滚动").performClick()
+            compose.onNodeWithText("上下滚动").performClick()
             waitFor { model().state.value.reader?.snapshot?.rules?.flow == ReaderFlow.SCROLLED }
-            compose.onNodeWithText("深色").performClick()
+            compose.onNodeWithTag("reader-theme-dark").performScrollTo().performClick()
             waitFor { model().state.value.reader?.snapshot?.rules?.theme == "dark" }
             assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
             ready()
@@ -144,9 +146,9 @@ class ReadingUiTest {
             assertEquals("true",evaluate("readerHost.diagnostics().anchorGeometry.visible"))
             compose.onNodeWithText("设置").performClick()
             val size = requireNotNull(model().state.value.reader).snapshot.rules.fontSize
-            compose.onNodeWithText("增大").performClick()
+            compose.onNodeWithContentDescription("增大字号").performClick()
             waitFor { model().state.value.reader?.snapshot?.rules?.fontSize == size + 1 }
-            compose.onNodeWithText("增大").performClick()
+            compose.onNodeWithContentDescription("增大字号").performClick()
             waitFor { model().state.value.reader?.snapshot?.rules?.fontSize == size + 2 }
             assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
             ready()
@@ -162,14 +164,20 @@ class ReadingUiTest {
             val reopened = requireNotNull(model().state.value.reader)
             assertTrue(reopened.generation > firstGeneration)
             assertEquals(jumped,reopened.snapshot.current)
-            assertEquals(18f,reopened.snapshot.rules.fontSize)
+            // Typography is app-wide: the size chosen before closing is the one after reopening, whatever the starting size was.
+            assertEquals(size + 2,reopened.snapshot.rules.fontSize)
+            compose.runOnUiThread { model().globalRules(com.localreader.app.core.RulesPatch(fontSize = com.localreader.app.core.FieldUpdate.Set(size))) }
+            // The size change re-lays the page out and resets transient chrome; open the bookmark list only after the renderer has settled.
+            waitFor { model().state.value.reader?.snapshot?.rules?.fontSize == size }
+            ready()
             compose.onNodeWithContentDescription("书签 1").performClick()
+            waitFor { compose.onAllNodes(hasTestTag("reader-bookmark-list")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(bookmark.excerpt).performClick()
             ready()
             assertEquals(bookmark.locator,requireNotNull(model().state.value.reader).snapshot.current)
             // The UI's format capability, rather than a parser constant in the screen, drives reencoding.
             compose.onNodeWithText("设置").performClick()
-            compose.onNodeWithText("文字显示乱码？").performClick();compose.onNodeWithText("GB18030").performClick()
+            compose.onNodeWithText("编码与分章").performScrollTo().performClick();compose.onNodeWithText("GB18030").performClick()
             waitFor {model().readerController(requireNotNull(model().state.value.reader).generation).textPreviewState.value.let {it.phase==com.localreader.app.core.PreviewPhase.DONE && it.value?.encoding=="GB18030"}}
             compose.onNodeWithText("按 GB18030 重新解析").performScrollTo().performClick()
             waitFor(30000) { !model().state.value.busy && model().state.value.reader?.revision != imported.version }
@@ -185,12 +193,67 @@ class ReadingUiTest {
             id?.let { repository.db.txt(it)?.let(repository::delete) }
             target.contentResolver.delete(uri,null,null)
             // Global actions intentionally clear every book's relevant overrides. Restore pre-test user preferences.
-            val restoredRevision=repository.db.preferencesRevision.value+1
-            repository.db.transaction { database ->
-                priorDefaults.forEach { row -> row.put("prefs_revision",restoredRevision);database.update("reader_defaults",row,"scope=?",arrayOf(row.getAsString("scope"))) }
-                priorOverrides.forEach { row -> database.update("reading_settings",row,"content_id=?",arrayOf(row.getAsString("content_id"))) }
+            restorePreferences(repository,priorDefaults,priorOverrides)
+        }
+    }
+    /** UI-P2-02: in continuous scrolling a real vertical drag hides the toolbar; a programmatic table-of-contents jump does not. */
+    @Test fun continuousScrollGestureHidesToolbarButProgrammaticJumpKeepsIt() {
+        compose.runOnUiThread { readerModel=ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
+        val instrumentation=InstrumentationRegistry.getInstrumentation();val target=instrumentation.targetContext
+        val repository=(target.applicationContext as ReaderApplication).repository
+        val priorDefaults=preferenceRows(repository,"reader_defaults");val priorOverrides=preferenceRows(repository,"reading_settings")
+        val nonce=UUID.randomUUID().toString();val uri=Uri.parse("content://com.localreader.app.test.fixtures/scroll-ui-$nonce.txt")
+        val text="Chapter 1 Scroll start\n"+"A long scrolling paragraph for the toolbar gesture test.\n".repeat(200)+"Chapter 2 Scroll end\n"+"Closing paragraph.\n".repeat(200)+nonce
+        target.contentResolver.openOutputStream(uri,"wt")!!.use { it.write(text.toByteArray()) }
+        var id: String?=null
+        fun toolbarShown()=compose.onAllNodes(hasTestTag("reader-toolbar")).fetchSemanticsNodes().isNotEmpty()
+        try {
+            waitFor { !model().state.value.loading };compose.runOnUiThread { model().importFiles(listOf(uri)) }
+            waitFor { !model().state.value.busy && model().state.value.results.isNotEmpty() };id=requireNotNull(model().state.value.results.single().bookId)
+            val record=requireNotNull(repository.content(requireNotNull(id)));compose.onNodeWithText("完成").performClick()
+            compose.runOnUiThread { model().flow(ReaderFlow.SCROLLED) }
+            waitFor { model().state.value.defaults.flow==ReaderFlow.SCROLLED }
+            openFromShelf(record.title);ready()
+            waitFor { model().state.value.reader?.snapshot?.rules?.flow==ReaderFlow.SCROLLED }
+            val session=requireNotNull(model().state.value.reader);val controller=model().readerController(session.generation)
+            waitFor { toolbarShown() }
+            // Programmatic jump: the position moves but the reader did not touch the page, so the bars stay.
+            val beforeJump=session.snapshot.current
+            compose.runOnUiThread { controller.goToToc(session.toc[1].id) }
+            waitFor { model().state.value.reader?.snapshot?.current!=beforeJump }
+            // ready() would re-show hidden bars and hide a failure here, so only wait for the page to settle.
+            waitFor { evaluate("Boolean(window.readerHost?.diagnostics().loaded && window.readerHost?.diagnostics().anchorGeometry?.visible)")=="true" }
+            assertTrue(toolbarShown())
+            lateinit var view: WebView
+            compose.runOnUiThread { view=requireNotNull(webView(compose.activity.window.decorView)) }
+            val dimensions=view.width to view.height
+            fun visibleTarget()=evaluate("JSON.stringify(window.readerHost.diagnostics().actualVisibleTarget)")
+            val beforeScroll=visibleTarget()
+            // Real gesture: one finger dragged upwards through the production WebView.
+            var x=0f;var y=0f
+            compose.runOnUiThread { val location=IntArray(2);view.getLocationOnScreen(location);x=location[0]+view.width*.5f;y=location[1]+view.height*.7f }
+            fun drag() {
+                val down=android.os.SystemClock.uptimeMillis();val distance=view.height*.45f
+                fun send(action: Int,dy: Float) {
+                    val event=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y-dy,0)
+                    try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+                }
+                send(android.view.MotionEvent.ACTION_DOWN,0f)
+                for(step in 1..20) { Thread.sleep(16);send(android.view.MotionEvent.ACTION_MOVE,distance*step/20) }
+                send(android.view.MotionEvent.ACTION_UP,distance)
             }
-            repository.db.preferencesRevision.value=restoredRevision
+            drag()
+            waitFor { !toolbarShown() }
+            drag();drag()
+            // The text really moved under the finger. Saving the scrolled position is the renderer's own contract
+            // (reported once the earlier anchor leaves the screen) and is not what this test is about.
+            try { waitFor { visibleTarget()!=beforeScroll } } catch(error: Throwable) { throw AssertionError("visible target stayed $beforeScroll; diagnostics ${evaluate("JSON.stringify({flow:window.readerHost.diagnostics().flow,target:window.readerHost.diagnostics().target})")}",error) }
+            assertEquals(dimensions,view.width to view.height)
+        } finally {
+            compose.runOnUiThread { model().closeReader() }
+            id?.let { repository.content(it)?.let(repository::delete) }
+            target.contentResolver.delete(uri,null,null)
+            restorePreferences(repository,priorDefaults,priorOverrides)
         }
     }
     @Test fun searchPanelClickUsesProductionControllerAndPersistsOriginalTextAnchor() {
@@ -210,7 +273,7 @@ class ReadingUiTest {
             val record=requireNotNull(repository.content(requireNotNull(id)))
             compose.onNodeWithText("完成").performClick();openFromShelf(record.title);ready()
             compose.onNodeWithText("搜索").performClick()
-            compose.onNodeWithText("搜索正文").performTextReplacement(marker)
+            compose.onNodeWithTag("reader-search-field").performTextReplacement(marker)
             compose.onNodeWithText("查找").performClick()
             waitFor { try { compose.onNodeWithText("找到 1 处").assertExists();true } catch(_: AssertionError) { false } }
             waitFor { compose.onAllNodes(hasText("约 第 ",substring=true)).fetchSemanticsNodes().isNotEmpty() }
@@ -238,6 +301,8 @@ class ReadingUiTest {
         compose.runOnUiThread { readerModel=ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
         val target=InstrumentationRegistry.getInstrumentation().targetContext
         val repository=(target.applicationContext as ReaderApplication).repository
+        // The reflow step below enlarges the app-wide font size; only those preferences are put back afterwards.
+        val priorDefaults=preferenceRows(repository,"reader_defaults");val priorOverrides=preferenceRows(repository,"reading_settings")
         val nonce=UUID.randomUUID().toString();val uri=Uri.parse("content://com.localreader.app.test.fixtures/end-ui-$nonce.txt")
         target.contentResolver.openOutputStream(uri,"wt")!!.use { it.write("Only one visible paragraph $nonce.".toByteArray()) }
         var id: String?=null;var failure: Throwable?=null;var stage="first-open"
@@ -251,7 +316,7 @@ class ReadingUiTest {
             val extent=requireNotNull(model().state.value.reader).snapshot.furthest
             compose.onNodeWithText("继续阅读").performClick()
             stage="dismissed-end-reflow"
-            compose.onNodeWithText("设置").performClick();compose.onNodeWithText("增大").performClick();assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));ready(false)
+            compose.onNodeWithText("设置").performClick();compose.onNodeWithContentDescription("增大字号").performClick();assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK));ready(false)
             compose.onNodeWithText("已到本书末尾").assertDoesNotExist();assertNull(repository.content(record.id)!!.finishedAt)
             assertEquals(saved,requireNotNull(model().state.value.reader).snapshot.current);assertEquals(extent,requireNotNull(model().state.value.reader).snapshot.furthest)
             stage="unfinished-reopen"
@@ -260,7 +325,6 @@ class ReadingUiTest {
             compose.onNodeWithText("标记读完").performClick();waitFor { repository.content(record.id)!!.finishedAt!=null }
             assertEquals(saved,requireNotNull(model().state.value.reader).snapshot.current);assertEquals(extent,requireNotNull(model().state.value.reader).snapshot.furthest)
             compose.onNodeWithTag("reader-close").performClick();waitFor { model().state.value.reader==null }
-            waitFor { model().shelfController.state.value.continueReading.none { it.id==record.id } }
             stage="finished-reopen"
             openFromShelf(record.title);ready(false);compose.onNodeWithText("已到本书末尾").assertDoesNotExist()
             // Undoing "finished" lives on the book's detail page, not in the reader's settings.
@@ -268,7 +332,6 @@ class ReadingUiTest {
             assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
             repository.setFinished(record.id,false);waitFor { repository.content(record.id)!!.finishedAt==null }
             compose.onNodeWithTag("reader-close").performClick();waitFor { model().state.value.reader==null }
-            waitFor { model().shelfController.state.value.continueReading.any { it.id==record.id } }
         } catch(error: Throwable) {
             failure=error
             // Failure-only observations precede cleanup; they never change the
@@ -335,6 +398,7 @@ class ReadingUiTest {
             cleanup { compose.runOnUiThread { model().closeReader() } }
             cleanup { id?.let { repository.content(it)?.let(repository::delete) } }
             cleanup { target.contentResolver.delete(uri,null,null) }
+            cleanup { restorePreferences(repository,priorDefaults,priorOverrides) }
         }
         failure?.let { throw it }
     }
@@ -663,22 +727,23 @@ class ReadingUiTest {
             assertNotEquals(originalAnchor,requireNotNull(model().state.value.reader).snapshot.current)
             tap(.15f);waitFor { controller.state.value.phase==com.localreader.app.core.ReaderPhase.READY && controller.state.value.progress?.page==originalPage }
             assertEquals(originalAnchor,requireNotNull(model().state.value.reader).snapshot.current)
-            tap(.5f);waitFor { compose.onAllNodes(hasTestTag("reader-bookmark-toggle")).fetchSemanticsNodes().isEmpty() }
+            // Genuine page navigation has already hidden the toolbar; the next centre tap shows it.
+            waitFor { compose.onAllNodes(hasTestTag("reader-bookmark-toggle")).fetchSemanticsNodes().isEmpty() }
             assertEquals(dimensions,activeView.width to activeView.height);assertSame(activeView,webView(compose.activity.window.decorView))
             tap(.5f);waitFor { compose.onAllNodes(hasTestTag("reader-bookmark-toggle")).fetchSemanticsNodes().isNotEmpty() }
             assertEquals(dimensions,activeView.width to activeView.height)
             val directory=repository.directory(record)
             val before=directory.walkTopDown().filter { it.isFile }.associate { it.relativeTo(directory).path to digest(it) }
             val persistedRules=app.readingStore.loadSnapshot(record.id).rules
-            compose.onNodeWithText("设置").performClick();compose.onNodeWithText("文字显示乱码？").performClick();compose.onNodeWithText("UTF-16LE").performClick()
+            compose.onNodeWithText("设置").performClick();compose.onNodeWithText("编码与分章").performScrollTo().performClick();compose.onNodeWithText("UTF-16LE").performClick()
             waitFor { controller.textPreviewState.value.phase==com.localreader.app.core.PreviewPhase.DONE }
             assertEquals("UTF-16LE",controller.textPreviewState.value.value!!.encoding)
             compose.onNodeWithText("预览 20 行").performScrollTo().performClick();waitFor { controller.textPreviewState.value.phase==com.localreader.app.core.PreviewPhase.DONE }
             compose.onNodeWithText("取消").performScrollTo().performClick();waitFor {controller.textPreviewState.value.phase==com.localreader.app.core.PreviewPhase.IDLE};assertEquals(com.localreader.app.core.PreviewPhase.IDLE,controller.textPreviewState.value.phase)
             compose.onNodeWithTag("reader-panel-编码与分章").assertDoesNotExist()
-            compose.onNodeWithTag("reader-panel-设置").assertExists()
+            compose.onNodeWithTag("reader-panel-排版设置").assertExists()
             assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
-            waitFor {compose.onAllNodes(hasTestTag("reader-panel-设置")).fetchSemanticsNodes().isEmpty()};ready()
+            waitFor {compose.onAllNodes(hasTestTag("reader-panel-排版设置")).fetchSemanticsNodes().isEmpty()};ready()
             assertEquals(before,directory.walkTopDown().filter { it.isFile }.associate { it.relativeTo(directory).path to digest(it) })
             assertEquals(persistedRules,app.readingStore.loadSnapshot(record.id).rules)
             fun actualIme(expectedVisible: Boolean): Boolean {

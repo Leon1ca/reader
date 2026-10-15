@@ -15,7 +15,7 @@ class FixedPublication(private val source: EpubSource): ReaderPublication {
     override val kind=WebContentKind.FIXED
     override val paginationParts=record.sections.map { PaginationPart(it.index,it.characters.toLong(),it.index) }
     override fun paginationCoordinate(locator: Locator): PaginationBoundary? = (locator as? Locator.Page)?.takeIf { it.version==sourceRevision && it.page in 0 until sectionCount }?.let { PaginationBoundary(it.page,0.0) }
-    override val compatibilityNotices=record.warnings
+    override val compatibilityNotices=EpubNotices.visible(record.warnings)
     override val protocolVersion=2
     override val direction=record.direction
     override val sectionCount=record.sections.size

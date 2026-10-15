@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.localreader.app.core.*
 import com.localreader.app.ui.design.*
 import kotlinx.coroutines.launch
@@ -47,12 +48,11 @@ private fun bookmarkDate(timestamp: Long): String {
 internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,controller: ReaderController,bookmarks: Boolean,
                            book: ContentSummary?,onTab: (Boolean)->Unit,onNavigate: ()->Unit,onNotice: (String)->Unit) {
     val type=LocalUiText.current
-    // Small panel text uses an actual weighted native family, not metadata-only
-    // fontWeight on a preloaded Typeface. Document typography is unaffected.
-    val auxiliary=type.auxiliary.copy(fontFamily=type.fonts.sans(FontWeight.Bold),fontWeight=FontWeight.Bold)
-    val explanation=type.explanation.copy(fontFamily=type.fonts.sans(FontWeight.Bold),fontWeight=FontWeight.Bold)
-    val action=type.value.copy(fontFamily=type.fonts.sans(FontWeight.Bold),fontWeight=FontWeight.Bold)
     val colors=LocalUiPalette.current;val list=rememberLazyListState();val scope=rememberCoroutineScope()
+    // The bundled UI font carries real 300/400/500 faces, so panel text no longer needs bold to stay legible (UiSpec: max 500).
+    val auxiliary=type.auxiliary.copy(fontWeight=FontWeight.Normal)
+    val explanation=type.explanation.copy(color=colors.secondaryText)
+    val action=type.value
     val current=currentChapter(session,state.position)
     val context=LocalContext.current
     val loader=remember(context) {(context.applicationContext as ReaderApplication).covers}
@@ -64,12 +64,20 @@ internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,
         }
     }
     SegmentedControl(listOf(false,true),bookmarks,{if(it)uiText(R.string.bookmarks_count,session.snapshot.bookmarks.size) else uiText(R.string.contents)},onTab,textStyle=auxiliary)
+    // The last deleted bookmark stays undoable until another one is deleted or the panel closes.
+    var undo by remember { mutableStateOf<ReaderBookmark?>(null) }
+    // The undo offer ends when the bookmark is really back; if putting it back fails the offer stays so it can be tried again.
+    LaunchedEffect(session.snapshot.bookmarks) { if(undo?.let { removed -> session.snapshot.bookmarks.any { it.id==removed.id } }==true)undo=null }
     if(bookmarks) {
+        undo?.let { removed -> Row(Modifier.fillMaxWidth().padding(vertical=6.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(uiText(R.string.bookmark_deleted),Modifier.weight(1f),style=explanation)
+            ActionButton(uiText(R.string.undo),{ controller.restoreBookmark(removed) },style=ActionStyle.FILTER)
+        } }
         if(session.snapshot.bookmarks.isEmpty())Text(uiText(R.string.bookmarks_empty),Modifier.padding(vertical=20.dp))
         LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-bookmark-list"),state=list) {items(session.snapshot.bookmarks,key={it.id}) {bookmark ->
             val dismiss=rememberSwipeToDismissBoxState()
             SwipeToDismissBox(dismiss,enableDismissFromStartToEnd=false,onDismiss={value ->
-                if(value==SwipeToDismissBoxValue.EndToStart) {controller.deleteBookmark(bookmark.id);onNotice(uiText(R.string.bookmark_deleting));scope.launch {dismiss.reset()}}
+                if(value==SwipeToDismissBoxValue.EndToStart) {undo=bookmark;controller.deleteBookmark(bookmark.id);onNotice(uiText(R.string.bookmark_deleting));scope.launch {dismiss.reset()}}
             },backgroundContent={Box(Modifier.fillMaxSize().background(colors.dangerContainer).padding(16.dp)) {Text(uiText(R.string.delete),color=colors.danger)}}) {
                 Row(Modifier.fillMaxWidth().background(colors.card),verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable(role=Role.Button) {controller.goTo(bookmark.locator);onNavigate()}.padding(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(2.dp)) {
@@ -81,23 +89,23 @@ internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,
                         if(bookmark.locator.version!=session.revision)Text(uiText(R.string.bookmark_nearby),color=colors.warning)
                         Text(bookmark.excerpt.ifBlank {uiText(R.string.empty_paragraph)})
                     }
-                    ActionButton(uiText(R.string.delete),{controller.deleteBookmark(bookmark.id);onNotice(uiText(R.string.bookmark_deleting))},style=ActionStyle.FILTER)
+                    ActionButton(uiText(R.string.delete),{undo=bookmark;controller.deleteBookmark(bookmark.id);onNotice(uiText(R.string.bookmark_deleting))},style=ActionStyle.FILTER)
                 }
             }
         }}
         Text(uiText(R.string.swipe_delete_bookmark),style=explanation)
     } else {
         Text(uiText(R.string.pagination_hint,if(session.textControls?.tocSource==TocSource.TEXT_SEGMENTS)uiText(R.string.text_segments_suffix) else ""),Modifier.padding(vertical=8.dp),style=explanation)
+        if(session.toc.isEmpty())EmptyState(uiText(R.string.toc_empty),title=uiText(R.string.toc_empty_title))
         LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-toc-list"),state=list) {items(session.toc,key={it.id}) {chapter ->
             val selected=chapter.id==current
-            Row(Modifier.fillMaxWidth().semantics {this.selected=selected}.background(if(selected)colors.primaryContainer else colors.card)
-                .clickable(role=Role.Button) {controller.goToToc(chapter.id);onNavigate()}.padding(start=(chapter.depth.coerceIn(0,12)*12).dp,top=12.dp,bottom=12.dp,end=4.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {Text(chapter.title,style=LocalTextStyle.current.copy(fontFamily=type.fonts.sans(FontWeight.Bold),fontWeight=FontWeight.Bold));if(selected)state.progress?.chapterPagesLeft?.let {Text(uiText(R.string.pages_remaining,if(state.progress.chapterEstimated)uiText(R.string.estimated_prefix) else "",it),style=explanation)}}
+            // ReaderToc board: no dividers; the current chapter is a rounded 12 tint with 15/500 primary text.
+            Row(Modifier.fillMaxWidth().semantics {this.selected=selected}.background(if(selected)colors.primary.copy(alpha=.08f) else colors.card,RoundedCornerShape(12.dp))
+                .clickable(role=Role.Button) {controller.goToToc(chapter.id);onNavigate()}.padding(start=(12+chapter.depth.coerceIn(0,12)*16).dp,top=12.dp,bottom=12.dp,end=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {Text(chapter.title,style=if(chapter.depth>0) type.value else type.row,fontWeight=if(selected) FontWeight.Medium else null,color=if(selected) colors.primary else colors.text);if(selected)state.progress?.chapterPagesLeft?.let {Text(uiText(R.string.pages_remaining,if(state.progress.chapterEstimated)uiText(R.string.estimated_prefix) else "",it),style=explanation)}}
                 val page=controller.pageForToc(chapter.id)
                 Text(page?.let {uiText(R.string.page_number,if(it.estimated)uiText(R.string.estimated_prefix) else "",it.page)} ?: uiText(R.string.page_not_estimated),style=explanation)
             }
-            Box(Modifier.fillMaxWidth().height(UiSize.border).background(colors.controlText.copy(alpha=.12f)))
         }}
-        ActionButton(uiText(R.string.locate_current_chapter),{session.toc.indexOfFirst {it.id==current}.takeIf {it>=0}?.let {index -> scope.launch {list.animateScrollToItem(index)}}},Modifier.fillMaxWidth(),enabled=current!=null,style=ActionStyle.SECONDARY,textStyle=action)
     }
 }

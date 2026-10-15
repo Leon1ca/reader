@@ -1,0 +1,4 @@
+<resources>
+    <!-- Android 12+ system launch screen: the same page colour, so splash, window and the first shelf frame are one surface. -->
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">true</item><item name="android:windowActionModeOverlay">true</item><item name="android:windowBackground">@color/window_page</item><item name="android:windowSplashScreenBackground">@color/window_page</item></style>
+</resources>

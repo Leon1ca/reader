@@ -25,7 +25,7 @@ fun Modifier.menuElevation(): Modifier {
 }
 
 fun Modifier.capsuleElevation(): Modifier = dropShadow(RoundedCornerShape(UiSize.tabRadius),
-    Shadow(radius=32.dp,spread=(-12).dp,offset=DpOffset(0.dp,14.dp),color=Color(0xFF14161A).copy(alpha=0.28f)))
+    Shadow(radius=16.dp,spread=(-6).dp,offset=DpOffset(0.dp,6.dp),color=Color(0xFF14161A).copy(alpha=0.18f)))
 
 fun Modifier.topHighlight(): Modifier = drawWithContent {
     drawContent()

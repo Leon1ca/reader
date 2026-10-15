@@ -18,6 +18,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -38,100 +44,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
-@Composable
-internal fun BookDetailScreen(book: ContentSummary,model: ReaderViewModel,loader: CoverLoader,enabled: Boolean,back: ()->Unit,edit: ()->Unit,delete: ()->Unit) {
-    val detail by remember(book.id) { model.shelfController.detail(book.id) }.collectAsStateWithLifecycle(initialValue=null)
-    val colors=LocalUiPalette.current;val type=LocalUiText.current
-    var more by remember {mutableStateOf(false)}
-    val snackbar=remember {SnackbarHostState()};val scope=rememberCoroutineScope()
-    fun toggleFinished() {
-        val previous=book.finishedAt!=null
-        model.shelfController.finished(book.id,!previous)
-        scope.launch { if(snackbar.showSnackbar(if(previous)uiText(R.string.marked_unfinished) else uiText(R.string.marked_finished),actionLabel=uiText(R.string.undo))==SnackbarResult.ActionPerformed)model.shelfController.finished(book.id,previous) }
-    }
-    Box(Modifier.fillMaxSize()) {
-    LazyColumn(Modifier.fillMaxSize().testTag("book-detail-list"),contentPadding=PaddingValues(bottom=32.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
-        item { ScreenHeader(uiText(R.string.book_information),back) { Box {
-            IconAction(uiText(R.string.book_more),UiGlyph.MORE,{more=true},enabled=enabled)
-            DropdownMenu(more,{more=false}) {
-                DropdownMenuItem(text={Text(uiText(R.string.edit_book))},onClick={more=false;edit()})
-                DropdownMenuItem(text={Text(if(book.finishedAt==null)uiText(R.string.mark_as_finished) else uiText(R.string.mark_as_unfinished))},onClick={more=false;toggleFinished()})
-            }
-        } } }
-        item { Column(Modifier.fillMaxWidth().padding(horizontal=32.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            BookCover(book,loader,Modifier.width(132.dp))
-            Text(book.title,style=type.detail,color=colors.text)
-            Text(book.author.ifBlank {uiText(R.string.author_unknown)},style=type.auxiliary,color=colors.secondaryText)
-            Text("${book.formatLabel()} · ${bytesLabel(book.bytes)}",style=type.explanation,color=colors.secondaryText)
-            ActionButton(if(book.lastRead==0L)uiText(R.string.start_reading) else uiText(R.string.continue_reading),{model.open(book.id)},Modifier.fillMaxWidth(),enabled)
-        } }
-        item { Group(Modifier.padding(horizontal=20.dp)) {
-            DataRow(uiText(R.string.reading_status),book.progressLabel())
-            DataRow(uiText(R.string.furthest_progress),"${(book.furthestFraction*100).toInt().coerceIn(0,100)}%")
-            DataRow(uiText(R.string.character_count),detail?.characters?.toString() ?: uiText(R.string.unknown))
-            SettingRow(uiText(R.string.bookmarks),detail?.bookmarkCount?.toString() ?: uiText(R.string.loading),{model.openWithPanel(book.id,ReaderPanel.BOOKMARKS)},enabled=enabled)
-            DataRow(uiText(R.string.original_name),detail?.content?.originalName ?: uiText(R.string.unknown))
-            if(book.format==ContentFormat.TXT)SettingRow(uiText(R.string.encoding_entry),book.encoding ?: uiText(R.string.unknown),{model.openWithPanel(book.id,ReaderPanel.ENCODING)},enabled=enabled) else DataRow(uiText(R.string.format),book.formatLabel())
-            SettingRow(uiText(R.string.reading_layout),detail?.let { if(it.hasFixedViewState)uiText(R.string.layout_book_zoom) else uiText(R.string.layout_global) } ?: uiText(R.string.loading),{model.openWithPanel(book.id,ReaderPanel.TYPOGRAPHY)},enabled=enabled)
-        } }
-        item { Group(Modifier.padding(horizontal=20.dp)) {
-            SettingRow(uiText(R.string.edit_book),uiText(R.string.title_and_author),edit,enabled=enabled)
-            SettingRow(if(book.finishedAt==null)uiText(R.string.mark_finished) else uiText(R.string.undo_finished),"",{toggleFinished()},enabled=enabled)
-            SettingRow(if(book.hiddenFromContinue)uiText(R.string.restore_continue) else uiText(R.string.hide_continue),"",{model.shelfController.hide(book.id,!book.hiddenFromContinue)},enabled=enabled && book.lastRead>0)
-        } }
-        item { Column(Modifier.padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            ActionButton(uiText(R.string.delete_book),delete,Modifier.fillMaxWidth(),enabled,ActionStyle.SECONDARY)
-            Text(uiText(R.string.metadata_hint),style=type.explanation,color=colors.secondaryText)
-        } }
-    }
-    SnackbarHost(snackbar,Modifier.align(Alignment.BottomCenter).padding(16.dp))
-    }
-}
-
-@Composable
-internal fun ContinueListScreen(books: List<ContentSummary>,loader: CoverLoader,enabled: Boolean,back: ()->Unit,open: (String)->Unit,detail: (String)->Unit,shelf: ShelfController,delete: (Set<String>)->Unit) {
-    val colors=LocalUiPalette.current;val type=LocalUiText.current
-    var selecting by rememberSaveable { mutableStateOf(false) }
-    var selectedIds by rememberSaveable(stateSaver=listSaver<List<String>,String>(save={it},restore={it.toList()})) { mutableStateOf<List<String>>(emptyList()) }
-    LaunchedEffect(books) { selectedIds=selectedIds.filter { id -> books.any { it.id==id } } }
-    BackHandler(selecting) {selecting=false;selectedIds=emptyList()}
-    LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        item { ScreenHeader(if(selecting)uiText(R.string.selected_count,selectedIds.size) else uiText(R.string.continue_reading),back) {
-            IconAction(if(selecting)uiText(R.string.cancel_selection) else uiText(R.string.select),UiGlyph.CHECK,{selecting=!selecting;selectedIds=emptyList()},enabled=enabled)
-        } }
-        if(selecting)item { Row(Modifier.padding(horizontal=20.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            ActionButton(uiText(R.string.select_all),{selectedIds=books.map {it.id}},Modifier.weight(1f),enabled,ActionStyle.SECONDARY)
-            ActionButton(uiText(R.string.delete_selected_count,selectedIds.size),{delete(selectedIds.toSet())},Modifier.weight(1f),enabled && selectedIds.isNotEmpty())
-        } }
-        if(books.isEmpty())item { Text(uiText(R.string.continue_empty),Modifier.padding(24.dp),style=type.auxiliary) }
-        items(books,key={it.id}) { book ->
-            var menu by remember(book.id) { mutableStateOf(false) }
-            Row(Modifier.padding(horizontal=20.dp).fillMaxWidth().contentElevation(RoundedCornerShape(18.dp)).background(colors.card,RoundedCornerShape(18.dp)).clickable(enabled=enabled && selecting) {selectedIds=if(book.id in selectedIds)selectedIds-book.id else selectedIds+book.id}.padding(14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-                BookCover(book,loader,Modifier.width(72.dp))
-                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Text(book.title,style=type.book)
-                    Text(book.progressLabel(),style=type.cover,color=colors.secondaryText)
-                    if(!selecting)ActionButton(uiText(R.string.continue_reading),{open(book.id)},style=ActionStyle.FILTER,enabled=enabled)
-                }
-                if(selecting)IconAction(if(book.id in selectedIds)uiText(R.string.deselect_book,book.title) else uiText(R.string.select_book,book.title),UiGlyph.CHECK,{selectedIds=if(book.id in selectedIds)selectedIds-book.id else selectedIds+book.id},enabled=enabled,color=if(book.id in selectedIds)colors.primary else colors.secondaryText)
-                else Box {
-                    IconAction(uiText(R.string.book_more_label,book.title),UiGlyph.MORE,{menu=true},enabled=enabled)
-                    DropdownMenu(menu,{menu=false}) {
-                        DropdownMenuItem(text={Text(uiText(R.string.book_information))},onClick={menu=false;detail(book.id)})
-                        DropdownMenuItem(text={Text(uiText(R.string.mark_finished))},onClick={menu=false;shelf.finished(book.id,true)})
-                        DropdownMenuItem(text={Text(uiText(R.string.hide_continue))},onClick={menu=false;shelf.hide(book.id)})
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable internal fun Group(modifier: Modifier=Modifier,content: @Composable ColumnScope.()->Unit) {
-    Column(modifier.fillMaxWidth().contentElevation(RoundedCornerShape(UiSize.groupRadius)).background(LocalUiPalette.current.card,RoundedCornerShape(UiSize.groupRadius)),content=content)
+    val shape=RoundedCornerShape(UiSize.groupRadius)
+    Box(modifier.fillMaxWidth().contentElevation(shape).background(LocalUiPalette.current.card,shape).clip(shape)) { Column(Modifier.fillMaxWidth().groupTrim(),content=content) }
 }
-@Composable private fun DataRow(label: String,value: String) {
-    Row(Modifier.fillMaxWidth().heightIn(min=50.dp).padding(horizontal=16.dp,vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+@Composable internal fun DataRow(label: String,value: String) {
+    Row(Modifier.fillMaxWidth().rowDivider().heightIn(min=50.dp).padding(horizontal=16.dp,vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
         Text(label,Modifier.weight(1f),style=LocalUiText.current.row)
         Text(value,Modifier.weight(1f),style=LocalUiText.current.value,color=LocalUiPalette.current.secondaryText)
     }
@@ -139,11 +57,11 @@ internal fun ContinueListScreen(books: List<ContentSummary>,loader: CoverLoader,
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->Unit,soon: ()->Unit,licenses: ()->Unit,onBackdropDirty: ()->Unit,onDialog: (Boolean)->Unit) {
+internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->Unit,soon: ()->Unit,licenses: ()->Unit,backup: ()->Unit,diagnostics: ()->Unit,fonts: ()->Unit,onBackdropDirty: ()->Unit,onDialog: (Boolean)->Unit) {
     val display by model.displayPreferences.collectAsStateWithLifecycle()
     val type=LocalUiText.current;val colors=LocalUiPalette.current
-    var defaults by remember { mutableStateOf(false) };var brightness by remember { mutableStateOf(false) };var compatibility by remember { mutableStateOf(false) }
-    SideEffect {onDialog(defaults || brightness || compatibility)}
+    var compatibility by remember { mutableStateOf(false) }
+    SideEffect {onDialog(compatibility)}
     DisposableEffect(Unit) {onDispose {onDialog(false)}}
     val list=rememberLazyListState();val dirty by rememberUpdatedState(onBackdropDirty)
     LaunchedEffect(list) { snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.distinctUntilChanged().collect { dirty() } }
@@ -153,10 +71,8 @@ internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->U
             Text(uiText(R.string.reading),style=type.section)
             Group {
                 SettingRow(uiText(R.string.appearance),uiText(R.string.light),{soon()})
-                SettingRow(uiText(R.string.book_defaults),"${if(state.defaults.flow==ReaderFlow.PAGINATED)uiText(R.string.flow_paginated) else uiText(R.string.flow_scrolled)} · ${fontLabel(state.defaults.fontFamily)} ${state.defaults.fontSize.toInt()}",{defaults=true})
-                SettingRow(uiText(R.string.brightness),display.brightness?.let { "${(it*100).toInt()}%" } ?: uiText(R.string.follow_system),{brightness=true})
                 SettingRow(uiText(R.string.article_defaults),uiText(R.string.in_development),{soon()})
-                SettingRow(uiText(R.string.font_management),uiText(R.string.in_development),{soon()})
+                SettingRow(uiText(R.string.font_management),uiText(R.string.view),fonts)
             }
         } }
         item { Column(Modifier.padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -170,9 +86,9 @@ internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->U
             Text(uiText(R.string.data_privacy),style=type.section)
             Group {
                 SettingRow(uiText(R.string.storage_space),uiText(R.string.view),storage)
-                SettingRow(uiText(R.string.backup_restore),uiText(R.string.in_development),{soon()})
+                SettingRow(uiText(R.string.backup_restore),uiText(R.string.view),backup)
                 SettingRow(uiText(R.string.site_sessions),uiText(R.string.in_development),{soon()})
-                SettingRow(uiText(R.string.diagnostic_logs),uiText(R.string.in_development),{soon()})
+                SettingRow(uiText(R.string.diagnostic_logs),uiText(R.string.view),diagnostics)
             }
         } }
         item { Column(Modifier.padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -183,26 +99,6 @@ internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->U
             }
             Text(uiText(R.string.local_privacy_hint),Modifier.padding(top=8.dp),style=type.explanation,color=colors.secondaryText)
         } }
-    }
-    if(defaults)ReaderOverlay(uiText(R.string.reading_defaults),onClose={defaults=false}) {
-        Column(Modifier.padding(bottom=8.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(uiText(R.string.defaults_hint),style=type.explanation)
-            Text(uiText(R.string.background),style=type.auxiliary)
-            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { ReaderThemes.labels.keys.forEach { value -> ActionButton(com.localreader.app.ui.UiStrings.theme(value),{model.theme(value)},style=ActionStyle.FILTER,selected=state.defaults.theme==value) } }
-            SegmentedControl(ReaderFlow.entries,state.defaults.flow,{if(it==ReaderFlow.PAGINATED)uiText(R.string.flow_paginated) else uiText(R.string.flow_scrolled)},{model.flow(it)})
-            Text(uiText(R.string.page_turn),style=type.auxiliary)
-            PageTurnControl(display.pageTurn) {model.displayPreferences(display.copy(pageTurn=it))}
-            TypographyRules(state.defaults,true,{model.globalRules(it)},{soon()})
-        }
-    }
-    if(brightness)ReaderOverlay(uiText(R.string.brightness),onClose={brightness=false}) {
-        Column(Modifier.padding(bottom=8.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(uiText(R.string.brightness_hint),style=type.explanation)
-            // Commit once per gesture; dragging only moves the local value.
-            var draft by remember(display.brightness) { mutableFloatStateOf(display.brightness ?: .5f) }
-            Slider(value=draft,onValueChange={draft=it},onValueChangeFinished={model.displayPreferences(display.copy(brightness=draft))})
-            ActionButton(uiText(R.string.system_brightness),{model.displayPreferences(display.copy(brightness=null))},style=ActionStyle.FILTER,selected=display.brightness==null)
-        }
     }
     if(compatibility)ReaderOverlay(uiText(R.string.compatibility),onClose={compatibility=false}) {
         Text(uiText(R.string.compatibility_formats) +
@@ -215,28 +111,24 @@ internal fun SettingsScreen(model: ReaderViewModel,state: UiState,storage: ()->U
 @Composable
 internal fun StorageScreen(model: ReaderViewModel,back: ()->Unit,cleanup: ()->Unit,backLabel: String=uiText(R.string.back_to_settings)) {
     val stats by model.storageStats.collectAsStateWithLifecycle()
+    val failed by model.storageFailed.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refreshStorage() }
     LazyColumn(Modifier.fillMaxSize().testTag("storage-list"),contentPadding=PaddingValues(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
         item { ScreenHeader(uiText(R.string.storage),back,backLabel=backLabel) { IconAction(uiText(R.string.refresh_storage),UiGlyph.CLOCK,model::refreshStorage) } }
         val snapshot=stats
-        if(snapshot==null)item { Row(Modifier.padding(24.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) { CircularProgressIndicator();Text(uiText(R.string.storage_calculating)) } }
+        if(snapshot==null && failed)item { Column(Modifier.padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text(uiText(R.string.storage_statistics_failed),style=LocalUiText.current.value,color=LocalUiPalette.current.danger)
+            ActionButton(uiText(R.string.retry),model::refreshStorage,Modifier.fillMaxWidth())
+        } }
+        else if(snapshot==null)item { Row(Modifier.padding(24.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) { CircularProgressIndicator();Text(uiText(R.string.storage_calculating)) } }
         else {
-            item { Column(Modifier.padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Text(bytesLabel(snapshot.total),style=LocalUiText.current.page)
-                Text(uiText(R.string.available_space,bytesLabel(snapshot.availableBytes)),style=LocalUiText.current.auxiliary)
-                if(!snapshot.consistent)Text(uiText(R.string.storage_changed),color=LocalUiPalette.current.warning)
-            } }
-            item { Group(Modifier.padding(horizontal=20.dp)) {
-                fun size(vararg categories: StorageCategory)=categories.sumOf { snapshot.bytes[it] ?: 0L }
-                DataRow(uiText(R.string.books),bytesLabel(size(StorageCategory.ORIGINAL)))
-                DataRow(uiText(R.string.thumbnails_indexes),bytesLabel(size(StorageCategory.COVER,StorageCategory.DERIVED)))
-                DataRow(uiText(R.string.database_temporary),bytesLabel(size(StorageCategory.DATABASE,StorageCategory.STAGING,StorageCategory.TRASH,StorageCategory.OTHER)))
-                DataRow(uiText(R.string.device_remaining),bytesLabel(snapshot.availableBytes))
-            } }
+            item { StorageUsageCard(snapshot,Modifier.padding(horizontal=20.dp)) }
         }
         item { Column(Modifier.padding(horizontal=20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(uiText(R.string.storage_cleanup_hint),style=LocalUiText.current.explanation)
-            ActionButton(uiText(R.string.cleanup_coming_soon),cleanup,Modifier.fillMaxWidth(),enabled=false,style=ActionStyle.SECONDARY)
+            Text(uiText(R.string.storage_cleanup_hint),Modifier.fillMaxWidth().padding(horizontal=8.dp),style=LocalUiText.current.explanation,color=LocalUiPalette.current.secondaryText,textAlign=androidx.compose.ui.text.style.TextAlign.Center)
+            val freed by model.cleanupResult.collectAsStateWithLifecycle()
+            ActionButton(uiText(R.string.cleanup_rebuildable),cleanup,Modifier.fillMaxWidth())
+            freed?.let { Text(uiText(R.string.cleanup_done,bytesLabel(it)),style=LocalUiText.current.explanation,color=LocalUiPalette.current.success) }
         } }
     }
 }
@@ -254,4 +146,34 @@ internal fun StorageScreen(model: ReaderViewModel,back: ()->Unit,cleanup: ()->Un
     }
 }
 
-private fun fontLabel(family: String)=when(family) { "serif" -> uiText(R.string.font_serif);"sans" -> uiText(R.string.font_sans);"kai" -> uiText(R.string.font_kai);else -> uiText(R.string.default_font) }
+/** Design board `Storage`: total, a segmented bar and a legend. Categories this build does not have yet are simply absent. */
+@Composable private fun StorageUsageCard(snapshot: StorageStats,modifier: Modifier=Modifier) {
+    val colors=LocalUiPalette.current;val type=LocalUiText.current
+    fun size(vararg categories: StorageCategory)=categories.sumOf { snapshot.bytes[it] ?: 0L }
+    class Part(val label: String,val note: Boolean,val bytes: Long,val color: androidx.compose.ui.graphics.Color)
+    val parts=listOf(
+        Part(uiText(R.string.books),false,size(StorageCategory.ORIGINAL),colors.primary),
+        Part(uiText(R.string.thumbnails_indexes),true,size(StorageCategory.COVER,StorageCategory.DERIVED),androidx.compose.ui.graphics.Color(0xFFB9BBC0)),
+        Part(uiText(R.string.database_temporary),false,size(StorageCategory.DATABASE,StorageCategory.STAGING,StorageCategory.TRASH,StorageCategory.OTHER),androidx.compose.ui.graphics.Color(0xFFD9D9D4)))
+    Column(modifier.fillMaxWidth().background(colors.card,RoundedCornerShape(UiSize.groupRadius)).padding(horizontal=16.dp,vertical=18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            Text(bytesLabel(snapshot.total),style=type.page.copy(fontSize=28.sp,letterSpacing=0.5.sp),color=colors.text)
+            Text(uiText(R.string.storage_used_remaining,bytesLabel(snapshot.availableBytes)),Modifier.padding(bottom=4.dp),style=type.auxiliary,color=colors.secondaryText)
+        }
+        if(!snapshot.consistent)Text(uiText(R.string.storage_changed),color=colors.warning)
+        Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(colors.input),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+            val total=parts.sumOf { it.bytes }.coerceAtLeast(1L)
+            parts.filter { it.bytes>0 }.forEach { part -> Box(Modifier.weight((part.bytes.toFloat()/total).coerceAtLeast(0.02f)).fillMaxHeight().background(part.color)) }
+        }
+        Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            parts.forEach { part -> Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(10.dp).background(part.color,RoundedCornerShape(3.dp)))
+                Text(part.label,Modifier.weight(1f),style=type.value,color=colors.text)
+                if(part.note)Text(uiText(R.string.storage_cleanable),style=type.explanation,color=colors.secondaryText)
+                Text(bytesLabel(part.bytes),style=type.auxiliary,color=colors.secondaryText)
+            } }
+        }
+    }
+}
+
+/** "约 1.2 万字" for long books, the plain count below ten thousand. */

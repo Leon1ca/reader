@@ -13,14 +13,15 @@ data class EpubCacheRecord(val revision: String,val title: String,val author: St
     val sections: List<EpubSectionRecord>,val toc: List<EpubToc>,val resources: List<EpubResourceRecord>,val warnings: List<String>,val layout: String,val mixed: Boolean,val direction: String,val coverFile: String? = null,val renderRevision: String=revision,val parts: List<EpubPartRecord> = sections.map { EpubPartRecord(it.index,it.index,0,it.characters,it.authorFile,it.customFile,it.elements) },val fixedPages: List<EpubFixedPage> = emptyList(),val declaredLayout: String=layout,val splitTargetBytes: Int=0,val splitMaxBytes: Int=0,val cacheSchema: Int=2)
 
 object EpubCache {
-    val RENDER_ALGORITHM="parts2-style4-${EpubParts.budget.key}"
+    /** style5: custom-mode CSS keeps the author's text-align and text-indent (Readest parity); older derived caches rebuild on open. */
+    val RENDER_ALGORITHM="parts2-style5-${EpubParts.budget.key}"
     private val DERIVED_DIRECTORY="derived-$RENDER_ALGORITHM"
     private const val LEGACY_DERIVED_DIRECTORY="derived-parts2-style4"
     internal fun compatibleSplit(record: EpubCacheRecord,budget: EpubSplitBudget=EpubParts.budget): Boolean =
         if(record.splitTargetBytes==0 && record.splitMaxBytes==0)
             budget.targetKiB==384 && record.renderRevision==record.revision+"-parts2-style4"
         else record.splitTargetBytes==budget.targetBytes && record.splitMaxBytes==budget.maxBytes &&
-            (record.renderRevision==record.revision+"-parts2-style4-${budget.key}" || record.mixed && record.renderRevision==record.revision+"-parts2-style4-${budget.key}-mixed1")
+            (record.renderRevision==record.revision+"-parts2-style5-${budget.key}" || record.mixed && record.renderRevision==record.revision+"-parts2-style5-${budget.key}-mixed1")
     private const val FIXED_DERIVED_DIRECTORY="derived-fxl1"
     fun activeDirectory(directory: File)=File(directory,"derived-mixed1-$RENDER_ALGORITHM").takeIf { it.isDirectory } ?: File(directory,FIXED_DERIVED_DIRECTORY).takeIf { it.isDirectory } ?: File(directory,DERIVED_DIRECTORY).takeIf { it.isDirectory } ?: File(directory,LEGACY_DERIVED_DIRECTORY).takeIf { it.isDirectory } ?: directory
     /** Schema 1 remains immutable. A schema 2 rebuild never replaces the original source/index. */

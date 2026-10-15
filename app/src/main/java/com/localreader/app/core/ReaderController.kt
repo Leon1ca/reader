@@ -41,11 +41,32 @@ class ReaderController(private val generation: Long,private val register: (Rende
         return ReaderCommandResult.APPLIED
     }
     fun cancelPreview() { synchronized(previewLock) { ++previewSerial;previewMutable.value=TextPreviewState() };previewJob?.cancel();previewJob=null }
-    fun reencode(encoding: String): ReaderCommandResult {
+    fun reencode(encoding: String,rule: ChapterRule?=null): ReaderCommandResult {
         if(!valid)return ReaderCommandResult.UNAVAILABLE
         if(previewSource==null)return ReaderCommandResult.NOT_APPLICABLE
-        require(encoding in previewEncodings);cancelPreview();actions.reencode(encoding);return ReaderCommandResult.APPLIED
+        require(encoding in previewEncodings);cancelPreview();cancelChapterScan();actions.reencode(encoding,rule);return ReaderCommandResult.APPLIED
     }
+    private var scanSerial=0L
+    private val scanMutable=kotlinx.coroutines.flow.MutableStateFlow(ChapterScanState())
+    val chapterScanState: kotlinx.coroutines.flow.StateFlow<ChapterScanState> = scanMutable
+    /** Counts what [rule] would find in the original, without touching the open book. */
+    fun scanChapters(encoding: String,rule: ChapterRule): ReaderCommandResult {
+        if(!valid)return ReaderCommandResult.UNAVAILABLE
+        val source=previewSource ?: return ReaderCommandResult.NOT_APPLICABLE
+        require(encoding in previewEncodings)
+        cancelChapterScan()
+        val serial=synchronized(previewLock) { ++scanSerial;scanMutable.value=ChapterScanState(PreviewPhase.RUNNING);scanSerial }
+        scanJob=searchScope.launch {
+            try {
+                val value=source.scanChapters(encoding,rule) { ensureActive() }
+                synchronized(previewLock) { if(valid && scanSerial==serial)scanMutable.value=ChapterScanState(PreviewPhase.DONE,value,encoding=encoding,rule=rule) }
+            } catch(cancel: CancellationException) { throw cancel }
+            catch(error: Exception) { synchronized(previewLock) { if(valid && scanSerial==serial)scanMutable.value=ChapterScanState(PreviewPhase.FAILED,message=(error as? ChapterRuleException)?.message ?: "预览失败") } }
+        }
+        return ReaderCommandResult.APPLIED
+    }
+    private var scanJob: kotlinx.coroutines.Job?=null
+    fun cancelChapterScan() { synchronized(previewLock) { ++scanSerial;scanMutable.value=ChapterScanState() };scanJob?.cancel();scanJob=null }
     fun setForeground(active: Boolean) { foreground=active && valid;backend?.setForeground(foreground) }
     fun setViewportInsets(value: ViewportInsets) { if(valid && value!=viewportInsets) { viewportInsets=value;backend?.setViewportInsets(value) } }
     fun setThemeOverride(value: String?) {
@@ -268,9 +289,11 @@ class ReaderController(private val generation: Long,private val register: (Rende
     fun goToToc(id: String) { if(valid)actions.goToToc(id) }
     fun addBookmark() { if(valid)actions.addBookmark() }
     fun deleteBookmark(id: Long) { if(valid)actions.deleteBookmark(id) }
+    /** Undo of a deletion: puts the same position and excerpt back. */
+    fun restoreBookmark(bookmark: ReaderBookmark) { if(valid)actions.restoreBookmark(bookmark) }
     fun patchRules(patch: RulesPatch): ReaderCommandResult {
         if(!valid)return ReaderCommandResult.UNAVAILABLE
-        if(!capabilities.fontSize && (patch.fontSize!=FieldUpdate.Keep || patch.lineHeight!=FieldUpdate.Keep || patch.fontFamily!=FieldUpdate.Keep || patch.epubStyleMode!=FieldUpdate.Keep || patch.columns!=FieldUpdate.Keep))return ReaderCommandResult.NOT_APPLICABLE
+        if(!capabilities.fontSize && (patch.fontSize!=FieldUpdate.Keep || patch.lineHeight!=FieldUpdate.Keep || patch.paragraphSpacing!=FieldUpdate.Keep || patch.fontFamily!=FieldUpdate.Keep || patch.epubStyleMode!=FieldUpdate.Keep || patch.columns!=FieldUpdate.Keep))return ReaderCommandResult.NOT_APPLICABLE
         actions.patchRules(patch);return ReaderCommandResult.APPLIED
     }
     fun markFinished(finished: Boolean) { if(valid) { dismissEnd();actions.finished(finished) } }
@@ -281,5 +304,5 @@ class ReaderController(private val generation: Long,private val register: (Rende
     fun toggleChrome() { if(valid)tapMutable.value++ }
     fun next() { if(valid)backend?.let {cancelOpeningForNavigation();it.next(timings?.begin(ReaderOperationKind.PAGE,generation,origin=mutable.value.position))} }
     fun prev() { if(valid)backend?.let {cancelOpeningForNavigation();it.prev(timings?.begin(ReaderOperationKind.PAGE,generation,origin=mutable.value.position))} }
-    fun detach() { openingOperation?.let {timings?.finish(it,ReaderOperationOutcome.CANCELED)};valid=false;cancelPreview();themeOverride=null;clearSelection();dismissInteraction();cancelSearch();searchScope.cancel();release?.invoke();release=null;backend=null;displayed=null }
+    fun detach() { openingOperation?.let {timings?.finish(it,ReaderOperationOutcome.CANCELED)};valid=false;cancelPreview();cancelChapterScan();themeOverride=null;clearSelection();dismissInteraction();cancelSearch();searchScope.cancel();release?.invoke();release=null;backend=null;displayed=null }
 }

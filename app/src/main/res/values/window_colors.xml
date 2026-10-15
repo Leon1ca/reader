@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shelf page colour (UiPalette.page): the window shows it from the first frame, so a cold start never flashes white. -->
+    <color name="window_page">#F7F7F5</color>
+</resources>

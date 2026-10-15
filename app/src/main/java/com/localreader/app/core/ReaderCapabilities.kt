@@ -9,4 +9,6 @@ data class ViewportInsets(val left: Int=0,val top: Int=0,val right: Int=0,val bo
 }
 enum class ReaderCommandResult { APPLIED, NOT_APPLICABLE, UNAVAILABLE }
 enum class PreviewPhase { IDLE, RUNNING, DONE, FAILED }
+/** A scan result belongs to one encoding and one rule; it is never applied to another. */
+data class ChapterScanState(val phase: PreviewPhase=PreviewPhase.IDLE,val value: ChapterScan?=null,val message: String?=null,val encoding: String?=null,val rule: ChapterRule?=null)
 data class TextPreviewState(val phase: PreviewPhase=PreviewPhase.IDLE,val value: TextPreview?=null,val message: String?=null)

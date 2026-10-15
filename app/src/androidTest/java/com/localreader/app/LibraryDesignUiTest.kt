@@ -33,6 +33,19 @@ class LibraryDesignUiTest {
         check(editor.commit()) {"Original UI preferences could not be restored"}
     }
     private fun waitFor(condition: ()->Boolean)=compose.waitUntil(20000,condition)
+    /**
+     * performScrollToNode only brings a row into the viewport; the floating tab bar is a separate window drawn over the bottom of
+     * the list, so a row left behind it would receive the bar's tap instead. Scroll until the row sits clear of the bar, then tap.
+     */
+    private fun clickClearOfTabBar(list: String,text: String) {
+        compose.onNodeWithTag(list).performScrollToNode(hasText(text))
+        compose.waitForIdle()
+        val limit=compose.activity.window.decorView.height*0.74f
+        val bottom=compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.bottom
+        if(bottom>limit)compose.onNodeWithTag(list).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.ScrollBy) { it(0f,bottom-limit) }
+        compose.waitForIdle()
+        compose.onNodeWithText(text).performClick()
+    }
     @Test fun asciiBulkAndContinuousSearchPreserveCompleteProductionQuery() {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val target=instrumentation.targetContext
@@ -51,11 +64,18 @@ class LibraryDesignUiTest {
         val text="QA-54ca310a-a10b-1234-5678-abcdef0123456789"
         fun assertQuery(expected: String,source: String) {
             waitFor { !model.shelfController.state.value.loading }
+            // The controller publishes the query immediately; the text field's semantics are rebuilt on the next frame. Read the
+            // field only after the UI has caught up (a bounded wait on the real field, not on a timer), then assert both exactly.
+            compose.waitForIdle()
+            fun editableText() = compose.onNodeWithTag("shelf-search").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+            runCatching { waitFor { editableText()==model.shelfController.state.value.query } }
             val actual=model.shelfController.state.value.query
-            val editable=compose.onNodeWithTag("shelf-search").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+            val editable=editableText()
             android.util.Log.i("SearchInputVerification","$source expected=$expected controller=$actual editable=$editable")
             assertEquals("$source controller",expected,actual)
             assertEquals("$source editable",expected,editable)
+            waitFor { val result=model.shelfController.state.value;result.query==expected && !result.loading && result.items.isEmpty() }
+            assertTrue("$source nonmatching query has no results",model.shelfController.state.value.items.isEmpty())
         }
         try {
             waitFor { !model.state.value.loading }
@@ -64,7 +84,6 @@ class LibraryDesignUiTest {
             id=requireNotNull(model.state.value.results.single().bookId)
             compose.onNodeWithText("完成").performClick()
             if(compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty())compose.onNodeWithContentDescription("书架").performClick()
-            compose.onNodeWithText("全部").performScrollTo().performClick()
             repeat(5) { iteration ->
                 compose.onNodeWithTag("shelf-search").performTextClearance()
                 compose.onNodeWithTag("shelf-search").performTextInput(text)
@@ -76,15 +95,11 @@ class LibraryDesignUiTest {
                 compose.onNodeWithTag("shelf-search").performTextClearance()
                 compose.onNodeWithTag("shelf-search").performClick()
                 instrumentation.uiAutomation.executeShellCommand("input text $text").use { descriptor -> java.io.FileInputStream(descriptor.fileDescriptor).use { it.readBytes() } }
-                compose.waitForIdle()
-                waitFor { !model.shelfController.state.value.loading }
-                val query=model.shelfController.state.value.query
-                val editable=compose.onNodeWithTag("shelf-search").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
-                android.util.Log.i("SearchInputVerification","adb-bulk-$iteration expected=$text controller=$query editable=$editable match=${query==text && editable==text}")
+                assertQuery(text,"adb-bulk-$iteration")
                 }
             }
         } finally {
-            compose.runOnUiThread { model.shelfController.query("");model.shelfController.filter(prior.filter);model.shelfController.sort(prior.sort) }
+            compose.runOnUiThread { model.shelfController.query("");model.shelfController.sort(prior.sort) }
             id?.let { app.repository.content(it)?.let(app.repository::delete) }
             target.contentResolver.delete(uri,null,null)
             restore(displayPreferences,displayKeys,priorDisplay)
@@ -103,6 +118,22 @@ class LibraryDesignUiTest {
         val nonce=UUID.randomUUID().toString();val batchId="r5-ui-$nonce";var submitted=false;val uris=mutableListOf<Uri>();val ids=mutableSetOf<String>()
         var failure: Throwable?=null
         fun fixture(name: String,bytes: ByteArray): Uri=Uri.parse("content://com.localreader.app.test.fixtures/r5-$nonce-$name").also { uri -> uris+=uri;target.contentResolver.openOutputStream(uri,"wt")!!.use {it.write(bytes)} }
+        fun hideSearchImeBeforeCapsule() {
+            // Search owns the IME. Capsules are intentionally absent until normal Back dismisses it.
+            compose.waitForIdle()
+            val before=model.shelfController.state.value
+            val instrumentation=InstrumentationRegistry.getInstrumentation()
+            val automation=instrumentation.uiAutomation
+            val flags=automation.serviceInfo.flags
+            automation.serviceInfo=automation.serviceInfo.apply { this.flags=this.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+            try {
+                fun imeVisible()=automation.windows.any { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                if(imeVisible())instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                waitFor { !imeVisible() && compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty() }
+                assertEquals(before.query,model.shelfController.state.value.query)
+                assertEquals(before.selected,model.shelfController.state.value.selected)
+            } finally { automation.serviceInfo=automation.serviceInfo.apply { this.flags=flags } }
+        }
         try {
             waitFor { !model.state.value.loading }
             val a=fixture("alpha.txt","OWNED ALPHA $nonce\n第二行中文😀".toByteArray())
@@ -120,8 +151,7 @@ class LibraryDesignUiTest {
             compose.onNodeWithContentDescription("书架").performClick()
             val id=requireNotNull(results.first().bookId);val original=requireNotNull(repository.content(id));val originalFile=repository.original(original)
             val bytesBefore=originalFile.readBytes()
-            // A one-shot detail request must be consumed, while opening/closing
-            // the production reader creates the normal continue-reading entry.
+            // A one-shot detail request must be consumed, and opening/closing the production reader records it as read.
             compose.runOnUiThread {model.openWithPanel(id,com.localreader.app.ui.ReaderPanel.BOOKMARKS)}
             waitFor {model.state.value.reader!=null && !model.state.value.busy && model.state.value.readerPanel==null}
             compose.onNodeWithTag("reader-panel-书签").assertExists()
@@ -131,15 +161,18 @@ class LibraryDesignUiTest {
             compose.runOnUiThread {model.readerController(requireNotNull(model.state.value.reader).generation).toggleChrome()}
             waitFor {compose.onAllNodes(hasTestTag("reader-close")).fetchSemanticsNodes().isNotEmpty()}
             compose.onNodeWithTag("reader-close").performClick()
-            waitFor {model.state.value.reader==null && model.shelfController.state.value.continueReading.any {it.id==id}}
-            compose.onNodeWithText("继续阅读").performClick()
-            compose.onNodeWithContentDescription("《${original.title}》更多").performClick()
-            compose.onNodeWithText("图书信息").performClick()
-            compose.onNodeWithContentDescription("返回书架").performClick()
-            compose.onNodeWithTag("book-detail-list").assertDoesNotExist()
-            compose.onNodeWithContentDescription("返回书架").assertExists()
-            compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
-            compose.onNodeWithContentDescription("返回书架").performClick()
+            waitFor {model.state.value.reader==null}
+            // The shelf has no continue-reading rail or list; the book is reached from its own card.
+            compose.onNodeWithText("继续阅读").assertDoesNotExist()
+            compose.onNodeWithTag("shelf-search").performTextReplacement(original.title)
+            waitFor {model.shelfController.state.value.items.any {it.id==id}}
+            // Book cards carry no "more/details" button any longer; the detail page is gone.
+            compose.onNodeWithContentDescription("《${original.title}》更多").assertDoesNotExist()
+            compose.onNodeWithText("查看详情").assertDoesNotExist()
+            hideSearchImeBeforeCapsule()
+            compose.onNodeWithTag("floating-tab-bar").assertExists()
+            compose.onNodeWithTag("shelf-search").performTextReplacement("")
+            hideSearchImeBeforeCapsule()
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithContentDescription("更多设置").performClick()
             compose.onNode(hasText("备份与恢复") and hasAnyAncestor(isDialog())).assertExists()
@@ -152,42 +185,39 @@ class LibraryDesignUiTest {
             val searchBounds=compose.onNodeWithTag("shelf-search").fetchSemanticsNode().boundsInRoot
             assertTrue(searchBounds.height>=48f*compose.activity.resources.displayMetrics.density-1f)
             compose.onNodeWithTag("shelf-search").performTextReplacement(nonce)
-            compose.onNodeWithText("全部").performClick()
             waitFor {model.shelfController.state.value.items.count {it.id in ids}==2}
-            compose.onNodeWithContentDescription("《${original.title}》更多").performClick()
-            compose.onNodeWithText("查看详情").performClick()
-            compose.onNodeWithText("图书信息").assertExists()
-            waitFor {compose.onAllNodes(hasText("未知")).fetchSemanticsNodes().isNotEmpty() || compose.onAllNodes(hasText("字数")).fetchSemanticsNodes().isNotEmpty()}
-            compose.onNodeWithContentDescription("图书更多操作").performClick();compose.onNodeWithText("编辑图书信息").performClick()
-            val changed="R5 edited $nonce"
-            compose.onNodeWithText("标题").performTextReplacement(changed)
-            compose.onNodeWithText("作者").performTextReplacement("OWNED AUTHOR")
-            compose.onNodeWithText("保存").performClick()
-            waitFor {repository.content(id)?.title==changed}
-            assertEquals(original.revision,repository.content(id)!!.revision)
+            hideSearchImeBeforeCapsule()
+            // Selection mode (Apple Books style): the tab bar gives way to the selection capsule; 全选/退出选择 sit in the header.
+            compose.onNodeWithContentDescription("选择").performClick()
+            compose.onNodeWithTag("selection-action-bar").assertExists();compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
+            compose.onNodeWithText("退出选择").assertExists()
+            // Nothing chosen: the actions are dimmed and change nothing.
+            compose.onNodeWithText("标记已读完").performClick();assertNull(repository.content(id)!!.finishedAt)
+            compose.onNodeWithText("全选").performClick()
+            waitFor {model.shelfController.state.value.selected.containsAll(ids)}
+            compose.onNodeWithText("取消全选").performClick()
+            waitFor {model.shelfController.state.value.selected.isEmpty()}
+            compose.onNodeWithTag("selection-action-bar").assertExists()
+            compose.onNodeWithTag("shelf-book-$id").performClick()
+            waitFor {model.shelfController.state.value.selected==setOf(id)}
+            compose.onNodeWithText("已选 1 本").assertExists()
+            compose.onNodeWithText("标记已读完").performClick();waitFor {repository.content(id)?.finishedAt!=null}
+            // Acting ends the selection and brings the tabs back.
+            waitFor {compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty()}
+            compose.onNodeWithTag("selection-action-bar").assertDoesNotExist()
             assertArrayEquals(bytesBefore,originalFile.readBytes())
-            compose.onNodeWithTag("book-detail-list").performScrollToNode(hasContentDescription("图书更多操作"))
-            compose.onNodeWithContentDescription("图书更多操作").performClick()
-            compose.onNodeWithText("标为已读完").performClick();waitFor {repository.content(id)?.finishedAt!=null}
-            compose.onNodeWithText("撤销").performClick();waitFor {repository.content(id)?.finishedAt==null}
-            compose.onNodeWithTag("book-detail-list").performScrollToNode(hasText("标记读完"))
-            compose.onNodeWithText("标记读完").performClick();waitFor {repository.content(id)?.finishedAt!=null}
-            compose.onNodeWithTag("book-detail-list").performScrollToNode(hasText("撤销读完"))
-            compose.onNodeWithText("撤销读完").performClick();waitFor {repository.content(id)?.finishedAt==null}
-            compose.onNodeWithTag("book-detail-list").performScrollToNode(hasContentDescription("返回书架"))
-            compose.onNodeWithContentDescription("返回书架").performClick()
+            repository.setFinished(id,false);waitFor {repository.content(id)?.finishedAt==null}
+            val changed=original.title
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithTag("settings-list").performScrollToNode(hasText("阅读排版"))
-            compose.onNodeWithText("阅读排版").performClick()
-            compose.onNodeWithText("背景和阅读模式应用到全部书，单本字号覆盖保留。").assertExists()
-            compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
-            compose.onNodeWithText("完成").performClick()
+            // Reading layout and brightness are set inside the reader only; settings no longer carries those two rows.
+            compose.onNodeWithTag("settings-list").performScrollToNode(hasText("字体管理"))
+            compose.onNodeWithText("阅读排版").assertDoesNotExist()
+            compose.onNodeWithText("阅读亮度").assertDoesNotExist()
             compose.onNodeWithTag("settings-list").performScrollToNode(hasText("外观"))
             compose.onNodeWithText("外观").performClick()
             compose.onNodeWithText("该功能开发中").assertExists()
             assertEquals(oldDisplay,app.uiPreferences.display.value)
-            compose.onNodeWithTag("settings-list").performScrollToNode(hasText("存储空间"))
-            compose.onNodeWithText("存储空间").performClick()
+            clickClearOfTabBar("settings-list","存储空间")
             waitFor {model.storageStats.value!=null}
             compose.onNodeWithTag("storage-list").performScrollToNode(hasText("缩略图与索引"))
             compose.onNodeWithText("缩略图与索引").assertExists()
@@ -195,19 +225,25 @@ class LibraryDesignUiTest {
             compose.onNodeWithTag("storage-list").performScrollToNode(hasContentDescription("返回设置"))
             compose.onNodeWithContentDescription("返回设置").performClick()
             val beforeDeferred=repository.summaries()
-            compose.onNodeWithTag("settings-list").performScrollToNode(hasText("备份与恢复"))
-            compose.onNodeWithText("备份与恢复").performClick()
-            waitFor {compose.onAllNodes(hasText("该功能开发中")).fetchSemanticsNodes().isNotEmpty()}
+            clickClearOfTabBar("settings-list","备份与恢复")
+            // Backup and restore is a real page now: opening it changes nothing in the library, and going back returns to settings.
+            waitFor {compose.onAllNodes(hasText("导出备份")).fetchSemanticsNodes().isNotEmpty()}
+            assertEquals(beforeDeferred,repository.summaries())
+            compose.onNodeWithTag("backup-list").performScrollToNode(hasContentDescription("返回设置"))
+            compose.onNodeWithContentDescription("返回设置").performClick()
+            waitFor {compose.onAllNodes(hasTestTag("settings-list")).fetchSemanticsNodes().isNotEmpty()}
+            compose.onNodeWithTag("settings-list").performScrollToNode(hasText("存储空间"))
             compose.onNodeWithText("存储空间").assertExists()
             assertEquals(beforeDeferred,repository.summaries())
             compose.onNodeWithText("图书信息").assertDoesNotExist()
             compose.onNodeWithContentDescription("书架").performClick()
             compose.onNodeWithTag("shelf-search").performTextReplacement(changed)
+            hideSearchImeBeforeCapsule()
             waitFor {model.shelfController.state.value.items.any {it.id==id}}
-            compose.onNodeWithContentDescription("《$changed》更多").performClick()
-            compose.onNodeWithText("查看详情").performClick()
-            compose.onNodeWithTag("book-detail-list").performScrollToNode(hasText("删除图书"))
-            compose.onNodeWithText("删除图书").performClick()
+            compose.onNodeWithContentDescription("选择").performClick()
+            compose.onNodeWithTag("shelf-book-$id").performClick()
+            waitFor {model.shelfController.state.value.selected==setOf(id)}
+            compose.onNode(hasText("删除") and hasAnyAncestor(hasTestTag("selection-action-bar"))).performClick()
             waitFor {compose.onAllNodes(hasText("书签（0 个）",substring=true)).fetchSemanticsNodes().isNotEmpty()}
             compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
             compose.onNodeWithText("删除").performClick()
@@ -230,7 +266,7 @@ class LibraryDesignUiTest {
                     }
                 }
             }
-            cleanup {compose.runOnUiThread {model.closeReader();if(app.imports.state.value.id==batchId)model.dismissResults();model.shelfController.dismissDeletions();model.shelfController.clearSelection();model.shelfController.query("");model.shelfController.sort(oldShelf.sort);model.shelfController.filter(oldShelf.filter);model.displayPreferences(oldDisplay)}}
+            cleanup {compose.runOnUiThread {model.closeReader();if(app.imports.state.value.id==batchId)model.dismissResults();model.shelfController.dismissDeletions();model.shelfController.clearSelection();model.shelfController.query("");model.shelfController.sort(oldShelf.sort);model.displayPreferences(oldDisplay)}}
             cleanup {restore(rawUi,uiKeys,beforeUi)}
             cleanup {restore(rawDisplay,displayKeys,beforeDisplay)}
             ids.forEach {id -> cleanup {repository.content(id)?.let(repository::delete)}}

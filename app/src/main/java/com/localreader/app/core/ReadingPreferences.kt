@@ -15,7 +15,7 @@ data class RulesPatch(val fontSize: FieldUpdate<Float> = FieldUpdate.Keep,
     val lineHeight: FieldUpdate<Double> = FieldUpdate.Keep, val margin: FieldUpdate<String> = FieldUpdate.Keep,
     val fontFamily: FieldUpdate<String> = FieldUpdate.Keep, val columns: FieldUpdate<String> = FieldUpdate.Keep,
     val epubStyleMode: FieldUpdate<String> = FieldUpdate.Keep, val fxlZoom: FieldUpdate<String> = FieldUpdate.Keep,
-    val spreadPreference: FieldUpdate<String> = FieldUpdate.Keep) {
+    val spreadPreference: FieldUpdate<String> = FieldUpdate.Keep, val paragraphSpacing: FieldUpdate<Double> = FieldUpdate.Keep) {
     /** True when the patch changes something that is stored per book instead of app-wide. */
     val touchesBook: Boolean get() = fxlZoom != FieldUpdate.Keep || spreadPreference != FieldUpdate.Keep
 }

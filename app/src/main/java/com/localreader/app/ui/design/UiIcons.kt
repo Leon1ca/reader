@@ -21,13 +21,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 
-enum class UiGlyph { SHELF, LATER, RSS, SETTINGS, PLUS, SEARCH, BACK, CHEVRON, MORE, CHECK, CLOCK, WARNING, CLOSE, BOOKMARK, TOC, BOOK, TYPE }
+enum class UiGlyph { SHELF, LATER, RSS, SETTINGS, PLUS, SEARCH, BACK, CHEVRON, MORE, CHECK, CLOCK, WARNING, CLOSE, BOOKMARK, TOC, BOOK, TYPE, CHEVRON_UP, CHEVRON_DOWN, GRIP }
 
 private val paths = mapOf(
     UiGlyph.PLUS to "M12 4.5v15M4.5 12h15",
     UiGlyph.SEARCH to "M15.4 15.4l4.6 4.6",
     UiGlyph.BACK to "M15 5l-7 7 7 7",
     UiGlyph.CHEVRON to "M9.5 6l6 6-6 6",
+    UiGlyph.GRIP to "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
+    UiGlyph.CHEVRON_UP to "M6 14.5l6-6 6 6",
+    UiGlyph.CHEVRON_DOWN to "M6 9.5l6 6 6-6",
     UiGlyph.CHECK to "M8.5 12.2l2.4 2.3 4.6-4.8",
     UiGlyph.CLOCK to "M12 7.5V12l3 2",
     UiGlyph.WARNING to "M12 4l9 16H3zM12 10v4M12 17v.5",
@@ -79,9 +82,9 @@ private fun DrawScope.vector(glyph: UiGlyph,color: Color,selected: Boolean) {
         }
         UiGlyph.MORE -> listOf(5.75f,12f,18.25f).forEach { drawCircle(color,1.5f,Offset(it,12f)) }
         else -> {
-            if(glyph == UiGlyph.SEARCH) drawCircle(color,6.25f,Offset(10.75f,10.75f),style=Stroke(1.7f))
+            if(glyph == UiGlyph.SEARCH) drawCircle(color,6.25f,Offset(10.75f,10.75f),style=Stroke(1.5f))
             if(glyph in setOf(UiGlyph.CHECK,UiGlyph.CLOCK)) drawCircle(color,8.5f,Offset(12f,12f),style=Stroke(1.8f))
-            drawPath(paths.getValue(glyph),color,style=if(glyph==UiGlyph.BOOKMARK && selected)Fill else Stroke(if(glyph in setOf(UiGlyph.CHECK,UiGlyph.CLOCK,UiGlyph.WARNING)) 1.8f else 1.6f,cap=StrokeCap.Round))
+            drawPath(paths.getValue(glyph),color,style=if(glyph==UiGlyph.BOOKMARK && selected)Fill else Stroke(if(glyph in setOf(UiGlyph.CHECK,UiGlyph.CLOCK,UiGlyph.WARNING)) 1.8f else 1.5f,cap=StrokeCap.Round))
         }
     }
 }

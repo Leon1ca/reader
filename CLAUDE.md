@@ -1,6 +1,6 @@
 # Claude · UI 工作约定
 
-先完整读取 [AGENTS.md](AGENTS.md) 和 [当前交接](docs/ai-handoff.md)。共同分工、命令、代码冻结、交接与恢复规则只在共同入口维护；本文件仅补充 UI 约定。
+先完整读取 [AGENTS.md](AGENTS.md) 和 [当前交接](docs/ai-handoff.md)。共同分工、[功能设计边界与验收契约](AGENTS.md#功能设计边界与验收契约)、[审核边界与结束条件](AGENTS.md#版本审核边界与结束条件)、命令、代码冻结、交接与恢复规则只在共同入口维护；本文件仅补充 UI 约定。
 
 - Sonnet 承接用户已指定的 UI、组件和交互工作；Opus 仅按需做重要方案评审。任务为“待指定”时只恢复上下文，不自行选择新功能、重做界面或开启后续里程碑。
 - 开工先确认目标画板、现有组件、状态来源、相关接口和验收条件。按需读 `docs/NEXT_DEVELOPMENT_PRD.md` 最新决策、`docs/UI_REPLACEMENT_PRD.md` 对应契约、`docs/ui-design/UiSpec.dc.html` 与目标画板；不要把历史接口示例当作当前签名。

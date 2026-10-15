@@ -31,14 +31,14 @@ class LibraryOpenedBookFactory(private val repository: LibraryRepository) : Open
                 .also { coroutine.ensureActive() }
         } catch (error: Throwable) { source.close(); throw error }
     }
-    override suspend fun reencode(contentId: String, encoding: String): ReencodedBook {
+    override suspend fun reencode(contentId: String, encoding: String, rule: ChapterRule?): ReencodedBook {
         var prepared: ReencodedBook? = null
         try { return withContext(Dispatchers.IO) {
         val book = requireNotNull(repository.db.content(contentId))
         var opened: OpenedBook? = null
         try {
             val coroutine = currentCoroutineContext()
-            repository.reencodePrepared(requireNotNull(repository.db.txt(book.id)),encoding,checkpoint = { coroutine.ensureActive() }) { candidate ->
+            repository.reencodePrepared(requireNotNull(repository.db.txt(book.id)),encoding,checkpoint = { coroutine.ensureActive() },rule = rule) { candidate ->
                 val source = repository.engine(candidate)
                 try {
                     val handle = TxtOpenedBook(contentId,ContentMetadata(candidate.title,candidate.author),source,repository.original(book),repository.searchRoot) { coroutine.ensureActive() }

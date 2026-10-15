@@ -10,9 +10,6 @@ enum class UiWidth { COMPACT, MEDIUM, EXPANDED }
 @Immutable
 data class WindowLayout(val width: UiWidth, val columns: Int, val horizontal: Dp) {
     val readerSidePanel: Boolean get() = width != UiWidth.COMPACT
-    val continueCardWidth: Dp get()=when(width) {UiWidth.COMPACT->272.dp;UiWidth.MEDIUM->300.dp;UiWidth.EXPANDED->340.dp}
-    val continueCoverWidth: Dp get()=when(width) {UiWidth.COMPACT->78.dp;UiWidth.MEDIUM->84.dp;UiWidth.EXPANDED->90.dp}
-    val continueGap: Dp get()=when(width) {UiWidth.COMPACT->12.dp;UiWidth.MEDIUM->14.dp;UiWidth.EXPANDED->16.dp}
     val tocWidth: Dp get() = 400.dp
     val panelMaxWidth: Dp get() = 480.dp
     fun readerToolbar(available: Dp): Dp = when(width) {
@@ -28,6 +25,15 @@ data class WindowLayout(val width: UiWidth, val columns: Int, val horizontal: Dp
                 available < 840.dp -> WindowLayout(UiWidth.MEDIUM,5,32.dp)
                 else -> WindowLayout(UiWidth.EXPANDED,8,48.dp)
             }
+        }
+        /**
+         * Width class corrected for short windows: a landscape phone (e.g. 844×390) is wide but not a tablet, so it gets
+         * at most 6 columns and fold-sized margins. An unbounded height (inside a scroll) counts as tall.
+         */
+        fun of(available: Dp,height: Dp): WindowLayout {
+            val base=of(available)
+            val short=height.value.isFinite() && height < 480.dp
+            return if(short && base.width==UiWidth.EXPANDED) base.copy(columns=6,horizontal=32.dp) else base
         }
     }
 }

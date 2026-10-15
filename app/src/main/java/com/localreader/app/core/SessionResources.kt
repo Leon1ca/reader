@@ -9,6 +9,10 @@ import java.util.Collections
 
 data class ReaderResource(val mime: String, val headers: Map<String,String>, val open: () -> InputStream)
 
+/** A font the user imported, found by id. Only the id format and the app's own table decide what can be served. */
+class UserFontResource(val mime: String,val open: () -> InputStream)
+fun interface UserFontSource { fun find(id: String): UserFontResource? }
+
 /**
  * Exact resource capabilities, session-scoped. Missing resources are denied, never fetched.
  *
@@ -17,7 +21,7 @@ data class ReaderResource(val mime: String, val headers: Map<String,String>, val
  * decodes the 25 MB CJK face once instead of once per section document. Every
  * other resource stays bound to this session and revision.
  */
-class SessionResources(val sessionId: String, private val publication: ReaderPublication, private val asset: (String) -> InputStream) {
+class SessionResources(val sessionId: String, private val publication: ReaderPublication, private val userFonts: UserFontSource? = null, private val asset: (String) -> InputStream) {
     val base = "${ReaderOrigin.URL}/reader/$sessionId/${publication.revision}/"
     val mainUrl = "${base}host.html"
     private val lock = Any()
@@ -38,7 +42,12 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
             uri.query != null || uri.fragment != null || uri.rawPath != uri.path) return null
         if (url.startsWith(FONT_BASE)) {
             val file = url.removePrefix(FONT_BASE)
-            if (mainFrame || file !in BundledFonts.files) return null
+            if (mainFrame) return null
+            if (file.startsWith(USER_FONT_PREFIX)) {
+                val font = userFonts?.find(file.removePrefix(USER_FONT_PREFIX)) ?: return null
+                return ReaderResource(font.mime, IMMUTABLE) { guarded(font.open()) }
+            }
+            if (file !in BundledFonts.files) return null
             return ReaderResource(if (file.endsWith(".css")) "text/css" else "font/ttf", IMMUTABLE) { guarded(asset("fonts/$file")) }
         }
         if (!url.startsWith(base)) return null
@@ -62,7 +71,7 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
             // Build outside the lock: page turns must never wait behind another section's disk read.
             val built = publication.section(section).let {
                 require(it.utf16Characters <= if(publication.kind==WebContentKind.FIXED)4*1024*1024 else if(publication.protocolVersion==2)1024*1024 else MAX_SECTION_CHARACTERS) { "Content section exceeds renderer budget" }
-                it.html.toByteArray(Charsets.UTF_8).also { bytes -> require(bytes.size <= if(publication.kind==WebContentKind.FIXED)4*1024*1024 else MAX_SECTION_BYTES) { "Content resource exceeds renderer budget" } }
+                (if(publication.kind==WebContentKind.EPUB)EpubHtmlTail.normalize(it.html) else it.html).toByteArray(Charsets.UTF_8).also { bytes -> require(bytes.size <= if(publication.kind==WebContentKind.FIXED)4*1024*1024 else MAX_SECTION_BYTES) { "Content resource exceeds renderer budget" } }
             }
             synchronized(lock) {
                 if (closed) return null
@@ -109,6 +118,7 @@ class SessionResources(val sessionId: String, private val publication: ReaderPub
     companion object {
         const val FONT_BASE = "${ReaderOrigin.URL}/fonts/"
         const val FONT_CSS_URL = "${FONT_BASE}readest.css"
+        const val USER_FONT_PREFIX = "user/"
         const val MAX_SECTION_CHARACTERS = 64 * 2049
         const val MAX_SECTION_BYTES = 2 * 1024 * 1024
         private const val REVOKED = "正文资源会话已撤销"

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 
 data class UiState(val loading: Boolean = true, val books: List<ContentSummary> = emptyList(), val reader: ReadingSession? = null,
                    val busy: Boolean = false, val operation: String = "", val results: List<ImportResult> = emptyList(), val error: String? = null, val defaults: ReaderRules = ReaderRules(), val libraryReady: Boolean = false, val readerPanel: ReaderPanel? = null)
@@ -31,15 +32,83 @@ class ReaderViewModel internal constructor(application: Application, private val
     private val storageMutable=MutableStateFlow<StorageStats?>(null)
     val storageStats=storageMutable.asStateFlow()
     private var storageJob: Job?=null
-    fun refreshStorage() { storageJob?.cancel();storageJob=viewModelScope.launch {
+    /** True after a failed scan, so the storage page offers a retry instead of waiting forever. */
+    val storageFailed=MutableStateFlow(false)
+    /** Result of the last cache cleanup: bytes freed, or null while none ran. */
+    val cleanupResult=MutableStateFlow<Long?>(null)
+    fun cleanCaches() { viewModelScope.launch {
+        if(state.value.busy || importState.value.phase in setOf(ImportPhase.RUNNING,ImportPhase.QUEUED) || shelfController.deletions.value.running) { notices.tryEmit(uiText(R.string.cleanup_busy));return@launch }
+        try { cleanupResult.value=withContext(Dispatchers.IO) { repository.cleanRebuildable { ensureActive() } };refreshStorage() }
+        catch(cancel: CancellationException) { throw cancel }
+        catch(error: Exception) { notices.tryEmit(uiText(R.string.cleanup_failed)) }
+    } }
+    fun refreshStorage() { storageJob?.cancel();storageFailed.value=false;storageJob=viewModelScope.launch {
         try { val stats=withContext(Dispatchers.IO) { repository.storageStats { ensureActive() } };storageMutable.value=stats }
         catch(cancel: CancellationException) { throw cancel }
-        catch(error: Exception) { mutable.update { it.copy(error=uiText(R.string.storage_statistics_failed)) } }
+        catch(error: Exception) { storageFailed.value=true;diag("storage_scan_failed",error) }
     } }
     val shelfController=ShelfController(contents,viewModelScope,app.uiPreferences,{ id ->
         check(!state.value.busy) { uiText(R.string.delete_busy) }
         if(owner?.opened?.contentId==id) { check(withContext(dbWriter) { flushPosition() }) { uiText(R.string.delete_progress_preserved) };closeReader() }
     },{ id -> retryOwners.removeAll { it.opened.contentId==id } },{ !state.value.busy },AndroidReadingTimings.ledger)
+    /**
+     * The shared minimum barrier before a backup or a library switch: every earlier serialised write has run and any reading
+     * position whose save failed is retried. False means progress is still unsaved and the operation must not proceed.
+     */
+    suspend fun settleProgress(): Boolean = withContext(dbWriter) {
+        var saved=true
+        (retryOwners.toList()+listOfNotNull(owner)).distinct().forEach { session ->
+            try { session.flush();retryOwners.remove(session) } catch(error: Exception) { saved=false }
+        }
+        saved
+    }
+    internal val backup=BackupController(application,app.backups,viewModelScope,app.diagnostics::record,::settleProgress,{
+        state.value.reader==null && !state.value.busy && importState.value.phase !in setOf(ImportPhase.RUNNING,ImportPhase.QUEUED) && !shelfController.deletions.value.running
+    },{ repository.db.close() })
+    /** Result of a restore finished (or undone) while the app was starting; shown once. */
+    val restoreResult: com.localreader.app.core.backup.RestoreOutcome?=app.restore.consumeOutcome().also { app.diagnostics.record(if(it==null)"app_start" else if(it.applied)"restore_applied" else "restore_rolled_back") }
+    val diagnosticsHook: (String)->Unit = { event -> app.diagnostics.record(event) }
+    val diagnostics get() = app.diagnostics
+    private fun diag(event: String,error: Throwable?=null) = app.diagnostics.record(event,error?.javaClass?.name.orEmpty())
+    // --- imported fonts ---
+    private val fontsMutable=MutableStateFlow<List<UserFont>>(emptyList())
+    val userFonts=fontsMutable.asStateFlow()
+    fun importFont(uri: Uri) { viewModelScope.launch {
+        try {
+            val (name,size)=withContext(Dispatchers.IO) { fileInfo(uri) }
+            val result=withContext(Dispatchers.IO) { app.userFonts.import(name,size,{ app.contentResolver.openInputStream(uri) ?: throw java.io.IOException() }) }
+            notices.tryEmit(uiText(if(result.duplicate)R.string.font_duplicate else R.string.font_imported,result.font.family))
+            diag("font_imported")
+        }
+        catch(cancel: CancellationException) { throw cancel }
+        catch(error: com.localreader.app.core.fonts.FontRejected) { notices.tryEmit(error.message ?: uiText(R.string.font_import_failed));diag("font_rejected") }
+        catch(error: Exception) { notices.tryEmit(uiText(R.string.font_import_failed));diag("font_import_failed",error) }
+    } }
+    fun deleteFont(id: String) { viewModelScope.launch {
+        try { withContext(dbWriter) { app.userFonts.delete(id) } }
+        catch(cancel: CancellationException) { throw cancel }
+        catch(error: Exception) { notices.tryEmit(uiText(R.string.font_delete_failed)) }
+    } }
+    // --- categories ---
+    private val categoriesMutable=MutableStateFlow<List<Category>>(emptyList())
+    val categories=categoriesMutable.asStateFlow()
+    private fun categoryAction(failure: Int=R.string.category_failed,work: () -> Unit,done: () -> Unit={}) { viewModelScope.launch {
+        try { withContext(dbWriter) { work() };done() }
+        catch(cancel: CancellationException) { throw cancel }
+        catch(error: IllegalArgumentException) { notices.tryEmit(error.message ?: uiText(failure)) }
+        catch(error: Exception) { notices.tryEmit(uiText(failure)) }
+    } }
+    /** Creates a category; [onCreated] receives its id on the main thread. Membership is never changed here. */
+    fun createCategory(name: String,onCreated: (Long)->Unit={}) { viewModelScope.launch {
+        try { val id=withContext(dbWriter) { repository.createCategory(name) };onCreated(id) }
+        catch(cancel: CancellationException) { throw cancel }
+        catch(error: IllegalArgumentException) { notices.tryEmit(error.message ?: uiText(R.string.category_failed)) }
+        catch(error: Exception) { notices.tryEmit(uiText(R.string.category_failed)) }
+    } }
+    fun renameCategory(id: Long,name: String) = categoryAction(work={ repository.renameCategory(id,name) })
+    fun deleteCategory(id: Long) = categoryAction(work={ repository.deleteCategory(id) },done={ if(shelfController.state.value.category==id)shelfController.category(ShelfCategories.ALL) })
+    fun reorderCategories(ids: List<Long>) = categoryAction(work={ repository.reorderCategories(ids) })
+    fun setCategoryMembership(ids: Set<String>,category: Long,member: Boolean) = categoryAction(work={ repository.setMembership(ids,category,member) })
     private val verifiedReaders=java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val factory: OpenedBookFactory = app.openedBooks
     private val controllers=ReaderControllerFactory(factory,readingStore)
@@ -54,7 +123,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun readerController(sessionGeneration: Long): ReaderController {
         check(owner?.generation==sessionGeneration)
         return controller ?: ReaderController(sessionGeneration,{ bindRenderer(sessionGeneration,it) },{ rendererEvent(sessionGeneration,it) },
-            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::finished,::closeReader,::flushPosition,::reencode),owner?.opened?.search,{ locator -> owner?.takeIf { it.generation==sessionGeneration }?.opened?.paginationChapterEnd(locator) },{ state.value.books.firstOrNull { it.id==owner?.opened?.contentId }?.finishedAt!=null },owner?.opened?.interactions,owner?.opened?.textPreview,AndroidReadingTimings.ledger,openingOperation).also { controller=it }
+            ReaderActions(::jump,::jumpToc,::addBookmark,::deleteBookmark,{ patch -> patchBook(patch) },::finished,::closeReader,::flushPosition,::reencode,::restoreBookmark),owner?.opened?.search,{ locator -> owner?.takeIf { it.generation==sessionGeneration }?.opened?.paginationChapterEnd(locator) },{ state.value.books.firstOrNull { it.id==owner?.opened?.contentId }?.finishedAt!=null },owner?.opened?.interactions,owner?.opened?.textPreview,AndroidReadingTimings.ledger,openingOperation).also { controller=it }
     }
     private val retryOwners = java.util.concurrent.CopyOnWriteArrayList<ReadingSessionOwner>()
     val preferences = application.getSharedPreferences("ui", 0)
@@ -74,16 +143,28 @@ class ReaderViewModel internal constructor(application: Application, private val
             val defaults = withContext(dbWriter) { readingPreferences.effectiveRules().rules }
             mutable.update { it.copy(loading = false,books = books,defaults = defaults,error = null,libraryReady = true) }
             shelfController.start()
-            viewModelScope.launch(Dispatchers.IO) { runCatching { repository.cleanupRetiredVersions() } }
+            viewModelScope.launch(Dispatchers.IO) { runCatching { repository.cleanupRetiredVersions() };runCatching { app.restore.libraryOpened() };runCatching { app.userFonts.reconcile() } }
             refreshRules()
         } catch(cancel: CancellationException) { throw cancel }
-        catch(e: Exception) { mutable.update { it.copy(loading = false,error = uiText(R.string.library_read_failed)) } } }
+        catch(e: Exception) {
+            diag("library_read_failed",e)
+            // A library that was just restored and cannot be loaded is put back the way it was.
+            val rolledBack=withContext(Dispatchers.IO) { runCatching { repository.db.close() };app.restore.libraryFailedToOpen() }
+            mutable.update { it.copy(loading = false,error = uiText(if(rolledBack!=null)R.string.restore_load_failed_rolled_back else R.string.library_read_failed)) }
+        } }
     }
     init {
         viewModelScope.launch {
             state.map { it.libraryReady }.distinctUntilChanged().collectLatest { ready ->
                 if(ready) {
-                    try { contents.observeAll().collect { books -> mutable.update { it.copy(books=books) } } }
+                    launch { try { repository.observeUserFonts().collect { fontsMutable.value=it } } catch(cancel: CancellationException) { throw cancel } catch(_: Exception) { } }
+            launch { try { repository.observeCategories().collect { list ->
+                categoriesMutable.value=list
+                // A category that was deleted elsewhere must not leave the shelf filtered to nothing.
+                val shown=shelfController.state.value.category
+                if(shown>0 && list.none { it.id==shown })shelfController.category(ShelfCategories.ALL)
+            } } catch(cancel: CancellationException) { throw cancel } catch(_: Exception) { } }
+            try { contents.observeAll().collect { books -> mutable.update { it.copy(books=books) } } }
                     catch(cancel: CancellationException) { throw cancel }
                     catch(e: Exception) { mutable.update { it.copy(error=uiText(R.string.shelf_update_failed)) } }
                 }
@@ -122,9 +203,23 @@ class ReaderViewModel internal constructor(application: Application, private val
         app.imports.state.collect { batch ->
             // Imports run in the background: they never lock reading or the rest of the library.
             mutable.update { old -> old.copy(results=batch.results) }
+            if(batch.phase==ImportPhase.DONE && batch.results.isNotEmpty() && loggedBatch!=batch.id) { loggedBatch=batch.id;app.diagnostics.record("import_done","ok:${batch.count(ImportOutcome.OK)} duplicate:${batch.count(ImportOutcome.DUPLICATE)} failed:${batch.count(ImportOutcome.FAILED)} canceled:${batch.count(ImportOutcome.CANCELED)}") }
         }
     } }
     private var submittedBatch: String?=null
+    private var loggedBatch: String?=null
+    /** One-shot messages for the library screen (e.g. a shared link that cannot be saved yet). */
+    /** Messages wait for a collector (cold start, reader open) and are shown exactly once. */
+    val notices=NoticeQueue()
+    /** A book opened or shared from another app: only readable content URIs reach the import pipeline. */
+    fun openExternal(intent: ExternalIntent) {
+        when(val decision=ExternalIntentPolicy.decide(intent)) {
+            is ExternalDecision.Import -> importFiles(decision.uris.map(Uri::parse))
+            ExternalDecision.LinkNotAvailable -> notices.tryEmit(uiText(R.string.coming_soon))
+            ExternalDecision.Unreadable -> notices.tryEmit(uiText(R.string.external_unreadable))
+            ExternalDecision.Ignore -> Unit
+        }
+    }
     fun importFiles(uris: List<Uri>,batchId: String=java.util.UUID.randomUUID().toString()) {
         if(uris.isEmpty() || importState.value.phase in setOf(ImportPhase.RUNNING,ImportPhase.QUEUED) || shelfController.deletions.value.running)return
         submittedBatch=batchId
@@ -134,6 +229,13 @@ class ReaderViewModel internal constructor(application: Application, private val
             catch(error: Exception) { mutable.update { it.copy(error=uiText(R.string.import_queue_failed)) } }
         }
     }
+    private fun fileInfo(uri: Uri): Pair<String,Long?> {
+        var size: Long?=null
+        val name=runCatching { app.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME,android.provider.OpenableColumns.SIZE),null,null,null)?.use { c ->
+            if(c.moveToFirst()) { val z=c.getColumnIndex(android.provider.OpenableColumns.SIZE);if(z>=0 && !c.isNull(z))size=c.getLong(z);c.getString(0) } else null
+        } }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.take(120) ?: uiText(R.string.font_default_name)
+        return name to size
+    }
     private fun displayName(uri: Uri): String? = runCatching {
         app.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { cursor ->
             if(cursor.moveToFirst())cursor.getString(0)?.trim()?.takeIf { it.isNotEmpty() }?.take(120) else null
@@ -142,7 +244,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun cancelImport() { app.imports.cancel(submittedBatch ?: importState.value.id) }
     fun dismissResults() { app.imports.dismiss();mutable.update { it.copy(results=emptyList()) } }
     fun consumeReaderPanel() { mutable.update { it.copy(readerPanel=null) } }
-    suspend fun bookmarkCount(ids: Set<String>): Int = withContext(dbWriter) { repository.db.bookmarkCount(ids) }
+    suspend fun bookmarkCount(ids: Set<String>): Int = withContext(dbWriter) { repository.bookmarkCount(ids) }
     fun dismissError() { mutable.update { it.copy(error = null) } }
 
     private class PendingProgressException(cause: Throwable?=null): Exception(cause)
@@ -171,7 +273,7 @@ class ReaderViewModel internal constructor(application: Application, private val
                 opened=next.opened
                 if (request == generation) { controller?.detach();controller=null;owner = next; opened = null; mutable.update { it.copy(reader = screen.copy(operation=operation),readerPanel=panel) } }
             } catch (cancel: CancellationException) { AndroidReadingTimings.ledger.finish(operation,ReaderOperationOutcome.CANCELED);throw cancel }
-            catch (e: Exception) { AndroidReadingTimings.ledger.finish(operation,ReaderOperationOutcome.FAILED);mutable.update { it.copy(error = uiText(when(e) {is PendingProgressException->R.string.old_progress_retry;is com.localreader.app.data.MissingBookFilesException->R.string.book_files_missing;else->R.string.body_open_failed})) } }
+            catch (e: Exception) { diag("open_failed",e);AndroidReadingTimings.ledger.finish(operation,ReaderOperationOutcome.FAILED);mutable.update { it.copy(error = uiText(when(e) {is PendingProgressException->R.string.old_progress_retry;is com.localreader.app.data.MissingBookFilesException->R.string.book_files_missing;else->R.string.body_open_failed})) } }
             finally { if(request!=generation)AndroidReadingTimings.ledger.finish(operation,ReaderOperationOutcome.CANCELED);opened?.close(); mutable.update { it.copy(busy = false, operation = "") } }
         }
     }
@@ -240,7 +342,7 @@ class ReaderViewModel internal constructor(application: Application, private val
             try { if(old!=null) { old.flush();retryOwners.remove(old) } }
             catch(error: Exception) { mutable.update { it.copy(error=uiText(R.string.position_save_failed)) } }
             finally { old?.closeSource() }
-            repository.db.notifyContentsChanged() // the shelf picks up the final progress of the closed book
+            repository.notifyProgressStored() // the shelf picks up the final progress of the closed book
             val books = contents.summaries(); mutable.update { it.copy(books = books) }
         }
     }
@@ -341,6 +443,19 @@ class ReaderViewModel internal constructor(application: Application, private val
             } catch (e: Exception) { mutable.update { it.copy(error = uiText(R.string.bookmark_save_failed)) } }
         }
     }
+    fun restoreBookmark(bookmark: ReaderBookmark) {
+        val active = owner ?: return
+        viewModelScope.launch(dbWriter) {
+            try {
+                check(readingStore.restoreBookmark(bookmark)) { "书签无法恢复" }
+                val list = readingStore.bookmarks(active.opened.contentId)
+                withContext(Dispatchers.Main.immediate) { if (owner === active) {
+                    active.bookmarks(list)
+                    mutable.update { it.copy(reader = it.reader?.copy(snapshot = active.snapshot,notice=uiText(R.string.bookmark_restored))) }
+                } }
+            } catch (e: Exception) { if (owner === active) mutable.update { it.copy(reader = it.reader?.copy(notice=uiText(R.string.bookmark_restore_failed))) } }
+        }
+    }
     fun deleteBookmark(id: Long) {
         val active = owner ?: return
         viewModelScope.launch(dbWriter) {
@@ -359,10 +474,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         shelfController.finished(active.opened.contentId,finished)
     }
     fun delete(book: ContentSummary) { shelfController.deleteBooks(setOf(book.id)) }
-    fun metadata(book: ContentSummary, title: String, author: String) = operation(uiText(R.string.saving_metadata)) {
-        contents.updateMetadata(book.id, title.trim().ifBlank { book.title }, author.trim().ifBlank { uiText(R.string.author_unknown) })
-    }
-    fun reencode(encoding: String) {
+    fun reencode(encoding: String,rule: ChapterRule?=null) {
         val active = owner ?: return
         val controls = active.opened.textControls ?: return
         if (state.value.busy || encoding !in controls.availableEncodings) return
@@ -375,7 +487,7 @@ class ReaderViewModel internal constructor(application: Application, private val
             var installed = false
             try {
                 // Queue behind captured bookmarks and small rule writes before the version transaction.
-                val prepared = withContext(dbWriter) { check(flushPosition()) { uiText(R.string.reencode_position_preserved) };reencoder.reencode(active.opened.contentId,encoding).also { replacement = it.opened } }
+                val prepared = withContext(dbWriter) { check(flushPosition()) { uiText(R.string.reencode_position_preserved) };reencoder.reencode(active.opened.contentId,encoding,rule).also { replacement = it.opened } }
                 if (owner !== active || request != generation) return@launch
                 val next = ReadingSessionOwner(prepared.opened,++generation,readingStore,prepared.snapshot)
                 val screen = next.state(notice = uiText(R.string.reencoded_notice),presentation = prepared.presentation)
@@ -413,4 +525,11 @@ class ReaderViewModel internal constructor(application: Application, private val
         owner=null;++generation
         closingScope.launch { try { flushPosition() } finally { old?.closeSource();closingScope.cancel() } }
     }
+}
+
+/** A queue of one-shot UI messages. Unlike a replay-less shared flow, nothing is lost while no screen is collecting. */
+class NoticeQueue {
+    private val channel=kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    fun tryEmit(message: String): Boolean=channel.trySend(message).isSuccess
+    val flow: kotlinx.coroutines.flow.Flow<String> get()=channel.receiveAsFlow()
 }

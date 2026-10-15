@@ -48,9 +48,9 @@ class LayoutSnapshotTest {
                             val state by model.state.collectAsStateWithLifecycle()
                             val count=screen.intValue
                             if(count<=2) {
-                                ShelfScreen(ShelfState(items=books.take(count),continueReading=books.take(count),loading=false),count,
-                                    model.shelfController,ShelfActions({},{},{},{},{},{},{}),app.covers,true)
-                            } else SettingsScreen(model,state,{},{},{},{},onDialog={})
+                                ShelfScreen(ShelfState(items=books.take(count),loading=false),count,
+                                    model.shelfController,ShelfActions({},{},{},{},{},{}),app.covers,true)
+                            } else SettingsScreen(model,state,{},{},{},{},{},{},{},onDialog={})
                             FloatingTabBar(activity,if(count==3)3 else 0,{},if(count==3)"更多设置" else "导入图书",{},moreAction=count==3,enabled=true,contentKey=count,dirtyKey=count)
                         }
                     }

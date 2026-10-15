@@ -12,6 +12,8 @@ const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),ass
    assert.equal(actual.size,v.expectedSize,v.name+' size');assert.equal(actual.line,v.expectedLine,v.name+' line');assert.equal(actual.color,v.expectedColor,v.name+' color')
    assert.equal(actual.family.includes('PackageFont'),v.packageFamily,v.name+' family')
    if(['html','root','body','inline'].some(name=>v.name===name+'-AUTHOR')) {assert.equal(actual.indent,72,v.name+' authored indent');assert.equal(actual.align,'right',v.name+' authored alignment')}
+   // CUSTOM controls fonts, size, colour and spacing only: the book's own alignment and first-line indent (3em here) are kept, as Readest does.
+   else if(['html','root','body','inline'].some(name=>v.name===name+'-CUSTOM')) {assert.equal(actual.indent,3*actual.size,v.name+' authored indent kept');assert.equal(actual.align,'right',v.name+' authored alignment kept')}
    else if(v.mode==='CUSTOM'||v.name.startsWith('missing-')) {assert.equal(actual.indent,0,v.name+' fallback indent');assert.equal(actual.align,'left',v.name+' fallback alignment');assert.equal(actual.margin,actual.size*.6,v.name+' paragraph margin')}
   }
   console.log(JSON.stringify({ok:true,compilerCssomVectors:vectors.length}))

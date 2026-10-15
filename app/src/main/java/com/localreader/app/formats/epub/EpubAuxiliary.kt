@@ -13,7 +13,7 @@ object EpubAuxiliary {
     }
     /** main is the explicit logical version root, never inferred from a renderer's parent. */
     internal fun verifyRetainedBudget(main: File,checkpoint: ()->Unit={},newDocKey: String?=null) {
-        val roots=listOf(main)+main.listFiles().orEmpty().filter { it.isDirectory && it.name.matches(Regex("derived-(?:mixed1-parts2-style4-split(?:256|384|512)|parts2-style4(?:-split(?:256|384|512))?|fxl1)")) }
+        val roots=listOf(main)+main.listFiles().orEmpty().filter { it.isDirectory && it.name.matches(Regex("derived-(?:mixed1-parts2-style[45]-split(?:256|384|512)|parts2-style[45](?:-split(?:256|384|512))?|fxl1)")) }
         val documents=mutableSetOf<String>()
         newDocKey?.let {require(it.matches(Regex("[0-9a-f]{32}")));documents+=it}
         var total=0L
