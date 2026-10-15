@@ -27,7 +27,7 @@
 
 未实现的功能（稍后阅读、RSS、PDF、漫画、应用级深色等）在界面中统一显示“该功能开发中”（分享链接同样只提示开发中），计划见 `docs/NEXT_DEVELOPMENT_PRD.md`。
 
-状态：0.6.0限定代码审核、Debug小米验收及2026-10-15的四项定版必补均已通过；8项已登记收口问题及本轮修复/追加需求已关闭。Release实际运行、30次代表时延、千本投影、宽屏大字号、数据与系统归还结果见[最终补验](docs/V0_6_FINAL_VALIDATION_20261015.md)，此前功能验收见[结版验收](docs/V0_6_CLOSEOUT_ACCEPTANCE_20261014.md)，恢复入口见[当前交接](docs/ai-handoff.md)。工程与有限验收收口完成，用户最终体验另列；完整TalkBack/物理平板/全V-3等专项尚未完成。输入法遮挡的后续有限修复也已通过259项JVM、API29及小米真实键盘检查，见[输入法修复与GitHub交付](docs/V0_6_IME_FIX_GITHUB_20261015.md)。用户已授权提交到私有仓库[Leon1ca/reader](https://github.com/Leon1ca/reader)；仅本地测试签名验证，不包含正式签名发行或GitHub Release。
+状态：0.6.0限定代码审核、Debug小米验收及2026-10-15的四项定版必补均已通过；8项已登记收口问题及本轮修复/追加需求已关闭。Release实际运行、30次代表时延、千本投影、宽屏大字号、数据与系统归还结果见[最终补验](docs/V0_6_FINAL_VALIDATION_20261015.md)，此前功能验收见[结版验收](docs/V0_6_CLOSEOUT_ACCEPTANCE_20261014.md)，恢复入口见[当前交接](docs/ai-handoff.md)。工程与有限验收收口完成，用户最终体验另列；完整TalkBack/物理平板/全V-3等专项尚未完成。输入法遮挡的后续有限修复也已通过259项JVM、API29及小米真实键盘检查，见[输入法修复与GitHub交付](docs/V0_6_IME_FIX_GITHUB_20261015.md)。代码已提交到私有仓库[Leon1ca/reader](https://github.com/Leon1ca/reader)；仅本地测试签名验证，不包含正式签名发行或GitHub Release。
 
 ## 构建
 
