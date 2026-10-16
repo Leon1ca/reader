@@ -3,6 +3,7 @@ package com.localreader.app.ui.design
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Values transcribed from UiSpec.dc.html. Reader document CSS has a separate owner. */
@@ -54,11 +55,17 @@ object UiSize {
     val filter = 30.dp
     val topIcon = 36.dp
     val readerIcon = 30.dp
-    val tabBar = 62.dp
+    /** Bottom capsule, measured from the Xiaomi Clock/Calendar/Weather apps: 54dp high, 25dp side margin, 25dp above the screen bottom. */
+    val tabBar = 54.dp
     fun navigationHeight(fontScale: Float)=tabBar+((fontScale-1f).coerceAtLeast(0f)*36).dp
-    fun navigationClearance(fontScale: Float)=112.dp+((fontScale-1f).coerceAtLeast(0f)*36).dp
-    val tabRadius = 31.dp
-    val tabBottom = 22.dp
+    fun navigationClearance(fontScale: Float)=88.dp+((fontScale-1f).coerceAtLeast(0f)*36).dp
+    val tabRadius = 27.dp
+    val tabBottom = 25.dp
+    val tabSide = 25.dp
+    /** Phone capsules span the window; on tablets and an unfolded foldable the capsule stays a compact centred pill. */
+    fun capsuleWidth(available: Dp): Dp = (available-tabSide*2).coerceAtMost(if(available>=600.dp)480.dp else 560.dp).coerceAtLeast(0.dp)
+    /** Distance of the capsule's bottom edge from the screen bottom: a gesture-bar inset sits inside it, a 3-button bar lifts it. */
+    fun capsuleBottom(navInset: Dp): Dp = if(navInset<=36.dp)tabBottom else navInset+8.dp
     val border = 0.5.dp
     const val coverRatio = 0.75f
 }

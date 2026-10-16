@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Run Android tests separately, prestarting both packages for OEM background limits."""
+"""Run Android tests separately, with an optional controlled foreground launch for OEM restrictions."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 import time
+import threading
 
 p=argparse.ArgumentParser()
 p.add_argument('--serial',required=True)
 p.add_argument('--output',type=Path,required=True)
 p.add_argument('--class-name')
 p.add_argument('--timeout',type=int,default=100)
+p.add_argument('--foreground-launch',action='store_true',help='Launch once after instrumentation starts, for MIUI background-activity restrictions')
 a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
 root=Path(__file__).resolve().parents[2]
 adb=['adb','-s',a.serial]
@@ -31,18 +32,33 @@ assert tests,'No selected tests found'
 records=[]
 for cls,method in tests:
  name=cls+'#'+method;start=time.monotonic();log=a.output/(cls.rsplit('.',1)[-1]+'-'+method+'.log')
+ lines=[];timed_out=False
+ setup=command(['shell','content','query','--uri','content://com.localreader.app.test.fixtures/preflight.txt'])
+ process=subprocess.Popen(adb+['shell','am','instrument','-w','-r','-e','class',name,'com.localreader.app.test/androidx.test.runner.AndroidJUnitRunner'],
+                          text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=1)
+ def collect():
+  launched=False
+  for line in process.stdout:
+   lines.append(line)
+   if a.foreground_launch and not launched and 'INSTRUMENTATION_STATUS_CODE: 1' in line:
+    # Match ActivityScenario's launch identity, once, while that test is starting. Prelaunching before instrumentation
+    # loses its foreground state when the runner replaces the process; repeated launches can interrupt the test itself.
+    launched=True;time.sleep(.8)
+    try:
+     launch=command(['shell','am','start','-W','-a','android.intent.action.MAIN','-c','android.intent.category.LAUNCHER',
+                     '-f','0x10008000','-n','com.localreader.app/.MainActivity'])
+     lines.append(launch.stdout)
+    except subprocess.TimeoutExpired:
+     lines.append('Controlled foreground launch timed out\n')
+ reader=threading.Thread(target=collect,daemon=True);reader.start()
  try:
-  # Each instrument invocation starts a new process; the previous test's UI teardown
-  # can otherwise trigger MIUI's cross-package background-launch restriction.
-  setup=command(['shell','content','query','--uri','content://com.localreader.app.test.fixtures/preflight.txt'])
-  launch=command(['shell','am','start','-W','-n','com.localreader.app/.MainActivity'])
-  result=command(['shell','am','instrument','-w','-e','class',name,'com.localreader.app.test/androidx.test.runner.AndroidJUnitRunner'],a.timeout)
-  log.write_text(setup.stdout+'\n'+launch.stdout+'\n'+result.stdout)
-  # An SdkSuppress'd test on an older platform reports "OK (0 tests)": that is a skip, not a pass.
-  status='PASS' if re.search(r'OK \([1-9]\d* tests?\)',result.stdout) else 'SKIP' if re.search(r'OK \(0 tests?\)',result.stdout) else 'FAIL'
- except subprocess.TimeoutExpired as error:
-  raw=error.stdout or b'';log.write_bytes(raw if isinstance(raw,bytes) else raw.encode())
-  command(['shell','am','force-stop','com.localreader.app']);status='TIMEOUT'
+  process.wait(timeout=a.timeout)
+ except subprocess.TimeoutExpired:
+  timed_out=True;process.kill();process.wait();command(['shell','am','force-stop','com.localreader.app'])
+ reader.join(timeout=35)
+ raw=setup.stdout+'\n'+''.join(lines);log.write_text(raw)
+ # An SdkSuppress'd test on an older platform reports "OK (0 tests)": that is a skip, not a pass.
+ status='TIMEOUT' if timed_out else 'PASS' if re.search(r'OK \([1-9]\d* tests?\)',raw) else 'SKIP' if re.search(r'OK \(0 tests?\)',raw) else 'FAIL'
  record=dict(test=name,status=status,seconds=round(time.monotonic()-start,2));records.append(record)
  (a.output/'results.json').write_text(json.dumps(records,ensure_ascii=False,indent=2)+'\n')
  print(json.dumps(record,ensure_ascii=False),flush=True)

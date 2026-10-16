@@ -17,17 +17,17 @@
 - **EPUB**：EPUB 2/3；“原样式”（默认）保留书的排版（居中、缩进、图片等），“自定义”只覆盖由你控制的字体、字号、行距、颜色与间距，书里的居中和首行缩进仍保留；两种模式下正文字体都使用你选的字体（书内嵌的字体文件与等宽字体除外）；中日韩书籍在书本身没写时按 Readest 缺省首行缩进两字符；长章自动分段；目录、书内搜索（与目录同高的侧卡）、脚注气泡、图片查看、读完确认。
 - **固定版式 EPUB**：适合整页 / 适合宽度 / 1–5×、单双页、RTL、捏合与平移。
 - **混合版式 EPUB**：按逐节声明选择可重排或固定版式后端，支持跨组前后翻页及稳定位置恢复；不同版式不会混放在同一展开页或连续视口中。
-- **书架**：所有支持格式一并显示；最近 / 书名 / 作者排序（最近＝最后阅读时间，未读按导入时间）、书名作者搜索、分类、选择模式（加入分类、标记已读完、删除）、只读存储统计。没有图书详情页，也不再提供编辑书名/作者；续读位置、书签与读完状态照常保存，没有单独的“继续阅读”区域。
-- **阅读设置**：字号、字体（默认：英文 Roboto + 中文霞鹜文楷屏幕版；另有宋体〔英文 Bitter〕、黑体〔英文 Roboto〕，并可导入 TTF/OTF）、行距、边距、背景五色、翻页方式、亮度（滑杆直接调节系统亮度，需在系统里授予“修改系统设置”；未授权时只调阅读窗口）、夜间（跟随系统 / 关闭 / 开启）；排版、背景与翻页方式对所有图书统一生效（仅固定版式的缩放与展开按书保存）；翻页方式含覆盖 / 仿真 / 滑动 / 无动画（默认无动画，保持原有行为）。
+- **书架**：所有支持格式一并显示；最近 / 书名 / 作者排序（最近＝最后阅读时间，未读按导入时间）、独立的书名作者搜索页、分类、选择模式（全选 / 取消全选、删除）、只读存储统计。搜索与选择模式互斥，选择模式底部仅显示删除钮。没有图书详情页，也不再提供编辑书名/作者；续读位置、书签与读完状态照常保存，没有单独的“继续阅读”区域。
+- **阅读设置**：字号、字体（默认：英文 Roboto + 中文霞鹜文楷屏幕版；另有宋体〔英文 Bitter〕、黑体〔英文 Roboto〕，并可导入 TTF/OTF）、行距、边距、背景五色、翻页方式、亮度（滑杆直接调节系统亮度，需在系统里授予“修改系统设置”；未授权时只调阅读窗口）、夜间（跟随系统 / 关闭 / 开启）；排版、背景与翻页方式对所有图书统一生效（仅固定版式的缩放与展开按书保存）；翻页方式含覆盖 / 仿真 / 滑动 / 无动画（默认无动画，保持原有行为）。阅读正文时隐藏系统状态栏，菜单/面板出现时显示，回书架恢复；正文位置不随显隐改变。
 - 应用界面的常用中文字使用内置 Noto Sans SC 子集（300/400/500），缺字回退系统字体，衬线标题使用系统字体；正文默认使用内置的 Roboto 与霞鹜文楷（均为 OFL），宋体、黑体选项在对应风格的系统中文字体缺失时由霞鹜文楷兜底。
 
 - **备份与恢复**：设置 → 备份与恢复。完整备份（图书副本、进度、书签、设置）或仅配置与记录，导出为未加密 zip（含清单与 SHA-256）；恢复先校验并预览，确认后关闭应用，下次启动时在任何组件打开书库之前切换，失败或中断会回到原书库。仅记录备份恢复后图书显示“待重新关联文件”。
 
-- **0.6.0**：从其他应用“用阅读打开”或分享 TXT/EPUB；分类（多对多、书架芯片、批量加入）；段间距可调；TXT 分章规则（自定义正则/按字数，带预览命中数）；字体导入（TTF/OTF）；存储页清理可重建缓存；本机诊断日志（可导出，不含书名与正文）。
+- **0.6.0**：从其他应用“用阅读打开”或分享 TXT/EPUB；分类（多对多、书架芯片）；段间距可调；TXT 分章规则（自定义正则/按字数，带预览命中数）；字体导入（TTF/OTF）；存储页清理可重建缓存；本机诊断日志（可导出，不含书名与正文）。
 
 未实现的功能（稍后阅读、RSS、PDF、漫画、应用级深色等）在界面中统一显示“该功能开发中”（分享链接同样只提示开发中），计划见 `docs/NEXT_DEVELOPMENT_PRD.md`。
 
-状态：0.6.0限定代码审核、Debug小米验收及2026-10-15的四项定版必补均已通过；8项已登记收口问题及本轮修复/追加需求已关闭。Release实际运行、30次代表时延、千本投影、宽屏大字号、数据与系统归还结果见[最终补验](docs/V0_6_FINAL_VALIDATION_20261015.md)，此前功能验收见[结版验收](docs/V0_6_CLOSEOUT_ACCEPTANCE_20261014.md)，恢复入口见[当前交接](docs/ai-handoff.md)。工程与有限验收收口完成，用户最终体验另列；完整TalkBack/物理平板/全V-3等专项尚未完成。输入法遮挡的后续有限修复也已通过259项JVM、API29及小米真实键盘检查，见[输入法修复与GitHub交付](docs/V0_6_IME_FIX_GITHUB_20261015.md)。代码已提交到私有仓库[Leon1ca/reader](https://github.com/Leon1ca/reader)；仅本地测试签名验证，不包含正式签名发行或GitHub Release。
+状态：**0.6.0已完结**，源码仓库为[Leon1ca/reader](https://github.com/Leon1ca/reader)。改进范围、实际检查和未验边界见[收尾记录](docs/RELEASE_0_6_0.md)；下一任务由用户另行指定，见[交接](docs/ai-handoff.md)。仓库源码公开与正式签名发行是不同事项，本轮没有创建GitHub Release。
 
 ## 构建
 
@@ -41,15 +41,14 @@ export JAVA_HOME=/path/to/jdk17     # 未设置时使用项目内 .local/jdk-17
 
 在 `local.properties` 设置 `sdk.dir` 或设置 `ANDROID_HOME`（需安装 API 37 与 Build Tools 36.0.0）。输出 `app/build/outputs/apk/debug/app-debug.apk`，包名 `com.localreader.app`。
 
-部分 MIUI 设备限制跨应用后台启动，可先预启动测试组件再运行设备测试：
+小米/MIUI限制跨应用后台启动时，可使用受控启动选项。先安装构建出的主包与测试包，再按类执行；每项测试开始后只拉起一次，避免反复启动干扰测试。设备测试会操作应用，请使用合适的测试设备并保留数据备份。
 
 ```sh
 ./scripts/build.sh assembleDebug assembleDebugAndroidTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell content query --uri content://com.localreader.app.test.fixtures/preflight.txt
-adb shell am start -W -n com.localreader.app/.MainActivity
-adb shell am instrument -w com.localreader.app.test/androidx.test.runner.AndroidJUnitRunner
+python3 scripts/tests/run-device-suite.py --serial <设备序列号> --foreground-launch \
+  --class-name com.localreader.app.LibraryDesignUiTest --output work/device-tests
 ```
 
 ### 浏览器内核回归

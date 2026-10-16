@@ -63,7 +63,6 @@
     <string name="mark_finished">标记读完</string>
     <string name="continue_reading">继续阅读</string>
     <string name="search_body">搜索正文</string>
-    <string name="find">查找</string>
     <string name="cancel_search">取消搜索</string>
     <string name="search_progress">正在搜索 %1$s / %2$s 章</string>
     <string name="search_failed">搜索失败，请重试</string>
@@ -323,10 +322,8 @@
     <string name="finished">已读完</string>
     <string name="not_started">未开始</string>
     <string name="read_percent">已读 %1$s%%</string>
-    <string name="epub_fixed">EPUB · 固定版式</string>
     <string name="sort_recent">最近阅读</string>
     <string name="sort_title">书名</string>
-    <string name="add_category">加入分类</string>
     <string name="shelf_empty">书架还是空的</string>
     <string name="shelf_empty_hint">目前支持 EPUB 和 TXT。导入时会复制一份到应用内，原文件不会被改动。</string>
     <string name="comic_folder_coming_soon">选择漫画图片文件夹 · 开发中</string>
@@ -376,10 +373,6 @@
     <string name="renderer_timeout">正文加载或重排超时，请返回书架重试。</string>
     <string name="book_files_missing">图书的应用内副本或索引缺失，请重新导入；阅读记录已保留</string>
     <string name="back_to_settings">返回设置</string>
-    <string name="relative_just_now">刚刚</string>
-    <string name="relative_minutes_ago">%1$d分钟前</string>
-    <string name="relative_hours_ago">%1$d小时前</string>
-    <string name="relative_days_ago">%1$d天前</string>
     <!-- Reader panels V2 (docs/ui-design/v2) -->
     <string name="display_settings">界面设置</string>
     <string name="typography_settings">排版设置</string>
@@ -416,6 +409,9 @@
     <!-- Shelf selection mode (Apple Books style) -->
     <string name="deselect_all">取消全选</string>
     <string name="exit_selection">退出选择</string>
-    <string name="mark_finished_action">标记已读完</string>
-    <string name="selection_actions">所选图书操作</string>
+    <string name="clear_search">清除搜索内容</string>
+    <string name="shelf_search_hint">输入书名或作者，在书架中查找</string>
+    <string name="search_book_count">书籍 · %1$s 本</string>
+    <string name="search_in_category">当前只在“%1$s”中查找</string>
+    <string name="search_all_books">在全部图书中查找</string>
 </resources>

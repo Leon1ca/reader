@@ -42,9 +42,11 @@ internal fun Context.readerActivity(): Activity? {
  * bottom edge (top corners only, extending under the navigation bar) with the 36×4 handle from UiSpec;
  * on wide screens it floats as a card or, for the contents list, a side panel.
  * Independent dialog windows never participate in measuring the reader surface.
+ * [content] receives the animated close.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=false,onClose: ()->Unit,content: @Composable ColumnScope.()->Unit) {
+internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=false,onClose: ()->Unit,content: @Composable ColumnScope.(close: ()->Unit)->Unit) {
     var closing by remember {mutableStateOf(false)}
     val duration=motionDuration(UiMotion.sheet)
     val latestClose by rememberUpdatedState(onClose)
@@ -76,7 +78,9 @@ internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=fal
                 .width(if(side && wide)layout.tocWidth.coerceAtMost(maxWidth) else if(wide)layout.panelMaxWidth.coerceAtMost(maxWidth) else maxWidth)
                 .heightIn(max=maxHeight).then(if(side)Modifier.fillMaxHeight() else Modifier)
                 .testTag("reader-panel-$title"),shape=shape,color=LocalUiPalette.current.card,shadowElevation=16.dp) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal=20.dp)) {
+                // A list panel (contents, bookmarks, search) gives the leftover height to its own list instead of scrolling the whole
+                // sheet, so the list runs to the bottom edge and no empty band is left beneath it.
+                val inside: @Composable ColumnScope.()->Unit = {
                     // Handle and title form the grab area: dragging down past the threshold closes the sheet.
                     Column(Modifier.fillMaxWidth().pointerInput(Unit) {
                         detectVerticalDragGestures(onDragEnd={if(drag>threshold)close();drag=0f},onDragCancel={drag=0f}) {_,amount -> drag=(drag+amount).coerceAtLeast(0f)}
@@ -87,12 +91,15 @@ internal fun ReaderOverlay(title: String,side: Boolean=false,bottom: Boolean=fal
                             IconAction(uiText(R.string.close_panel,title),UiGlyph.CLOSE,close,visual=UiSize.readerIcon)
                         }
                     }
-                    content()
+                    content(close)
+                    val navigation=WindowInsets.navigationBars.union(WindowInsets.displayCutout)
                     // A sheet or side panel runs to the screen edge, so it keeps its last row clear of the navigation bar. The
                     // floating card on wide screens ends above that bar; padding it by the bar's height left a blank strip (CLOSE-05).
                     Spacer(Modifier.height(20.dp))
                     if(attached || (side && wide))Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars.union(WindowInsets.displayCutout)))
                 }
+                if(side)Column(Modifier.fillMaxHeight().padding(horizontal=20.dp),content=inside)
+                else Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal=20.dp),content=inside)
             }
         }
     }

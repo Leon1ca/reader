@@ -35,7 +35,12 @@ class TxtOpenedBook(override val contentId: String, override val metadata: Conte
     override fun locatorForToc(id: String): Locator? {
         checkOpen()
         val index = entries.indexOfFirst { it.id == id }
-        return chapters.getOrNull(index)?.let { Locator.Text(revision,it.sourceOffset,it.paragraph) }
+        // A heading is usually indented; the display trims that indent. Aiming at the raw paragraph start would land in
+        // trimmed whitespace and be reported as a "nearby" restore, so aim at the first displayed character instead.
+        return chapters.getOrNull(index)?.let { chapter ->
+            val skip=projection?.slice(chapter.paragraph)?.takeIf { it.displayedLength>0 }?.start ?: 0
+            Locator.Text(revision,chapter.sourceOffset+skip,chapter.paragraph,skip)
+        }
     }
     override fun chapterOf(locator: Locator): TocEntry? {
         checkOpen()

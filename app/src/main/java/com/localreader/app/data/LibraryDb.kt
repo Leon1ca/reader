@@ -240,7 +240,6 @@ class LibraryDb(private val context: Context, private val migrationCheckpoint: (
         notifyContentsChanged()
     }
     fun delete(id: String) = transaction { it.delete("contents","id=?",arrayOf(id)) }
-    fun setMetadata(id: String,title: String,author: String) = transaction { it.update("contents",ContentValues().apply { put("title",title);put("author",author) },"id=?",arrayOf(id));Unit }
     fun savePosition(id: String,locator: Locator.Text,furthest: Long = locator.sourceOffset,time: Long = System.currentTimeMillis()) = transaction { db ->
         val meta = requireNotNull(txtMetadata(id)); check(content(id)?.revision == locator.version)
         val old = db.rawQuery("SELECT furthest_json FROM positions WHERE content_id=?",arrayOf(id)).use { check(it.moveToFirst());ReadingExtentCodec.decode(it.getString(0)) as TxtReadingExtent }

@@ -21,7 +21,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 
-enum class UiGlyph { SHELF, LATER, RSS, SETTINGS, PLUS, SEARCH, BACK, CHEVRON, MORE, CHECK, CLOCK, WARNING, CLOSE, BOOKMARK, TOC, BOOK, TYPE, CHEVRON_UP, CHEVRON_DOWN, GRIP }
+enum class UiGlyph { SHELF, LATER, RSS, SETTINGS, PLUS, SEARCH, BACK, CHEVRON, MORE, CHECK, CLOCK, WARNING, CLOSE, BOOKMARK, TOC, BOOK, TYPE, CHEVRON_UP, CHEVRON_DOWN, GRIP, TRASH }
 
 private val paths = mapOf(
     UiGlyph.PLUS to "M12 4.5v15M4.5 12h15",
@@ -39,6 +39,7 @@ private val paths = mapOf(
     UiGlyph.TOC to "M8 6h12M8 12h12M8 18h12M3 6h.5M3 12h.5M3 18h.5",
     UiGlyph.BOOK to "M12 5v15M12 5C9 3 5 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1z",
     UiGlyph.TYPE to "M3 19L8 5l5 14M5 14h6M15 11h5v8M20 14h-3a2.5 2.5 0 0 0 0 5h3",
+    UiGlyph.TRASH to "M4.5 6.75h15M9.5 6.75V4.75h5v2M6.25 6.75l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h6.7a1.5 1.5 0 0 0 1.5-1.4l.9-12.1M10 10.75v5.5M14 10.75v5.5",
 ).mapValues { PathParser().parsePathString(it.value).toPath() }
 private val laterBridge = PathParser().parsePathString("M9.9 13.6c1.3-.9 2.9-.9 4.2 0M3.1 14.2l1.5-6.3a1.9 1.9 0 0 1 1.8-1.4h.9M20.9 14.2l-1.5-6.3a1.9 1.9 0 0 0-1.8-1.4h-.9").toPath()
 private val rssWaves = PathParser().parsePathString("M7.6 11.1a5.3 5.3 0 0 1 5.3 5.3M7.6 7.4a9 9 0 0 1 9 9").toPath()

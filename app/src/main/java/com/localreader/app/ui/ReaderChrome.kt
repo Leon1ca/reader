@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
@@ -40,23 +41,28 @@ internal fun ReaderChrome(activity: Activity?,session: ReadingSession,state: Rea
     val footer=if(pages.isNotEmpty())uiText(R.string.page_range,pages.first()+1,if(pages.size>1)"–${pages.last()+1}" else "",session.document.sectionCount)
         else progress?.let { "${if(it.pageEstimated)uiText(R.string.estimated_prefix) else ""}${it.page} / ${if(it.pagesEstimated)uiText(R.string.estimated_prefix) else ""}${it.pages}" }
         ?: "${(session.currentFraction*100).toInt()}%"
-    val safe=WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    val safe=ReaderInsets.safe
+    val direction=androidx.compose.ui.platform.LocalLayoutDirection.current
+    var headerHeight by remember { mutableIntStateOf(0) }
+    var footerHeight by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Continuous-scroll sections reserve their top/bottom content space in input.applyInsets. These page-coloured
         // bands additionally keep text passing through the fixed title and page-number areas readable during scrolling.
         // They consume no input or layout space: WebView size, Locator and taps stay unchanged; paged/fixed books need no band.
         if(session.snapshot.rules.flow==ReaderFlow.SCROLLED && session.document.kind!=WebContentKind.FIXED && pageColor.alpha>0f) {
-            // Cover only the actual labels, leaving the renderer's larger top/bottom content margins available at chapter ends.
+            // The compact viewport bands are smaller than the header. Measure the actual labels so scrolling text cannot
+            // show through either label, including when the system font size makes the footer taller than its minimum.
             val fade=4.dp
-            val top=with(density) { safe.getTop(density).toDp() }+37.dp
-            val bottom=with(density) { safe.getBottom(density).toDp() }+52.dp
+            val top=with(density) { maxOf(headerHeight,safe.getTop(density)+ReaderInsets.headerHeight.roundToPx()).toDp() }+fade
+            val bottom=with(density) { maxOf(footerHeight,safe.getBottom(density)+ReaderInsets.bottomBand.roundToPx()).toDp() }+fade
             Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(top)
                 .background(Brush.verticalGradient(0f to pageColor,((top-fade)/top) to pageColor,1f to pageColor.copy(alpha=0f))))
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(bottom)
                 .background(Brush.verticalGradient(0f to pageColor.copy(alpha=0f),(fade/bottom) to pageColor,1f to pageColor)))
         }
-        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsPadding(WindowInsets(top=safe.getTop(density)))
-            .heightIn(min=50.dp).padding(horizontal=10.dp),verticalAlignment=Alignment.CenterVertically) {
+        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().onSizeChanged {headerHeight=it.height}.testTag("reader-header-band")
+            .windowInsetsPadding(WindowInsets(left=safe.getLeft(density,direction),top=safe.getTop(density),right=safe.getRight(density,direction)))
+            .heightIn(min=if(shown)50.dp else ReaderInsets.headerHeight).padding(horizontal=10.dp),verticalAlignment=Alignment.CenterVertically) {
             if(shown)IconAction(if(session.document.auxiliary)uiText(R.string.back_to_main) else uiText(R.string.back_to_library),UiGlyph.BACK,onClose,Modifier.testTag("reader-close"),visual=HeaderButton) else Spacer(Modifier.width(48.dp))
             Text(if(shown)progress?.chapterPagesLeft?.let {uiText(R.string.chapter_pages_remaining,if(progress.chapterEstimated)uiText(R.string.estimated_prefix) else "",it)} ?: session.metadata.title else session.metadata.title,
                 Modifier.weight(1f).padding(horizontal=4.dp),style=type.readerHeader,maxLines=1,overflow=TextOverflow.Ellipsis,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=colors.chromeText)
@@ -69,8 +75,8 @@ internal fun ReaderChrome(activity: Activity?,session: ReadingSession,state: Rea
                 }
             } else Spacer(Modifier.width(48.dp))
         }
-        if(!shown)Text(footer,Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets(bottom=safe.getBottom(density)))
-            .heightIn(min=72.dp).wrapContentHeight(Alignment.CenterVertically).testTag("reader-page-label")
+        if(!shown)Text(footer,Modifier.align(Alignment.BottomCenter).onSizeChanged {footerHeight=it.height}.windowInsetsPadding(WindowInsets(bottom=safe.getBottom(density)))
+            .heightIn(min=ReaderInsets.bottomBand).wrapContentHeight(Alignment.CenterVertically).testTag("reader-page-label")
             .padding(horizontal=6.dp),style=type.readerPage,color=colors.chromeText)
         if(activity!=null) {
             val layout=WindowLayout.of(maxWidth);val width=layout.readerToolbar(maxWidth)
@@ -119,3 +125,15 @@ internal fun ReaderChrome(activity: Activity?,session: ReadingSession,state: Rea
  * toolbar's 24dp icons in a 62dp capsule rather than the earlier 30dp buttons, which read as too small (as in Apple Books).
  */
 private val HeaderButton=40.dp
+
+/**
+ * Where the reading viewport sits. The top is measured from the status bar's size even while that bar is hidden, so showing the
+ * menu (which shows the bar) never moves the page; the bands are the space for the running header and the page number.
+ */
+internal object ReaderInsets {
+    val topBand = 30.dp
+    val bottomBand = 26.dp
+    val headerHeight = 40.dp
+    @OptIn(ExperimentalLayoutApi::class)
+    val safe: WindowInsets @Composable get() = WindowInsets.statusBarsIgnoringVisibility.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
+}

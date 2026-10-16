@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>阅读 改进设计稿</title>
+<style>
+:root{--bg:#F6F5F1;--card:#FFFFFF;--ink:#1A1B1E;--sub:#63666C;--line:#E2E1DA;--accent:#1F5FCC;--tint:#E9F0FC;--paper:#F3ECDF;--paperInk:#2B2620;--danger:#C23B2E;--ok:#1E6B45;
+--font:"Noto Sans SC",system-ui,-apple-system,"PingFang SC",sans-serif;--serif:"Noto Serif SC","Songti SC",serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141516;--card:#1E2022;--ink:#ECECE8;--sub:#A3A6AB;--line:#32353A;--accent:#7DA7F0;--tint:#25324A;--paper:#1C1B19;--paperInk:#C9C2B6;--danger:#F08A7E;--ok:#6FCB9B;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141516;--card:#1E2022;--ink:#ECECE8;--sub:#A3A6AB;--line:#32353A;--accent:#7DA7F0;--tint:#25324A;--paper:#1C1B19;--paperInk:#C9C2B6;--danger:#F08A7E;--ok:#6FCB9B;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);padding-inline:16px;padding-block:24px 64px;line-height:1.6;font-size:15px}
+main{max-width:1080px;margin:0 auto}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:19px;margin:48px 0 4px}
+.lead{color:var(--sub);margin:0 0 8px;max-width:62ch}
+.item{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:16px;align-items:start}
+.note{min-width:0}
+.note p{margin:0 0 8px}.note b{font-weight:600}
+.tag{display:inline-block;font-size:12px;letter-spacing:.06em;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-right:6px}
+.cap{font-size:12px;color:var(--sub);margin:6px 2px 0;text-align:center}
+.phone{width:240px;height:480px;border-radius:26px;border:1px solid var(--line);background:var(--bg);position:relative;overflow:hidden;margin:0 auto;font-size:11px}
+.phone.paper{background:var(--paper);color:var(--paperInk)}
+.sb{height:22px}
+.row{display:flex;align-items:center;gap:8px}
+.pill{border-radius:999px}
+.capsule{position:absolute;left:14px;right:14px;bottom:14px;height:44px;border-radius:22px;background:color-mix(in srgb,var(--card) 88%,transparent);box-shadow:0 6px 16px -6px rgba(20,22,26,.3);display:flex;align-items:center;justify-content:space-around;padding:0 4px;font-size:10px}
+.capsule.three{background:none;box-shadow:none;gap:8px;padding:0;justify-content:stretch}
+.capsule.three>div{flex:1;height:44px;border-radius:22px;background:var(--card);box-shadow:0 6px 16px -6px rgba(20,22,26,.3);display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px}
+.dot{width:16px;height:16px;border:1.6px solid currentColor;border-radius:50%;display:inline-block}
+.sq{width:16px;height:16px;border:1.6px solid currentColor;border-radius:4px;display:inline-block}
+.btn{width:30px;height:30px;border-radius:50%;background:color-mix(in srgb,var(--ink) 8%,transparent);display:flex;align-items:center;justify-content:center}
+.search{margin:0 14px;height:34px;border-radius:17px;background:color-mix(in srgb,var(--ink) 8%,transparent);padding:0 12px;display:flex;align-items:center;gap:6px;color:var(--sub);font-size:12px}
+.card{background:var(--card);border-radius:12px;padding:10px 12px;margin:0 14px 8px}
+.ch{font-family:var(--serif)}
+</style>
+</head>
+<body>
+<main>
+<h1>阅读 · 第二批改进设计稿</h1>
+<p class="lead">第 4、6、7、8、10 项会改变外观或交互，先给出方案。每项末尾写明我的推荐，你回复“全部按推荐”或指出要改的项，我再开始写代码。第 1、2、3、5、9、11 项属于明确缺陷，已直接修复，不在此列。</p>
+
+<h2>4 · 正文标题与排版密度</h2>
+<p class="lead">现状：章节标题 1.5 倍字号，再叠加浏览器默认上下间距，标题单独占去约三分之一页，同一屏的正文行数比 Readest 少。</p>
+<div class="item">
+<div><div class="phone paper"><div class="sb"></div>
+<div style="padding:44px 22px 0"><div class="ch" style="font-size:25px;font-weight:700;line-height:1.3;margin:0 0 30px">第一章 示例标题</div>
+<div class="ch" style="font-size:14px;line-height:1.8;text-indent:2em">这是一段用于界面审阅的示例正文，句子长度适中，用来观察行距、段间距与字体在真实排版中的效果。读者可以在此看到。</div><div class="ch" style="font-size:14px;line-height:1.8;text-indent:2em;margin-top:8px">第二段文字紧随其后，保持两字符首行缩进。</div></div></div><div class="cap">现状：标题 1.5em，上下留白大</div></div>
+<div><div class="phone paper"><div class="sb"></div>
+<div style="padding:26px 22px 0"><div class="ch" style="font-size:18px;font-weight:600;line-height:1.35;margin:0 0 14px">第一章 示例标题</div>
+<div class="ch" style="font-size:14px;line-height:1.8;text-indent:2em">这是一段用于界面审阅的示例正文，句子长度适中，用来观察行距、段间距与字体在真实排版中的效果。读者可以在此看到。</div><div class="ch" style="font-size:14px;line-height:1.8;text-indent:2em;margin-top:8px">第二段文字紧随其后，保持两字符首行缩进。</div><div class="ch" style="font-size:14px;line-height:1.8;text-indent:2em;margin-top:8px">第三段继续往下排，同屏多出两到三行正文。</div></div></div><div class="cap">方案：标题 1.25em / 600，上下留白减半</div></div>
+<div class="note"><p><span class="tag">改什么</span>只改 TXT 与生成章节标题的 h2：字号 1.5em 改 1.25em，字重 600，上下间距由默认约 0.83em 收到 0.5em，标题行高 1.35。</p><p><span class="tag">不改</span>正文字号、行距、段距的用户设置，EPUB 作者样式模式下不动书中自带标题。</p><p><b>推荐：</b>采用此方案。同一屏约多 2 到 3 行正文。</p></div>
+</div>
+
+<h2>6 · 书架搜索结果：独立列表页</h2>
+<p class="lead">现状：输入关键词后书架原地过滤，没有“返回”，样式与书架一样。参考 Readest 与微信读书：点搜索框进入独立搜索页，取消回书架。</p>
+<div class="item">
+<div><div class="phone"><div class="sb"></div><div style="padding:6px 14px 8px;font-size:22px;font-weight:600">书架</div><div class="search">搜索书名、作者</div>
+<div style="margin:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div style="aspect-ratio:3/4;border-radius:5px;background:#9a6a35"></div><div style="aspect-ratio:3/4;border-radius:5px;background:#6a4f77"></div><div style="aspect-ratio:3/4;border-radius:5px;background:#7b3f3b"></div></div></div><div class="cap">① 书架，点搜索框</div></div>
+<div><div class="phone"><div class="sb"></div><div class="row" style="padding:6px 14px 10px"><div class="search" style="flex:1;margin:0;color:var(--ink)">三体<span style="margin-left:auto;color:var(--sub)">✕</span></div><span style="color:var(--accent);font-size:13px">取消</span></div>
+<div style="padding:0 14px 6px;color:var(--sub);font-size:11px">书籍 · 2 本</div>
+<div class="card row"><div style="width:34px;height:46px;border-radius:4px;background:#2f6d6d"></div><div><div style="font-size:13px;font-weight:500">三体</div><div style="color:var(--sub)">刘慈欣 · 已读 38%</div></div></div>
+<div class="card row"><div style="width:34px;height:46px;border-radius:4px;background:#7b3f3b"></div><div><div style="font-size:13px;font-weight:500">三体 II 黑暗森林</div><div style="color:var(--sub)">刘慈欣 · 未开始</div></div></div>
+<div style="padding:10px 14px 6px;color:var(--sub);font-size:11px">最近搜索</div><div class="row" style="padding:0 14px;flex-wrap:wrap"><span class="pill" style="background:var(--tint);color:var(--accent);padding:3px 10px">流浪地球</span><span class="pill" style="background:var(--tint);color:var(--accent);padding:3px 10px">活着</span></div></div><div class="cap">② 独立搜索页，键盘弹出，胶囊隐藏</div></div>
+<div class="note"><p><span class="tag">流程</span>点搜索框进入全屏搜索页（自动聚焦），结果按书名、作者列成行；点“取消”或系统返回回到原书架并保留滚动位置。</p><p><span class="tag">范围</span>只搜书架的书名和作者；书内全文搜索仍在阅读器里（见第 10 项）。</p><p><b>推荐：</b>采用，并带“最近搜索”最多 5 条（存在本机，可清除）。不想要最近搜索可告诉我去掉。</p></div>
+</div>
+
+<h2>7 · “全选”改为图形按钮</h2>
+<div class="item">
+<div><div class="phone"><div class="sb"></div><div class="row" style="padding:10px 14px"><div style="font-size:22px;font-weight:600;flex:1">书架</div><div class="pill" style="padding:6px 12px;background:color-mix(in srgb,var(--ink) 8%,transparent)">全选</div></div><div style="padding:0 14px;color:var(--sub)">现状：文字按钮</div></div><div class="cap">现状</div></div>
+<div><div class="phone"><div class="sb"></div><div class="row" style="padding:10px 14px"><div style="font-size:22px;font-weight:600;flex:1">已选 2 本</div><div class="btn" style="color:var(--accent);background:var(--tint)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg></div><div class="btn">✕</div></div><div style="padding:0 14px;color:var(--sub)">方案：圆形勾选图标，已全选时填充变深，点第二次取消全选；右侧叉号退出选择</div></div><div class="cap">方案</div></div>
+<div class="note"><p>图标为圆内打勾，与书卡上的选中标记同一语言。保留“全选 / 取消全选”的无障碍名称，触区 48dp。</p><p><b>推荐：</b>采用。</p></div>
+</div>
+
+<h2>8 · 选择模式底部：三个独立按钮</h2>
+<p class="lead">现状：分类、标为读完、删除共用一个胶囊底框，看起来像切换标签。方案：三个各自独立的圆角按钮，参考 iBooks，删除为红色。</p>
+<div class="item">
+<div><div class="phone"><div class="sb"></div><div style="padding:10px 14px;font-size:22px;font-weight:600">已选 2 本</div><div class="capsule" style="justify-content:space-around"><span>加入分类</span><span>标为读完</span><span style="color:var(--danger)">删除</span></div></div><div class="cap">现状：一个底框</div></div>
+<div><div class="phone"><div class="sb"></div><div style="padding:10px 14px;font-size:22px;font-weight:600">已选 2 本</div><div class="capsule three"><div><span class="sq"></span>分类</div><div><span class="dot"></span>读完</div><div style="color:var(--danger)"><span class="sq" style="border-radius:3px"></span>删除</div></div></div><div class="cap">方案：三个独立按钮，位置与高度同标签胶囊</div></div>
+<div class="note"><p>每个按钮图标加文字，高度与底部标签胶囊一致（54dp），按钮间距 8dp，整排左右留边同标签胶囊。未选书时三个按钮置灰不可点。</p><p><b>推荐：</b>采用，图标加文字。</p></div>
+</div>
+
+<h2>10 · 书内搜索：参考 iBooks</h2>
+<p class="lead">现状：搜索占满高度的侧栏卡片，结果列表又长又挤。方案：底部半高面板，顶部搜索框与“取消”，结果按章节分组，匹配词高亮，点结果跳转并关闭面板，书内留一枚可返回的小标记。</p>
+<div class="item">
+<div><div class="phone paper"><div class="sb"></div><div class="ch" style="padding:20px 22px;font-size:13px;line-height:1.8;opacity:.6">……他把<span style="background:#f2d36b;color:#2b2620">黑暗</span>森林的法则写在纸上，又划掉。窗外的雪还在下……</div>
+<div style="position:absolute;left:0;right:0;bottom:0;height:300px;border-radius:22px 22px 0 0;background:var(--card);color:var(--ink);box-shadow:0 -8px 30px rgba(0,0,0,.14);padding:10px 14px">
+<div style="width:34px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px"></div>
+<div class="row"><div class="search" style="flex:1;margin:0;color:var(--ink)">黑暗<span style="margin-left:auto;color:var(--sub)">✕</span></div><span style="color:var(--accent);font-size:13px">取消</span></div>
+<div style="color:var(--sub);font-size:11px;margin:8px 0 4px">12 处结果</div>
+<div style="font-size:11px;color:var(--sub);margin:6px 0 2px">第十二章 · 第 214 页</div><div style="font-size:12px;line-height:1.5">……法则写在纸上，宇宙就是一片<b style="color:var(--accent)">黑暗</b>森林……</div>
+<div style="height:1px;background:var(--line);margin:8px 0"></div>
+<div style="font-size:11px;color:var(--sub);margin-bottom:2px">第十五章 · 第 301 页</div><div style="font-size:12px;line-height:1.5">……每个文明都是带枪的猎人，潜行于<b style="color:var(--accent)">黑暗</b>丛林……</div></div></div><div class="cap">方案：底部半高面板，可上拉到全高</div></div>
+<div class="note"><p><span class="tag">交互</span>键盘弹出时面板跟随上移，结果区可滚动；提交后收起键盘，结果在原位更新。点某条结果：关闭面板、跳转，并在正文高亮匹配词。</p><p><span class="tag">不改</span>搜索内核、结果分组与页码估算沿用现有逻辑，只换界面。</p><p><b>推荐：</b>采用半高面板，不做全屏。</p></div>
+</div>
+</main>
+</body>
+</html>

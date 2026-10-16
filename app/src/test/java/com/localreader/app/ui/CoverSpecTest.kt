@@ -21,7 +21,7 @@ class CoverSpecTest {
             assertTrue(compiled.afterAuthor.contains(ReaderThemes.background(theme)))
             assertTrue(compiled.afterAuthor.contains(ReaderThemes.foreground(theme)))
             assertTrue(compiled.afterAuthor.contains("line-height:2.0"));assertTrue(compiled.afterAuthor.contains("'Roboto'"))
-            assertEquals("40px",compiled.geometry.marginLeft)
+            assertEquals("34px",compiled.geometry.marginLeft)
         }
     }
 }

@@ -58,11 +58,11 @@ data class UiTextStyles(val fonts: UiFontSet) {
     val groupCaption = explanation
     /** Empty-state and long explanatory paragraphs: 13/300 with a 1.7 line height. */
     val emptyState = auxiliary.copy(lineHeight=22.sp)
-    val navigation = sans(10,FontWeight.Normal).copy(letterSpacing=0.4.sp)
+    val navigation = sans(12,FontWeight.Normal).copy(letterSpacing=0.2.sp)
     // These are UI labels only. The document body is never styled through Compose. UiSpec: weight never above 500.
     val readerHeader = sans(13,FontWeight.Normal).copy(letterSpacing=1.sp)
     val readerPage = sans(12,FontWeight.Normal).copy(letterSpacing=0.4.sp)
-    val readerNavigation = navigation
+    val readerNavigation = sans(10,FontWeight.Normal).copy(letterSpacing=0.4.sp)
 }
 
 val LocalUiText = staticCompositionLocalOf { UiTextStyles(UiFonts.system) }

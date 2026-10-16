@@ -28,7 +28,7 @@
 
 - 内核骨架可保留：`SessionResources`（会话级资源白名单）、`RendererEventGate`（会话/revision/epoch/command 门禁）、host 协议骨架（`host.js`）、TXT 索引（28 字节记录）、`RuleCompiler`（规则编译与渲染分离）、导入流水线（暂存→fsync→重命名→事务入库）。
 - 但整体是 **TXT/HTML 专用栈**：`ReaderViewModel`/`UiState` 直接持有 `TxtEngine`；进度、书签、`Book.current` 全是 `Locator.Text`；UI 直接 new `WebReaderAdapter`；`ReaderPublication.target()` 只有 `block+character`；`host.js` 的 `rangeFor/targetFor` 硬编码 `[data-block]`；`SessionResources` 只允许 `reader/sample/` 下的资源；没有页码数据通路；没有点击区；`Scaffold` 顶底栏会改变 WebView 高度；旋转/折叠会重建 Activity。
-- 阶段 0（P0/P1/P2/P3 缺陷修复）已在工作区完成但**尚未编译、未提交**，见 `docs/NEXT_DEVELOPMENT_PRD.md` 第 9 节。**任务 K0-1 先验证它。**
+- 历史阶段0及其任务编号已执行；本文件保留内核契约，旧阶段描述不表示当前待办。0.6.0结果见[收尾记录](RELEASE_0_6_0.md)，后续任务以[NEXT](NEXT_DEVELOPMENT_PRD.md)为准。
 
 ### 1.2 目标
 

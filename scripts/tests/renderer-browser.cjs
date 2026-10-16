@@ -74,7 +74,13 @@ const server = http.createServer((req,res) => {
     await command('setRules',{...rules,flow:'scrolled',beforeAuthor:rules.beforeAuthor.replace('20px','26px'),target:anchor})
     assert.deepEqual((await page.evaluate(()=>readerHost.diagnostics())).target,anchor)
     assert.equal((await page.evaluate(()=>readerHost.diagnostics())).anchorGeometry.visible,true,'reflow must retain actual source glyph visibility')
-    await page.setViewportSize({width:720,height:412});await page.waitForTimeout(350)
+    const invalidations=await page.evaluate(()=>readerHost.diagnostics().events.filter(e=>e.type==='layoutInvalidated').length)
+    await page.setViewportSize({width:720,height:412})
+    await page.waitForFunction(count=>readerHost.diagnostics().events.filter(e=>e.type==='layoutInvalidated').length>count,invalidations)
+    // WebReaderAdapter handles layoutInvalidated by issuing setRules at the saved locator. Replay that native half of
+    // the production protocol here; resizing an isolated host without its owner is not the application's rotate path.
+    await command('setRules',{...rules,flow:'scrolled',beforeAuthor:rules.beforeAuthor.replace('20px','26px'),target:anchor})
+    assert.deepEqual((await page.evaluate(()=>readerHost.diagnostics())).target,anchor,'resize must retain the same source locator')
     assert.equal((await page.evaluate(()=>readerHost.diagnostics())).anchorGeometry.visible,true,'resize must retain actual source glyph visibility')
     assert.equal((await page.evaluate(()=>readerHost.diagnostics())).contents.some(c=>c.scriptExecuted),false)
     assert.equal(await page.evaluate(()=>window.attacked),undefined)

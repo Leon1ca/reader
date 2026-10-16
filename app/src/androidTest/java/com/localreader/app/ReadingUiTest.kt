@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.hasText
@@ -73,18 +74,21 @@ class ReadingUiTest {
     }
     private fun openFromShelf(title: String) {
         // Existing read books precede a fresh unread fixture. Use the production
-        // search field so the real card can be clicked even in a populated library.
-        if(compose.onAllNodes(androidx.compose.ui.test.hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty())
-            compose.onNodeWithContentDescription("书架").performClick()
-        // The shelf lists every format (there is no format filter). Select the real grid card by its stable source ID.
+        // search page so the real result can be clicked even in a populated library.
+        if(compose.onAllNodes(androidx.compose.ui.test.hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty()) {
+            if(compose.onAllNodes(androidx.compose.ui.test.hasTestTag("shelf-search-target")).fetchSemanticsNodes().isEmpty())
+                compose.onNodeWithContentDescription("书架").performClick()
+            compose.onNodeWithTag("shelf-search-target").performClick()
+        }
+        // The shelf lists every format (there is no format filter). Select the real result row by its stable source ID.
         compose.onNodeWithTag("shelf-search").performTextReplacement(title)
         var id: String?=null
         waitFor {
             id=model().shelfController.state.value.items.singleOrNull {it.title==title}?.id
             id!=null
         }
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("shelf-book-$id"))
-        compose.onNodeWithTag("shelf-book-$id").performClick()
+        compose.onNodeWithTag("shelf-search-results").performScrollToNode(hasTestTag("shelf-search-result-$id"))
+        compose.onNodeWithTag("shelf-search-result-$id").performClick()
         waitFor {model().state.value.reader?.contentId==id}
         compose.onNodeWithText("图书信息").assertDoesNotExist()
     }
@@ -96,6 +100,125 @@ class ReadingUiTest {
             compose.runOnUiThread { val reader=requireNotNull(model().state.value.reader);model().readerController(reader.generation).toggleChrome() }
         waitFor { try { compose.onNodeWithTag("reader-bookmark-toggle").assertIsEnabled(); true } catch (_: AssertionError) { false } }
         if(dismissEnd)try { compose.onNodeWithText("已到本书末尾").assertExists();compose.onNodeWithText("继续阅读").performClick() } catch(_: AssertionError) { /* This workflow may be on a non-final page. */ }
+    }
+    /** Compact reading chrome must keep its window geometry and cover scrolling text behind both running labels. */
+    @Test fun readerStatusBarsPreserveGeometryAndScrollLabelsStayOpaque() {
+        compose.runOnUiThread { readerModel=ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val target=instrumentation.targetContext
+        val application=target.applicationContext as ReaderApplication
+        val repository=application.repository
+        val priorDisplay=application.uiPreferences.display.value
+        val priorDefaults=preferenceRows(repository,"reader_defaults")
+        val priorOverrides=preferenceRows(repository,"reading_settings")
+        val uri=Uri.parse("content://com.localreader.app.test.fixtures/window-ui-${UUID.randomUUID()}.txt")
+        target.contentResolver.openOutputStream(uri,"wt")!!.use {
+            it.write(("Chapter 1 window geometry\n"+"正文首末行与页眉页码应各自清晰，滚动内容不能透过标签。".repeat(1600)).toByteArray())
+        }
+        var id: String?=null
+        fun statusBar(visible: Boolean) = waitFor {
+            if(android.os.Build.VERSION.SDK_INT>=30) {
+                var matches=false
+                compose.runOnUiThread {
+                    matches=androidx.core.view.ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                        ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.statusBars())==visible
+                }
+                matches
+            } else {
+                // API29's compat inset retains the stable top even in fullscreen. Check the actual system window instead.
+                val descriptor=instrumentation.uiAutomation.executeShellCommand("dumpsys window windows")
+                val windows=android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use {it.readText()}
+                val status=windows.split(Regex("(?m)^  Window #")).firstOrNull {it.substringBefore('\n').contains(" StatusBar}:")}
+                status?.lineSequence()?.any {it.trim()=="isVisible=$visible"}==true
+            }
+        }
+        val geometry="""JSON.stringify((()=>{const p=document.getElementById('renderer'),d=readerHost.diagnostics();
+            return {width:innerWidth,height:innerHeight,anchor:d.anchorGeometry,target:d.actualVisibleTarget,
+            frames:p.getContents().map(x=>{const r=x.doc.defaultView.frameElement.getBoundingClientRect();
+            return {index:x.index,left:r.left,top:r.top,width:r.width,height:r.height}})}})(),
+            (key,value)=>typeof value==='number'?Math.round(value*10)/10:value)""".trimIndent()
+        try {
+            waitFor { !model().state.value.loading }
+            compose.runOnUiThread { model().displayPreferences(priorDisplay.copy(nightMode=com.localreader.app.core.NightMode.LIGHT)) }
+            id=requireNotNull(repository.import(uri).bookId)
+            compose.runOnUiThread { model().open(requireNotNull(id)) }
+            ready()
+            val session=requireNotNull(model().state.value.reader)
+            val controller=model().readerController(session.generation)
+            compose.runOnUiThread { controller.toggleChrome() }
+            statusBar(false)
+            waitFor { controller.state.value.position==model().state.value.reader?.snapshot?.current }
+            instrumentation.waitForIdleSync()
+            android.os.SystemClock.sleep(500)
+            val before=evaluate(geometry)
+            val locator=requireNotNull(model().state.value.reader).snapshot.current
+            compose.runOnUiThread { controller.toggleChrome() }
+            statusBar(true)
+            val bookmarkBounds=compose.onNodeWithTag("reader-bookmark-toggle").fetchSemanticsNode().boundsInRoot
+            var safeLeft=0;var safeRight=0;var windowWidth=0
+            compose.runOnUiThread {
+                val decor=compose.activity.window.decorView
+                val safe=androidx.core.view.ViewCompat.getRootWindowInsets(decor)!!.getInsets(
+                    androidx.core.view.WindowInsetsCompat.Type.navigationBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+                safeLeft=safe.left;safeRight=safe.right;windowWidth=decor.width
+            }
+            assertTrue("bookmark must clear the left system inset",bookmarkBounds.left>=safeLeft)
+            assertTrue("bookmark must clear the right system inset",bookmarkBounds.right<=windowWidth-safeRight)
+            assertEquals("showing the menu must not move the page",before,evaluate(geometry))
+            assertEquals(locator,requireNotNull(model().state.value.reader).snapshot.current)
+            compose.onNodeWithText("目录").performClick()
+            waitFor { compose.onAllNodes(hasTestTag("reader-toc-list")).fetchSemanticsNodes().isNotEmpty() }
+            statusBar(true)
+            assertEquals("showing a panel must not move the page",before,evaluate(geometry))
+            assertTrue(instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+            waitFor { compose.onAllNodes(hasTestTag("reader-toc-list")).fetchSemanticsNodes().isEmpty() }
+            compose.runOnUiThread { controller.toggleChrome() }
+            statusBar(false)
+            assertEquals(before,evaluate(geometry))
+            compose.runOnUiThread { model().globalRules(com.localreader.app.core.RulesPatch(
+                flow=com.localreader.app.core.FieldUpdate.Set(ReaderFlow.SCROLLED),
+                theme=com.localreader.app.core.FieldUpdate.Set("gray"),
+                fontSize=com.localreader.app.core.FieldUpdate.Set(16f))) }
+            waitFor { model().state.value.reader?.snapshot?.rules?.flow==ReaderFlow.SCROLLED }
+            ready()
+            compose.runOnUiThread { controller.toggleChrome() }
+            statusBar(false)
+            val footer=compose.onNodeWithTag("reader-page-label").fetchSemanticsNode().boundsInRoot
+            val header=compose.onNodeWithTag("reader-header-band").fetchSemanticsNode().boundsInRoot
+            val expected=android.graphics.Color.parseColor(com.localreader.app.core.ReaderThemes.background("gray"))
+            for (offset in listOf(300,317,334)) {
+                evaluate("(()=>{const c=document.getElementById('renderer').shadowRoot.querySelector('#container');c.scrollTop=$offset;return true})()")
+                instrumentation.waitForIdleSync()
+                android.os.SystemClock.sleep(400)
+                val bitmap=instrumentation.uiAutomation.takeScreenshot()
+                try {
+                    // The middle holds the labels. At either edge the complete band must be opaque page colour.
+                    val density=target.resources.displayMetrics.density
+                    val left=(14*density).toInt()
+                    val right=(70*density).toInt()
+                    val rows=listOf((header.bottom-10*density).toInt() until (header.bottom-2*density).toInt(),
+                        (footer.top+2*density).toInt() until (footer.top+10*density).toInt())
+                    rows.forEachIndexed { band,ys ->
+                        var wrong=0
+                        for(y in ys)for(x in left until right)for(px in listOf(safeLeft+x,bitmap.width-safeRight-1-x)) {
+                            val pixel=bitmap.getPixel(px,y)
+                            val delta=kotlin.math.abs(android.graphics.Color.red(pixel)-android.graphics.Color.red(expected))+
+                                kotlin.math.abs(android.graphics.Color.green(pixel)-android.graphics.Color.green(expected))+
+                                kotlin.math.abs(android.graphics.Color.blue(pixel)-android.graphics.Color.blue(expected))
+                            if(delta>18)wrong++
+                        }
+                        assertEquals("scrolling text leaked through chrome band $band at offset $offset",0,wrong)
+                    }
+                } finally { bitmap.recycle() }
+            }
+        } finally {
+            compose.runOnUiThread { model().closeReader();model().displayPreferences(priorDisplay) }
+            waitFor { model().state.value.reader==null }
+            statusBar(true)
+            id?.let { repository.content(it)?.let(repository::delete) }
+            target.contentResolver.delete(uri,null,null)
+            restorePreferences(repository,priorDefaults,priorOverrides)
+        }
     }
     @Test fun existingBookDirectoryStyleBookmarkCloseReopenAndEncodingUseProductionChain() {
         compose.runOnUiThread { readerModel = ViewModelProvider(compose.activity)[ReaderViewModel::class.java] }
@@ -274,7 +397,8 @@ class ReadingUiTest {
             compose.onNodeWithText("完成").performClick();openFromShelf(record.title);ready()
             compose.onNodeWithText("搜索").performClick()
             compose.onNodeWithTag("reader-search-field").performTextReplacement(marker)
-            compose.onNodeWithText("查找").performClick()
+            // The search capsule has no separate 查找 button: the keyboard's search key submits.
+            compose.onNodeWithTag("reader-search-field").performImeAction()
             waitFor { try { compose.onNodeWithText("找到 1 处").assertExists();true } catch(_: AssertionError) { false } }
             waitFor { compose.onAllNodes(hasText("约 第 ",substring=true)).fetchSemanticsNodes().isNotEmpty() }
             val result=hasText(marker,substring=true) and !hasSetTextAction()

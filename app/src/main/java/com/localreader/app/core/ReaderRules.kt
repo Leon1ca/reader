@@ -8,7 +8,7 @@ data class ReaderRules(val schemaVersion: Int = 1, val fontSize: Float = 16f, va
     init { require(fxlZoom in setOf("fit-page","fit-width") || fxlZoom.toDoubleOrNull()?.let { it.isFinite() && it in 1.0..5.0 }==true);require(spreadPreference in setOf("AUTO","SINGLE"));require(schemaVersion == 1 && fontSize in 12f..36f && theme in ReaderThemes.labels && epubStyleMode in setOf("AUTHOR","CUSTOM") && lineHeight.isFinite() && lineHeight in 1.2..2.4 && paragraphSpacing.isFinite() && paragraphSpacing in 0.0..2.4) }
     companion object { const val DEFAULT_PARAGRAPH_SPACING = 0.6 }
 }
-data class RendererGeometry(val gap: String = "7%", val marginTop: String = "24px", val marginBottom: String = "24px",
+data class RendererGeometry(val gap: String = "4%", val marginTop: String = "24px", val marginBottom: String = "24px",
                             val marginLeft: String = "16px", val marginRight: String = "16px", val maxColumns: Int = 1)
 data class CompiledRules(val profileId: String, val beforeAuthor: String, val afterAuthor: String, val geometry: RendererGeometry = RendererGeometry())
 
@@ -31,9 +31,10 @@ object RuleCompiler {
         val after = ":root{font-size:${rules.fontSize * profile.mobileScale}px;color-scheme:${if (rules.theme == "dark") "dark" else "light"};}" +
             "html,body{background:$bg;color:$fg;overflow-wrap:break-word;} body{font-family:${ReaderFontStacks.choose(rules.fontFamily,profile.fontFamily)};letter-spacing:0;word-spacing:0;}" +
             "p{margin:${rules.paragraphSpacing}em 0;line-height:${rules.lineHeight};text-align:left;hyphens:manual;white-space:normal;text-indent:0;}" +
-            "p.continuation{text-indent:0;margin-top:0;} p.continues{margin-bottom:0;} h2{font-size:1.5em;text-indent:0;}" +
+            "p.continuation{text-indent:0;margin-top:0;} p.continues{margin-bottom:0;} h2{font-size:1.25em;font-weight:600;line-height:1.35;margin:0.5em 0;text-indent:0;}" +
             "blockquote p,li p{text-indent:0;} li{line-height:${rules.lineHeight};} pre,code{font-family:monospace;line-height:1.5;text-indent:0;}"
-        return CompiledRules("${profile.id}/rules-v${rules.schemaVersion}/layout-v3${spacingSuffix(rules)}", before, after, RendererGeometry(marginLeft=margin(rules),marginRight=margin(rules),maxColumns=if(rules.columns=="one")1 else 2))
+        // layout-v4: chapter headings 1.25em/600, line height 1.35 and half the default margin; layout-v5: side gap 4%, margins 14/22/34px (2026-10-16).
+        return CompiledRules("${profile.id}/rules-v${rules.schemaVersion}/layout-v6${spacingSuffix(rules)}", before, after, RendererGeometry(marginTop="12px",marginBottom="12px",marginLeft=margin(rules),marginRight=margin(rules),maxColumns=if(rules.columns=="one")1 else 2))
     }
     /** The chosen imported font becomes one more declared face, so it is known before fonts.ready like the bundled ones. */
     private fun userFontFace(rules: ReaderRules,base: String): String = ReaderFontStacks.userFontId(rules.fontFamily)?.let { id ->
@@ -43,7 +44,7 @@ object RuleCompiler {
     private fun spacingSuffix(rules: ReaderRules)=if(rules.paragraphSpacing==ReaderRules.DEFAULT_PARAGRAPH_SPACING)"" else "-ps${rules.paragraphSpacing}"
     /** Chinese, Japanese or Korean content, from the declared language (`zh-CN`, `ja`, `ko-KR`, ...). */
     fun isCjk(language: String?): Boolean = language?.trim()?.lowercase()?.substringBefore('-')?.substringBefore('_') in setOf("zh","ja","ko")
-    private fun margin(rules: ReaderRules)=when(rules.margin) { "S" -> "16px";"L" -> "40px";else -> "26px" }
+    private fun margin(rules: ReaderRules)=when(rules.margin) { "S" -> "14px";"L" -> "34px";else -> "22px" }
     private fun compileEpub(rules: ReaderRules,fontUrl: String,faces: String,language: String?): CompiledRules {
         val base=fontUrl.substringBeforeLast('/')+"/"
         var fonts=faces+userFontFace(rules,base)
@@ -64,10 +65,10 @@ object RuleCompiler {
         val root=":root{font-size:${rules.fontSize*profile.mobileScale}px;color-scheme:${if(rules.theme=="dark")"dark" else "light"};} html{background:$bg;color:$fg;}"
         val after=if(rules.epubStyleMode=="AUTHOR")":root{color-scheme:${if(rules.theme=="dark")"dark" else "light"};}" else root+
             "body{font-family:$family;line-height:${rules.lineHeight};color:$fg;background:$bg;overflow-wrap:break-word;}"+
-            "p{margin:${rules.paragraphSpacing}em 0;line-height:${rules.lineHeight};hyphens:manual;} blockquote p,li p,td p,th p,.noindent,.nonindent{text-indent:0;} pre,code{font-family:monospace;text-indent:0;}"
+            "p{margin:${rules.paragraphSpacing}em 0;line-height:${rules.lineHeight};hyphens:manual;} h1,h2,h3{line-height:1.35;margin-top:.6em;margin-bottom:.5em;} blockquote p,li p,td p,th p,.noindent,.nonindent{text-indent:0;} pre,code{font-family:monospace;text-indent:0;}"
         val side=margin(rules)
-        return CompiledRules("epub-${rules.epubStyleMode.lowercase()}/rules-v${rules.schemaVersion}/layout-v3${if(cjk)"c" else ""}${spacingSuffix(rules)}",before,after,
-            RendererGeometry(marginLeft=side,marginRight=side,maxColumns=if(rules.columns=="one")1 else 2))
+        return CompiledRules("epub-${rules.epubStyleMode.lowercase()}/rules-v${rules.schemaVersion}/layout-v5${if(cjk)"c" else ""}${spacingSuffix(rules)}",before,after,
+            RendererGeometry(marginTop="12px",marginBottom="12px",marginLeft=side,marginRight=side,maxColumns=if(rules.columns=="one")1 else 2))
     }
 
 }

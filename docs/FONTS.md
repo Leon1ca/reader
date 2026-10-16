@@ -41,4 +41,4 @@ OFL 允许字体随软件打包，需保留相应版权和许可；字体本身�
 - 这五个字体只用于**正文渲染**（WebView）。应用自身界面（书架、设置、面板）的常用文字使用 `res/font/` 的 Noto Sans SC 子集（300/400/500），缺字回退系统字体，衬线标题使用系统字体；不加载这五个正文资产。界面子集的 OFL 许可随 APK 的 `NotoSansSC-OFL.txt` 保留。
 - `app/src/main/assets/fonts/readest.css` 声明 `@font-face`（`font-display:block`）。Roboto/Bitter 的 `unicode-range` 等于原 Google 网页分包的有效覆盖；LXGW 不设范围。
 - 字体以固定、与会话无关的地址 `https://appassets.androidplatform.net/fonts/<文件>` 提供，并带长期缓存头；APK 内以不压缩方式存放（`noCompress ttf`），渲染进程只需解码一次。
-- 2026-10-14正文选择：默认英文Roboto＋中文LXGW屏幕版；宋体英文Bitter、黑体英文Roboto，中文按对应系统字体可用性回退LXGW；旧kai偏好兼容保留并在面板显示文楷。导入字体缺字回退默认栈，AUTHOR 与 CUSTOM 均保持用户所选正文字体，书内嵌字体及 monospace 保留，出版物命名的系统家族和 generic 家族重定向至所选字体，固定版式不强制重排。资产与许可未变；本次候选范围与实际检查见[Sol接手收口](V0_6_SOL_TAKEOVER_20261014.md)及[当前交接](ai-handoff.md)。
+- 2026-10-14正文选择：默认英文Roboto＋中文LXGW屏幕版；宋体英文Bitter、黑体英文Roboto，中文按对应系统字体可用性回退LXGW；旧kai偏好兼容保留并在面板显示文楷。导入字体缺字回退默认栈，AUTHOR 与 CUSTOM 均保持用户所选正文字体，书内嵌字体及 monospace 保留，出版物命名的系统家族和 generic 家族重定向至所选字体，固定版式不强制重排。资产与许可未变；本次候选范围与实际检查见[当前交接](ai-handoff.md)及[0.6.0收尾记录](RELEASE_0_6_0.md)。

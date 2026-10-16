@@ -15,6 +15,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { ReaderApp(model) }
+        com.localreader.app.ui.WebViewWarmup.start(this)
         // A recreated activity (process death, history) replays its old intent; that delivery was already handled.
         if(savedInstanceState==null)handleExternal(intent)
     }

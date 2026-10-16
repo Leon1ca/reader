@@ -33,6 +33,19 @@ class LibraryDesignUiTest {
         check(editor.commit()) {"Original UI preferences could not be restored"}
     }
     private fun waitFor(condition: ()->Boolean)=compose.waitUntil(20000,condition)
+    /** The shelf's field opens the separate search page; its editable field carries the "shelf-search" tag. */
+    private fun openShelfSearch() {
+        if(compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isNotEmpty())return
+        if(compose.onAllNodes(hasTestTag("shelf-search-target")).fetchSemanticsNodes().isEmpty())compose.onNodeWithContentDescription("书架").performClick()
+        compose.onNodeWithTag("shelf-search-target").performClick()
+        waitFor { compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isNotEmpty() }
+    }
+    /** 取消 clears the query and returns to the shelf, where the tab capsule is back once the keyboard is gone. */
+    private fun closeShelfSearch(model: ReaderViewModel) {
+        compose.onNodeWithText("取消").performClick()
+        waitFor { model.shelfController.state.value.query.isEmpty() && compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty() }
+        waitFor { compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty() }
+    }
     /**
      * performScrollToNode only brings a row into the viewport; the floating tab bar is a separate window drawn over the bottom of
      * the list, so a row left behind it would receive the bar's tap instead. Scroll until the row sits clear of the bar, then tap.
@@ -83,7 +96,7 @@ class LibraryDesignUiTest {
             waitFor { !model.state.value.busy && model.state.value.results.isNotEmpty() }
             id=requireNotNull(model.state.value.results.single().bookId)
             compose.onNodeWithText("完成").performClick()
-            if(compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isEmpty())compose.onNodeWithContentDescription("书架").performClick()
+            openShelfSearch()
             repeat(5) { iteration ->
                 compose.onNodeWithTag("shelf-search").performTextClearance()
                 compose.onNodeWithTag("shelf-search").performTextInput(text)
@@ -119,7 +132,7 @@ class LibraryDesignUiTest {
         var failure: Throwable?=null
         fun fixture(name: String,bytes: ByteArray): Uri=Uri.parse("content://com.localreader.app.test.fixtures/r5-$nonce-$name").also { uri -> uris+=uri;target.contentResolver.openOutputStream(uri,"wt")!!.use {it.write(bytes)} }
         fun hideSearchImeBeforeCapsule() {
-            // Search owns the IME. Capsules are intentionally absent until normal Back dismisses it.
+            // Search owns the IME. Back first dismisses only the keyboard; the query and the search page stay.
             compose.waitForIdle()
             val before=model.shelfController.state.value
             val instrumentation=InstrumentationRegistry.getInstrumentation()
@@ -127,9 +140,17 @@ class LibraryDesignUiTest {
             val flags=automation.serviceInfo.flags
             automation.serviceInfo=automation.serviceInfo.apply { this.flags=this.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
             try {
-                fun imeVisible()=automation.windows.any { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-                if(imeVisible())instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                waitFor { !imeVisible() && compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty() }
+                // A retained MIUI accessibility window is not proof that the keyboard is still visible.
+                fun imeVisible()=if(android.os.Build.VERSION.SDK_INT>=30)
+                    androidx.core.view.ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())==true
+                    else automation.windows.any { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                // Auto-focus can still be opening the IME when the query settles. Wait for the
+                // keyboard we intend to dismiss, otherwise Back can race its opening animation.
+                waitFor { imeVisible() }
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                // The search page keeps its own field on the capsule line, so no capsule comes back while it is open.
+                waitFor { !imeVisible() && compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
                 assertEquals(before.query,model.shelfController.state.value.query)
                 assertEquals(before.selected,model.shelfController.state.value.selected)
             } finally { automation.serviceInfo=automation.serviceInfo.apply { this.flags=flags } }
@@ -164,15 +185,17 @@ class LibraryDesignUiTest {
             waitFor {model.state.value.reader==null}
             // The shelf has no continue-reading rail or list; the book is reached from its own card.
             compose.onNodeWithText("继续阅读").assertDoesNotExist()
+            openShelfSearch()
+            // The search page owns the capsule line: neither capsule is shown on it, with or without the keyboard.
+            compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
             compose.onNodeWithTag("shelf-search").performTextReplacement(original.title)
             waitFor {model.shelfController.state.value.items.any {it.id==id}}
+            compose.onNodeWithTag("shelf-search-result-$id").assertExists()
             // Book cards carry no "more/details" button any longer; the detail page is gone.
             compose.onNodeWithContentDescription("《${original.title}》更多").assertDoesNotExist()
             compose.onNodeWithText("查看详情").assertDoesNotExist()
-            hideSearchImeBeforeCapsule()
+            closeShelfSearch(model)
             compose.onNodeWithTag("floating-tab-bar").assertExists()
-            compose.onNodeWithTag("shelf-search").performTextReplacement("")
-            hideSearchImeBeforeCapsule()
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithContentDescription("更多设置").performClick()
             compose.onNode(hasText("备份与恢复") and hasAnyAncestor(isDialog())).assertExists()
@@ -182,27 +205,32 @@ class LibraryDesignUiTest {
             compose.onNodeWithContentDescription("返回设置").performClick()
             compose.onNodeWithContentDescription("书架").performClick()
             compose.onNodeWithContentDescription("搜索书名、作者").assertExists()
+            openShelfSearch()
             val searchBounds=compose.onNodeWithTag("shelf-search").fetchSemanticsNode().boundsInRoot
             assertTrue(searchBounds.height>=48f*compose.activity.resources.displayMetrics.density-1f)
             compose.onNodeWithTag("shelf-search").performTextReplacement(nonce)
             waitFor {model.shelfController.state.value.items.count {it.id in ids}==2}
-            hideSearchImeBeforeCapsule()
-            // Selection mode (Apple Books style): the tab bar gives way to the selection capsule; 全选/退出选择 sit in the header.
-            compose.onNodeWithContentDescription("选择").performClick()
+            ids.forEach { compose.onNodeWithTag("shelf-search-result-$it").assertExists() }
+            closeShelfSearch(model)
+            // Selection mode (Apple Books style): the tab bar gives way to the selection capsules; 全选/退出选择 sit in the header.
+            compose.onNodeWithText("选择").performClick()
             compose.onNodeWithTag("selection-action-bar").assertExists();compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
-            compose.onNodeWithText("退出选择").assertExists()
-            // Nothing chosen: the actions are dimmed and change nothing.
-            compose.onNodeWithText("标记已读完").performClick();assertNull(repository.content(id)!!.finishedAt)
+            compose.onNodeWithContentDescription("退出选择").assertExists()
+            // Nothing chosen: the delete button is dimmed and opens nothing.
+            compose.onNodeWithTag("selection-action-bar").performClick();compose.onAllNodes(hasText("删除",substring=true) and !hasAnyAncestor(hasTestTag("selection-action-bar"))).assertCountEquals(0)
             compose.onNodeWithText("全选").performClick()
             waitFor {model.shelfController.state.value.selected.containsAll(ids)}
             compose.onNodeWithText("取消全选").performClick()
             waitFor {model.shelfController.state.value.selected.isEmpty()}
             compose.onNodeWithTag("selection-action-bar").assertExists()
+            compose.onNodeWithTag("shelf-grid").performScrollToNode(hasTestTag("shelf-book-$id"))
             compose.onNodeWithTag("shelf-book-$id").performClick()
             waitFor {model.shelfController.state.value.selected==setOf(id)}
+            // In a populated library the fixture may be far below the lazy header.
+            compose.onNodeWithTag("shelf-grid").performScrollToIndex(0)
             compose.onNodeWithText("已选 1 本").assertExists()
-            compose.onNodeWithText("标记已读完").performClick();waitFor {repository.content(id)?.finishedAt!=null}
-            // Acting ends the selection and brings the tabs back.
+            compose.onNodeWithContentDescription("退出选择").performClick()
+            // Leaving the selection brings the tabs back.
             waitFor {compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty()}
             compose.onNodeWithTag("selection-action-bar").assertDoesNotExist()
             assertArrayEquals(bytesBefore,originalFile.readBytes())
@@ -237,13 +265,23 @@ class LibraryDesignUiTest {
             assertEquals(beforeDeferred,repository.summaries())
             compose.onNodeWithText("图书信息").assertDoesNotExist()
             compose.onNodeWithContentDescription("书架").performClick()
+            openShelfSearch()
             compose.onNodeWithTag("shelf-search").performTextReplacement(changed)
-            hideSearchImeBeforeCapsule()
             waitFor {model.shelfController.state.value.items.any {it.id==id}}
-            compose.onNodeWithContentDescription("选择").performClick()
+            hideSearchImeBeforeCapsule()
+            // System Back leaves the search page (the keyboard went first) and the full shelf comes back.
+            compose.waitForIdle()
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            try { waitFor {model.shelfController.state.value.query.isEmpty() && compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().isNotEmpty()} }
+            catch(error: Throwable) {
+                android.util.Log.e("LibrarySearchBackVerification","query=${model.shelfController.state.value.query} search=${compose.onAllNodes(hasTestTag("shelf-search")).fetchSemanticsNodes().size} capsule=${compose.onAllNodes(hasTestTag("floating-tab-bar")).fetchSemanticsNodes().size}",error)
+                throw error
+            }
+            compose.onNodeWithText("选择").performClick()
+            compose.onNodeWithTag("shelf-grid").performScrollToNode(hasTestTag("shelf-book-$id"))
             compose.onNodeWithTag("shelf-book-$id").performClick()
             waitFor {model.shelfController.state.value.selected==setOf(id)}
-            compose.onNode(hasText("删除") and hasAnyAncestor(hasTestTag("selection-action-bar"))).performClick()
+            compose.onNodeWithTag("selection-action-bar").performClick()
             waitFor {compose.onAllNodes(hasText("书签（0 个）",substring=true)).fetchSemanticsNodes().isNotEmpty()}
             compose.onNodeWithTag("floating-tab-bar").assertDoesNotExist()
             compose.onNodeWithText("删除").performClick()

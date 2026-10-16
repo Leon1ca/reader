@@ -13,14 +13,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Popup
@@ -29,41 +33,75 @@ import androidx.compose.ui.window.PopupProperties
 import com.localreader.app.ui.backdrop.GlassBackdrop
 import com.localreader.app.ui.design.*
 
+/**
+ * The capsule windows are touched, never keyboard-focused. Some Android skins draw the platform default-focus highlight (a
+ * translucent square) over the touched tab; switch it off on the popup's own view tree.
+ */
+@Composable
+private fun NoFocusHighlight() {
+    val view=androidx.compose.ui.platform.LocalView.current
+    SideEffect {
+        view.defaultFocusHighlightEnabled=false
+        (view.parent as? android.view.View)?.defaultFocusHighlightEnabled=false
+    }
+}
+
+/**
+ * While the keyboard is up the capsule fades out and back instead of leaving composition: re-creating its window and glass
+ * sampler after every keyboard close was what stuttered, and the sampler needs a capture before it can show the blur again.
+ * Hidden, it does not take touches.
+ */
+@Composable
+private fun Modifier.capsuleFade(visible: Boolean): Modifier {
+    val alpha by androidx.compose.animation.core.animateFloatAsState(if(visible)1f else 0f,androidx.compose.animation.core.tween(motionDuration(UiMotion.chrome)),label="capsule")
+    return graphicsLayer { this.alpha=alpha }.then(if(visible) Modifier else Modifier.pointerInput(Unit) { awaitPointerEventScope { while(true)awaitPointerEvent().changes.forEach { it.consume() } } })
+}
+
+/** Shared by the tab and selection capsules so both sit on the same line as the Xiaomi apps' bottom capsule. */
+@Composable
+internal fun capsulePlacement(navInsetPx: Int): PopupPositionProvider {
+    val density=LocalDensity.current
+    return remember(navInsetPx,density) { object: PopupPositionProvider {
+        override fun calculatePosition(anchorBounds: IntRect,windowSize: IntSize,layoutDirection: LayoutDirection,popupContentSize: IntSize): IntOffset {
+            val gap=with(density) { UiSize.capsuleBottom(navInsetPx.toDp()).roundToPx() }
+            return IntOffset((windowSize.width-popupContentSize.width)/2,windowSize.height-gap-popupContentSize.height)
+        }
+    } }
+}
+
 /** The popup owns only the capsule, not a full-screen input surface. */
 @Composable
 internal fun FloatingTabBar(activity: Activity,selected: Int,onSelect: (Int)->Unit,actionLabel: String,action: ()->Unit,
-                            moreAction: Boolean=false,enabled: Boolean,contentKey: Any,dirtyKey: Any,dirtyTick: ()->Long={ 0L }) {
+                            moreAction: Boolean=false,enabled: Boolean,contentKey: Any,dirtyKey: Any,dirtyTick: ()->Long={ 0L },visible: Boolean=true) {
     val colors=LocalUiPalette.current;val type=LocalUiText.current;val density=LocalDensity.current
     val bottom=WindowInsets.navigationBars.union(WindowInsets.displayCutout).getBottom(density)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val barHeight=UiSize.navigationHeight(density.fontScale)
-        val width=(maxWidth-32.dp).coerceAtMost(560.dp).coerceAtLeast(0.dp)
-        val placement=remember(bottom,density) { object: PopupPositionProvider {
-            override fun calculatePosition(anchorBounds: IntRect,windowSize: IntSize,layoutDirection: LayoutDirection,popupContentSize: IntSize)=
-                IntOffset((windowSize.width-popupContentSize.width)/2,windowSize.height-bottom-with(density) { 22.dp.roundToPx() }-popupContentSize.height)
-        } }
+        val width=UiSize.capsuleWidth(maxWidth)
+        val placement=capsulePlacement(bottom)
         Popup(popupPositionProvider=placement,properties=PopupProperties(focusable=false,dismissOnBackPress=false,dismissOnClickOutside=false,clippingEnabled=false)) {
-            Box(Modifier.width(width).height(barHeight).testTag("floating-tab-bar").semantics {contentDescription=uiText(R.string.main_navigation)}) {
+            NoFocusHighlight()
+            Box(Modifier.width(width).height(barHeight).capsuleFade(visible).then(if(visible)Modifier.testTag("floating-tab-bar").semantics {contentDescription=uiText(R.string.main_navigation)} else Modifier.clearAndSetSemantics {})) {
                 // The shadows are drawn first, under the glass; drawn over it they dirty the frosted surface.
-                Row(Modifier.fillMaxSize(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { Box(Modifier.weight(1f).fillMaxHeight().capsuleElevation());Box(Modifier.size(62.dp).capsuleElevation()) }
+                Row(Modifier.fillMaxSize(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { Box(Modifier.weight(1f).fillMaxHeight().capsuleElevation());Box(Modifier.size(barHeight).capsuleElevation()) }
                 GlassBackdrop(activity,colors.card,contentKey,splitFraction=1f,modifier=Modifier.fillMaxSize(),dirtyKey=dirtyKey to dirtyTick())
                 Row(Modifier.fillMaxSize(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.weight(1f).fillMaxHeight(),verticalAlignment=Alignment.CenterVertically) {
                         listOf(uiText(R.string.shelf),uiText(R.string.later),"RSS",uiText(R.string.settings)).forEachIndexed { index,label ->
                             // The selected tab's pill wraps both the icon and its label, as in Apple Books' tab bar.
-                            Column(Modifier.weight(1f).fillMaxHeight().semantics { contentDescription=label;this.selected=index==selected }
-                                .clickable(interactionSource=remember { androidx.compose.foundation.interaction.MutableInteractionSource() },indication=null,role=Role.Tab) { onSelect(index) }.padding(horizontal=3.dp,vertical=5.dp)
-                                .background(if(index==selected)Brush.verticalGradient(listOf(colors.primaryContainer,colors.primaryContainer.copy(alpha=.75f))) else Brush.verticalGradient(listOf(Color.Transparent,Color.Transparent)),RoundedCornerShape(26.dp))
-                                .padding(bottom=4.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
+                            Column(Modifier.weight(1f).fillMaxHeight().semantics { contentDescription=label;this.selected=index==selected;role=Role.Tab;onClick { onSelect(index);true } }
+                                .pointerInput(index) { detectTapGestures { onSelect(index) } }.padding(3.dp)
+                                .then(if(index==selected)Modifier.background(colors.primaryContainer,RoundedCornerShape(UiSize.tabRadius-3.dp)) else Modifier)
+                                .padding(top=2.dp,bottom=2.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
                                 Box(Modifier.fillMaxWidth().weight(1f),contentAlignment=Alignment.Center) {
-                                    UiIcon(listOf(UiGlyph.SHELF,UiGlyph.LATER,UiGlyph.RSS,UiGlyph.SETTINGS)[index],Modifier.size(24.dp),if(index==selected)colors.primary else colors.controlText,selected=index==selected)
+                                    UiIcon(listOf(UiGlyph.SHELF,UiGlyph.LATER,UiGlyph.RSS,UiGlyph.SETTINGS)[index],Modifier.size(22.dp),if(index==selected)colors.primary else colors.controlText,selected=index==selected)
                                 }
                                 Text(label,modifier=Modifier.clearAndSetSemantics {},
                                     style=type.navigation,color=if(index==selected)colors.primary else colors.controlText)
                             }
                         }
                     }
-                    Box(Modifier.size(62.dp).semantics { contentDescription=actionLabel }.clickable(interactionSource=remember { androidx.compose.foundation.interaction.MutableInteractionSource() },indication=null,enabled=enabled,role=Role.Button,onClick=action),contentAlignment=Alignment.Center) {
+                    Box(Modifier.size(barHeight).semantics { contentDescription=actionLabel;role=Role.Button;if(enabled)onClick { action();true } else disabled() }.then(if(enabled)Modifier.pointerInput(action) { detectTapGestures { action() } } else Modifier),contentAlignment=Alignment.Center) {
                         UiIcon(if(moreAction)UiGlyph.MORE else UiGlyph.PLUS,Modifier.size(24.dp),colors.controlText)
                     }
                 }
@@ -73,32 +111,36 @@ internal fun FloatingTabBar(activity: Activity,selected: Int,onSelect: (Int)->Un
 }
 
 /**
- * Shelf selection mode (Apple Books style): this capsule takes the tab bar's place, same width, position and glass, with
- * the three actions for the chosen books. With nothing chosen the actions are dimmed and do nothing.
+ * Shelf selection mode: the only batch action left is delete, a round icon-only button on the capsule line at the lower right
+ * (same height as the tab capsule, same side margin, same glass). With nothing chosen it is dimmed and does nothing.
  */
 @Composable
-internal fun SelectionActionBar(activity: Activity,count: Int,enabled: Boolean,onCategorize: ()->Unit,onFinished: ()->Unit,onDelete: ()->Unit,contentKey: Any,dirtyKey: Any) {
-    val colors=LocalUiPalette.current;val type=LocalUiText.current;val density=LocalDensity.current
+internal fun SelectionActionBar(activity: Activity,count: Int,enabled: Boolean,onDelete: ()->Unit,contentKey: Any,dirtyKey: Any,visible: Boolean=true) {
+    val colors=LocalUiPalette.current;val density=LocalDensity.current
     val bottom=WindowInsets.navigationBars.union(WindowInsets.displayCutout).getBottom(density)
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val barHeight=UiSize.navigationHeight(density.fontScale)
-        val width=(maxWidth-32.dp).coerceAtMost(560.dp).coerceAtLeast(0.dp)
+    run {
+        val size=UiSize.navigationHeight(density.fontScale)
         val placement=remember(bottom,density) { object: PopupPositionProvider {
-            override fun calculatePosition(anchorBounds: IntRect,windowSize: IntSize,layoutDirection: LayoutDirection,popupContentSize: IntSize)=
-                IntOffset((windowSize.width-popupContentSize.width)/2,windowSize.height-bottom-with(density) { 22.dp.roundToPx() }-popupContentSize.height)
+            override fun calculatePosition(anchorBounds: IntRect,windowSize: IntSize,layoutDirection: LayoutDirection,popupContentSize: IntSize): IntOffset {
+                val gap=with(density) { UiSize.capsuleBottom(bottom.toDp()).roundToPx() }
+                // Right edge of the tab capsule's row, so the button lines up with the "+" orb on the shelf.
+                val side=with(density) { ((windowSize.width.toDp()-UiSize.capsuleWidth(windowSize.width.toDp()))/2).roundToPx() }
+                return IntOffset(windowSize.width-side-popupContentSize.width,windowSize.height-gap-popupContentSize.height)
+            }
         } }
         Popup(popupPositionProvider=placement,properties=PopupProperties(focusable=false,dismissOnBackPress=false,dismissOnClickOutside=false,clippingEnabled=false)) {
-            Box(Modifier.width(width).height(barHeight).capsuleElevation().testTag("selection-action-bar").semantics { contentDescription=uiText(R.string.selection_actions) }) {
+            NoFocusHighlight()
+            val available=enabled && count>0
+            var pressed by remember { mutableStateOf(false) }
+            val scale by androidx.compose.animation.core.animateFloatAsState(if(pressed)UiMotion.pressedScale else 1f,androidx.compose.animation.core.tween(motionDuration(UiMotion.press)),label="selection press")
+            val label=uiText(R.string.delete)
+            Box(Modifier.size(size).capsuleFade(visible).graphicsLayer { scaleX=scale;scaleY=scale }
+                .then(if(visible)Modifier.testTag("selection-action-bar").semantics { contentDescription=label;role=Role.Button;if(available)onClick { onDelete();true } else disabled() } else Modifier.clearAndSetSemantics {})
+                .then(if(available)Modifier.pointerInput(onDelete) { detectTapGestures(onPress={ pressed=true;try { tryAwaitRelease() } finally { pressed=false } }) { onDelete() } } else Modifier),
+                contentAlignment=Alignment.Center) {
+                Box(Modifier.fillMaxSize().capsuleElevation(RoundedCornerShape(percent=50)))
                 GlassBackdrop(activity,colors.card,contentKey,modifier=Modifier.fillMaxSize(),dirtyKey=dirtyKey)
-                Row(Modifier.fillMaxSize().padding(horizontal=6.dp),verticalAlignment=Alignment.CenterVertically) {
-                    val available=enabled && count>0
-                    listOf(Triple(uiText(R.string.add_category),colors.controlText,onCategorize),Triple(uiText(R.string.mark_finished_action),colors.controlText,onFinished),
-                        Triple(uiText(R.string.delete),colors.danger,onDelete)).forEach { (label,tint,action) ->
-                        Box(Modifier.weight(1f).fillMaxHeight().clickable(enabled=available,role=Role.Button,onClick=action),contentAlignment=Alignment.Center) {
-                            Text(label,style=type.row,color=tint.copy(alpha=if(available) 1f else .4f),maxLines=1)
-                        }
-                    }
-                }
+                UiIcon(UiGlyph.TRASH,Modifier.size(22.dp),colors.danger.copy(alpha=if(available) 1f else .4f))
             }
         }
     }

@@ -119,17 +119,33 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
         onDispose { stop() }
     }
     LaunchedEffect(session.notice,session.snapshot.bookmarks) {session.notice?.let {localNotice=it}}
+    // A jump (contents, bookmark, search) starts a new position; the previous restore's "nearby" notice must not outlive it.
+    val nearbyNotice=uiText(R.string.nearby_restored)
+    LaunchedEffect(session.jumpSerial) { if(session.jumpSerial>0 && localNotice==nearbyNotice)localNotice=null }
     LaunchedEffect(localNotice) {if(localNotice!=null) {delay(4000);localNotice=null}}
     val density=androidx.compose.ui.platform.LocalDensity.current
     // IME and native ActionMode affect foreground controls, never the source
     // layout. Keeping them out also preserves an active native text selection.
-    val safe=WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    // The status bar is hidden while reading and comes back with the menu. The page must not move when it does, so the
+    // top inset is the status bar's size whether or not it is showing; the bar then overlays the page like the toolbar does.
+    val safe=ReaderInsets.safe
     val layoutDirection=androidx.compose.ui.platform.LocalLayoutDirection.current
-    val nativeInsets=ViewportInsets(safe.getLeft(density,layoutDirection),safe.getTop(density)+with(density) { 50.dp.roundToPx() },safe.getRight(density,layoutDirection),safe.getBottom(density)+with(density) { 72.dp.roundToPx() })
+    val nativeInsets=ViewportInsets(safe.getLeft(density,layoutDirection),safe.getTop(density)+with(density) { ReaderInsets.topBand.roundToPx() },safe.getRight(density,layoutDirection),safe.getBottom(density)+with(density) { ReaderInsets.bottomBand.roundToPx() })
     SideEffect { controller.setViewportInsets(nativeInsets) }
     val surface=remember(session.generation) { ReaderSurface(context).apply { bind(controller) } }
     DisposableEffect(surface) { onDispose { surface.close() } }
     val background = Color(ReaderThemes.background(themeOverride ?: session.snapshot.rules.theme).toColorInt())
+    val barsWindow=context.readerActivity()?.window
+    val barsView=androidx.compose.ui.platform.LocalView.current
+    val barsWanted=chrome || panel!=null || interaction!=null
+    DisposableEffect(barsWindow,barsWanted) {
+        val controls=barsWindow?.let { WindowCompat.getInsetsController(it,barsView) }
+        controls?.systemBarsBehavior=androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if(barsWanted)controls?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars()) else controls?.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        onDispose { }
+    }
+    // Leaving the reader always brings the status bar back for the library.
+    DisposableEffect(barsWindow) { onDispose { barsWindow?.let { WindowCompat.getInsetsController(it,barsView).show(androidx.core.view.WindowInsetsCompat.Type.statusBars()) } } }
     BackHandler { if(interaction!=null)controller.dismissInteraction() else if (encoding != null) { encoding=null;controller.cancelPreview() } else if(panel!=null)dismissPanel() else if(chrome)chrome=false else if(controller.returnToMain())Unit else if(!busy)controller.close() }
 
     // Chrome overlays a permanently measured native surface; visibility never
@@ -208,54 +224,60 @@ internal fun ReaderDesignScreen(model: ReaderViewModel, session: ReadingSession,
         ReaderPanel.TYPOGRAPHY -> if(controller.capabilities.fixedZoom)uiText(R.string.zoom_and_spread) else uiText(R.string.typography_settings)
         else -> selected.title
     }
-    // Search is the same full-height card as the table of contents, on phones and tablets alike.
-    ReaderOverlay(title,side=selected==ReaderPanel.CONTENTS || selected==ReaderPanel.BOOKMARKS || selected==ReaderPanel.SEARCH,onClose=::dismissPanel) {
+    // Search is the same full-height panel as the table of contents, on phones and tablets alike; its search capsule sits at
+    // the top, as on the shelf's search page.
+    ReaderOverlay(title,side=selected==ReaderPanel.CONTENTS || selected==ReaderPanel.BOOKMARKS || selected==ReaderPanel.SEARCH,onClose=::dismissPanel) { close ->
             when (selected) {
                 ReaderPanel.SEARCH -> {
-                    // As in Apple Books: a search field on top (the keyboard's search key submits), one status line, then results.
+                    // As in Apple Books: one status line, results grouped by chapter, and the shelf's search capsule with 取消 at the
+                    // top (the keyboard's search key submits). A result jumps to the match and closes the panel.
                     val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
                     val submit={ if(searchQuery.isNotBlank()) { keyboard?.hide();controller.search(searchQuery) } }
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        UiTextField(searchQuery,{ searchQuery=it },uiText(R.string.search_body),Modifier.weight(1f).testTag("reader-search-field"),leading=UiGlyph.SEARCH,
-                            keyboardOptions=androidx.compose.foundation.text.KeyboardOptions(imeAction=androidx.compose.ui.text.input.ImeAction.Search),
-                            keyboardActions=androidx.compose.foundation.text.KeyboardActions(onSearch={ submit() }))
-                        if(searchState.phase==SearchPhase.RUNNING) ActionButton(uiText(R.string.cancel_search),controller::cancelSearch,style=ActionStyle.FILTER)
-                        else ActionButton(uiText(R.string.find),submit,enabled=searchQuery.isNotBlank(),style=ActionStyle.FILTER)
-                    }
-                    val status=LocalUiText.current.explanation;val secondary=LocalUiPalette.current.secondaryText
-                    Column(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                    val type=LocalUiText.current;val colors=LocalUiPalette.current
+                    val status=type.explanation;val secondary=colors.secondaryText
+                    SearchCapsuleBar(searchQuery,{ searchQuery=it },uiText(R.string.search_body),uiText(R.string.cancel),uiText(R.string.clear_search),
+                        { if(searchState.phase==SearchPhase.RUNNING)controller.cancelSearch();close() },Modifier.padding(bottom=8.dp),
+                        fieldModifier=Modifier.testTag("reader-search-field"),onSearch=submit,autoFocus=searchQuery.isEmpty() && searchState.phase==SearchPhase.IDLE)
+                    Column(Modifier.fillMaxWidth().padding(bottom=8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                         when(searchState.phase) {
                             SearchPhase.RUNNING -> {
+                                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                    Text(uiText(R.string.search_progress,searchState.completedDocuments,searchState.totalDocuments),Modifier.weight(1f),style=status,color=secondary)
+                                    ActionButton(uiText(R.string.cancel_search),controller::cancelSearch,style=ActionStyle.FILTER)
+                                }
                                 UiProgressBar(if(searchState.totalDocuments>0)searchState.completedDocuments.toFloat()/searchState.totalDocuments else null)
-                                Text(uiText(R.string.search_progress,searchState.completedDocuments,searchState.totalDocuments),style=status,color=secondary)
                             }
                             SearchPhase.FAILED -> Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                Text(searchState.message ?: uiText(R.string.search_failed),Modifier.weight(1f),style=status,color=LocalUiPalette.current.danger)
-                                ActionButton(uiText(R.string.retry),{ controller.search(searchQuery) },enabled=searchQuery.isNotEmpty(),style=ActionStyle.FILTER)
+                                Text(searchState.message ?: uiText(R.string.search_failed),Modifier.weight(1f),style=status,color=colors.danger)
+                                ActionButton(uiText(R.string.retry),{ controller.search(searchQuery) },enabled=searchQuery.isNotBlank(),style=ActionStyle.FILTER)
                             }
                             SearchPhase.CANCELED -> Text(uiText(R.string.search_canceled),style=status,color=secondary)
-                            SearchPhase.DONE -> Text(if(searchState.hits.isEmpty())uiText(R.string.search_empty) else uiText(R.string.search_hit_count,searchState.hits.size,if(searchState.truncated)uiText(R.string.search_truncated) else ""),style=status,color=secondary)
+                            SearchPhase.DONE -> if(searchState.hits.isNotEmpty())Text(uiText(R.string.search_hit_count,searchState.hits.size,if(searchState.truncated)uiText(R.string.search_truncated) else ""),style=status,color=secondary)
                             SearchPhase.IDLE -> Text(uiText(R.string.search_hint),style=status,color=secondary)
                         }
+                        if(session.document.kind==WebContentKind.FIXED)Text(uiText(R.string.fixed_search_hint),style=status,color=secondary)
                     }
-                    if(session.document.kind==WebContentKind.FIXED)Text(uiText(R.string.fixed_search_hint),style=MaterialTheme.typography.labelSmall)
                     val chapter=currentChapter(session,rendererState.position)?.let {id -> session.toc.firstOrNull {it.id==id}?.title}
                     val groups=searchState.hits.groupBy {it.chapter}.entries.sortedBy {if(it.key==chapter)0 else 1}
-                    LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-search-results")) {groups.forEach {group ->
-                        item(key="chapter-${group.key}") {Text(uiText(R.string.search_chapter_count,group.key.ifBlank {uiText(R.string.body)},group.value.size),style=LocalUiText.current.section)}
+                    val mark=SpanStyle(fontFamily=type.fonts.sans(FontWeight.Medium),fontWeight=FontWeight.Medium,color=colors.primary,background=colors.primary.copy(alpha=.12f))
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("reader-search-results")) {
+                        if(searchState.phase==SearchPhase.DONE && searchState.hits.isEmpty()) item(key="empty") { EmptyState(uiText(R.string.search_hint),title=uiText(R.string.search_empty)) }
+                        groups.forEach {group ->
+                        item(key="chapter-${group.key}") {
+                            Text(uiText(R.string.search_chapter_count,group.key.ifBlank {uiText(R.string.body)},group.value.size),Modifier.fillMaxWidth().padding(top=14.dp,bottom=2.dp).semantics {heading()},
+                                style=type.auxiliary.copy(fontWeight=FontWeight.Medium),color=secondary,maxLines=1,overflow=TextOverflow.Ellipsis)
+                        }
                         items(group.value,key={it.id}) { hit ->
-                        Column(Modifier.fillMaxWidth().clickable(role=androidx.compose.ui.semantics.Role.Button) {if(controller.goToSearch(hit.id))dismissPanel()}.padding(vertical=12.dp)) {
-                                if(hit.chapter.isNotBlank())Text(hit.chapter,style=MaterialTheme.typography.labelSmall)
+                            Column(Modifier.fillMaxWidth().rowDivider().clickable(role=androidx.compose.ui.semantics.Role.Button) {if(controller.goToSearch(hit.id))dismissPanel()}.padding(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                                 val page=if(rendererState.phase==ReaderPhase.READY)controller.pageForSearch(hit.id) else null
-                                Text(page?.let { uiText(R.string.page_number,if(it.estimated)uiText(R.string.estimated_prefix) else "",it.page) } ?: uiText(R.string.page_not_estimated),style=MaterialTheme.typography.labelSmall)
+                                Text(page?.let { uiText(R.string.page_number,if(it.estimated)uiText(R.string.estimated_prefix) else "",it.page) } ?: uiText(R.string.page_not_estimated),style=status,color=secondary)
                                 Text(buildAnnotatedString {
                                     append(hit.excerpt.text.substring(0,hit.excerpt.matchStart))
-                                    withStyle(SpanStyle(fontFamily=LocalUiText.current.fonts.sans(FontWeight.Medium),fontWeight=FontWeight.Medium,color=LocalUiPalette.current.primary)) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
+                                    withStyle(mark) { append(hit.excerpt.text.substring(hit.excerpt.matchStart,hit.excerpt.matchEnd)) }
                                     append(hit.excerpt.text.substring(hit.excerpt.matchEnd))
-                                })
+                                },style=type.value.copy(lineHeight=22.sp),color=colors.text,maxLines=3,overflow=TextOverflow.Ellipsis)
                             }
-                        Box(Modifier.fillMaxWidth().height(UiSize.border).background(LocalUiPalette.current.controlText.copy(alpha=.12f)))
-                    } } }
+                        } } }
                 }
                 ReaderPanel.CONTENTS, ReaderPanel.BOOKMARKS -> ContentsPanel(session,rendererState,controller,selected==ReaderPanel.BOOKMARKS,uiState.books.firstOrNull {it.id==session.contentId},{panel=if(it)ReaderPanel.BOOKMARKS else ReaderPanel.CONTENTS},::dismissPanel,{localNotice=it})
                 ReaderPanel.READING -> ReadingControls(model,session) {panel=ReaderPanel.TYPOGRAPHY}

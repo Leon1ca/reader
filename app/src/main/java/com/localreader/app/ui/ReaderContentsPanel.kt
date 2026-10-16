@@ -45,7 +45,7 @@ private fun bookmarkDate(timestamp: Long): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,controller: ReaderController,bookmarks: Boolean,
+internal fun ColumnScope.ContentsPanel(session: ReadingSession,state: ReaderControllerState,controller: ReaderController,bookmarks: Boolean,
                            book: ContentSummary?,onTab: (Boolean)->Unit,onNavigate: ()->Unit,onNotice: (String)->Unit) {
     val type=LocalUiText.current
     val colors=LocalUiPalette.current;val list=rememberLazyListState();val scope=rememberCoroutineScope()
@@ -74,7 +74,7 @@ internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,
             ActionButton(uiText(R.string.undo),{ controller.restoreBookmark(removed) },style=ActionStyle.FILTER)
         } }
         if(session.snapshot.bookmarks.isEmpty())Text(uiText(R.string.bookmarks_empty),Modifier.padding(vertical=20.dp))
-        LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-bookmark-list"),state=list) {items(session.snapshot.bookmarks,key={it.id}) {bookmark ->
+        LazyColumn(Modifier.weight(1f,fill=false).testTag("reader-bookmark-list"),state=list) {items(session.snapshot.bookmarks,key={it.id}) {bookmark ->
             val dismiss=rememberSwipeToDismissBoxState()
             SwipeToDismissBox(dismiss,enableDismissFromStartToEnd=false,onDismiss={value ->
                 if(value==SwipeToDismissBoxValue.EndToStart) {undo=bookmark;controller.deleteBookmark(bookmark.id);onNotice(uiText(R.string.bookmark_deleting));scope.launch {dismiss.reset()}}
@@ -97,7 +97,7 @@ internal fun ContentsPanel(session: ReadingSession,state: ReaderControllerState,
     } else {
         Text(uiText(R.string.pagination_hint,if(session.textControls?.tocSource==TocSource.TEXT_SEGMENTS)uiText(R.string.text_segments_suffix) else ""),Modifier.padding(vertical=8.dp),style=explanation)
         if(session.toc.isEmpty())EmptyState(uiText(R.string.toc_empty),title=uiText(R.string.toc_empty_title))
-        LazyColumn(Modifier.heightIn(max=460.dp).testTag("reader-toc-list"),state=list) {items(session.toc,key={it.id}) {chapter ->
+        LazyColumn(Modifier.weight(1f).testTag("reader-toc-list"),state=list) {items(session.toc,key={it.id}) {chapter ->
             val selected=chapter.id==current
             // ReaderToc board: no dividers; the current chapter is a rounded 12 tint with 15/500 primary text.
             Row(Modifier.fillMaxWidth().semantics {this.selected=selected}.background(if(selected)colors.primary.copy(alpha=.08f) else colors.card,RoundedCornerShape(12.dp))

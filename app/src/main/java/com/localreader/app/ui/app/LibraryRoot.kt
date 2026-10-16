@@ -73,12 +73,17 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
         var deleteIds by rememberSaveable(stateSaver=listSaver<List<String>,String>(save={it},restore={it.toList()})) { mutableStateOf<List<String>>(emptyList()) }
         // Shelf selection mode: while on, the bottom bar shows the selection actions instead of the tabs.
         var selectingRequested by rememberSaveable { mutableStateOf(false) }
+        // Shelf search page (UI item 6). A query that is still set (e.g. after reading a found book) keeps the page open, so the
+        // shelf is never left filtered by text that is not on screen.
+        var searchRequested by rememberSaveable { mutableStateOf(false) }
+        val searching=tab==0 && route.kind==RouteKind.ROOT && (searchRequested || shelf.query.isNotEmpty())
+        fun closeSearch() { model.shelfController.query("");searchRequested=false }
         var pickerIds by rememberSaveable(stateSaver=listSaver<List<String>,String>(save={it},restore={it.toList()})) { mutableStateOf<List<String>>(emptyList()) }
         val categories by model.categories.collectAsStateWithLifecycle()
         // Scroll ticks only refresh the tab bar's backdrop; reading them here would recompose the whole library per frame.
         val backdropTick=remember { mutableLongStateOf(0L) }
         com.localreader.app.ui.ShelfPresentationTiming(shelf.presentationOperation,
-            tab==0 && route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && !shelf.loading,shelf.items.size,loader)
+            tab==0 && route.kind==RouteKind.ROOT && !searching && sheet==null && deleteIds.isEmpty() && !shelf.loading,shelf.items.size,loader)
         val enabled=state.libraryReady && !state.loading && !state.busy && !deletion.running
         val documentContract=remember {
             object: ActivityResultContracts.OpenMultipleDocuments() {
@@ -115,22 +120,24 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
                     else -> when(tab) {
                         0 -> ShelfScreen(shelf,state.books.size,model.shelfController,ShelfActions(model::open,::launchImport,
                             {sheet=LibrarySheet.MORE},{deleteIds=it.toList()},{showSoon()},{ pickerIds=it.toList() },categories,{ model.shelfController.start() }),loader,enabled,onBackdropDirty={backdropTick.longValue++},
-                            selectingRequested=selectingRequested,onSelectingRequested={ selectingRequested=it })
+                            selectingRequested=selectingRequested,onSelectingRequested={ selectingRequested=it },
+                            searching=searching,onSearch={ selectingRequested=false;model.shelfController.clearSelection();searchRequested=true })
                         1 -> DeferredTabScreen(false,{showSoon()})
                         2 -> DeferredTabScreen(true,{showSoon()})
                         else -> SettingsScreen(model,state,{navigation.push(tab,LibraryRoute(RouteKind.STORAGE));model.refreshStorage()},{showSoon()},{navigation.push(tab,LibraryRoute(RouteKind.LICENSES))},{navigation.push(tab,LibraryRoute(RouteKind.BACKUP))},{navigation.push(tab,LibraryRoute(RouteKind.DIAGNOSTICS))},{navigation.push(tab,LibraryRoute(RouteKind.FONTS))},{backdropTick.longValue++},onDialog={settingsDialog=it})
                     }
                 } }
             }
+            if(searching) ShelfSearchScreen(shelf,model.shelfController,loader,enabled,categories,model::open,::closeSearch)
             val selecting=tab==0 && (selectingRequested || shelf.selected.isNotEmpty())
-            if(!imeVisible && route.kind==RouteKind.ROOT && sheet==null && deleteIds.isEmpty() && pickerIds.isEmpty() && !settingsDialog && state.error==null && deletion.results.isEmpty() && activity!=null) {
-                if(selecting) SelectionActionBar(activity,shelf.selected.size,enabled,{ pickerIds=shelf.selected.toList() },
-                    { shelf.selected.toList().forEach { model.shelfController.finished(it,true) };model.shelfController.clearSelection();selectingRequested=false },
-                    { deleteIds=shelf.selected.toList() },contentKey=listOf(colors.page,"selection",androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books to backdropTick.longValue)
+            // The search page puts its own field on the capsule line, so neither capsule is shown under it.
+            if(route.kind==RouteKind.ROOT && !searching && sheet==null && deleteIds.isEmpty() && pickerIds.isEmpty() && !settingsDialog && state.error==null && deletion.results.isEmpty() && activity!=null) {
+                if(selecting) SelectionActionBar(activity,shelf.selected.size,enabled,{ deleteIds=shelf.selected.toList() },
+                    contentKey=listOf(colors.page,"selection",androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books to backdropTick.longValue,visible=!imeVisible)
                 else FloatingTabBar(activity,tab,{ index -> tab=index;model.preferences.edit { putInt("tab",index) };backdropTick.longValue++ },
                     if(tab==0) uiText(R.string.import_books) else if(tab==1) uiText(R.string.add_link) else if(tab==2) uiText(R.string.add_subscription) else uiText(R.string.more_settings),
                     {when(tab) {0 -> launchImport();1 -> showSoon();2 -> showSoon();else -> sheet=LibrarySheet.MORE}},
-                    moreAction=tab==3,enabled=if(tab==0)enabled else true,contentKey=listOf(colors.page,tab,androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books,dirtyTick={ backdropTick.longValue*31+coverRevision.hashCode() })
+                    moreAction=tab==3,enabled=if(tab==0)enabled else true,contentKey=listOf(colors.page,tab,androidx.compose.ui.platform.LocalDensity.current.fontScale),dirtyKey=state.books,dirtyTick={ backdropTick.longValue*31+coverRevision.hashCode() },visible=!imeVisible)
             }
             SnackbarHost(snackbar,Modifier.align(Alignment.BottomCenter).padding(horizontal=16.dp).padding(bottom=UiSize.navigationClearance(androidx.compose.ui.platform.LocalDensity.current.fontScale)))
             val importing=imports.phase in setOf(ImportPhase.QUEUED,ImportPhase.RUNNING)
@@ -182,7 +189,8 @@ fun LibraryRoot(model: ReaderViewModel,state: UiState) {
 private fun Context.activity(): Activity? { var current=this;while(current is ContextWrapper) { if(current is Activity)return current;current=current.baseContext };return current as? Activity }
 
 @Composable internal fun ScreenHeader(title: String,onBack: (()->Unit)?=null,backLabel: String=uiText(R.string.back_to_library),gutter: androidx.compose.ui.unit.Dp=20.dp,actions: @Composable RowScope.()->Unit={}) {
-    Row(Modifier.fillMaxWidth().height(UiSize.header).padding(horizontal=gutter),verticalAlignment=Alignment.CenterVertically) {
+    // At least the shared 64dp; a large font scale may grow it so the capsule buttons keep their full height.
+    Row(Modifier.fillMaxWidth().heightIn(min=UiSize.header).padding(horizontal=gutter),verticalAlignment=Alignment.CenterVertically) {
         // The design's back arrow is a bare 22dp glyph, not a tinted circle.
         onBack?.let { IconAction(backLabel,UiGlyph.BACK,it,plain=true,color=LocalUiPalette.current.text) }
         // Screens reached by a back arrow carry the design's 16sp title; top-level tabs keep the large heading.

@@ -65,12 +65,6 @@ fun UiProgressBar(fraction: Float?,modifier: Modifier=Modifier,color: Color=Loca
     }
 }
 
-/** The one indeterminate spinner: 18dp, stroke 2, primary. */
-@Composable
-fun UiSpinner(modifier: Modifier=Modifier,size: Dp=18.dp) {
-    CircularProgressIndicator(modifier.size(size),color=LocalUiPalette.current.primary,strokeWidth=2.dp)
-}
-
 /** Single-line field on the input fill, radius 12, 40 high inside a 48 touch row. */
 @Composable
 fun UiTextField(value: String,onValueChange: (String)->Unit,placeholder: String,modifier: Modifier=Modifier,
@@ -140,17 +134,5 @@ fun UiSlider(value: Float,onValueChange: (Float)->Unit,label: String,modifier: M
             }
             end?.invoke()
         }
-    }
-}
-
-/**
- * Page body for secondary screens (details, settings and their sub-pages): content is centred and capped at 640dp,
- * side padding follows [WindowLayout] (20 phone / 32 fold / 48 tablet), so tablets do not stretch rows edge to edge.
- */
-@Composable
-fun AdaptivePage(modifier: Modifier=Modifier,contentMaxWidth: Dp=640.dp,content: @Composable (WindowLayout)->Unit) {
-    BoxWithConstraints(modifier.fillMaxWidth(),contentAlignment=Alignment.TopCenter) {
-        val layout=WindowLayout.of(this.maxWidth,this.maxHeight)
-        Box(Modifier.widthIn(max=contentMaxWidth+layout.horizontal*2).fillMaxWidth().padding(horizontal=layout.horizontal)) { content(layout) }
     }
 }
